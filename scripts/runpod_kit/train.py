@@ -63,10 +63,15 @@ tok = AutoTokenizer.from_pretrained(BASE)
 # Detect MoE (fused-expert) architectures before loading, so we can skip the
 # broken bnb path for them rather than discover the memory blowup at OOM time.
 _cfg = AutoConfig.from_pretrained(BASE)
-IS_MOE = getattr(_cfg, "num_experts", None) is not None
+# Qwen3.6 checkpoints are VL composites: the language model's fields
+# (num_experts, hidden size...) live under cfg.text_config, not the top level
+# (smoke 21.08 printed num_experts=None and would have taken the dense/bnb path).
+_txt = getattr(_cfg, "text_config", None) or _cfg
+N_EXPERTS = getattr(_txt, "num_experts", None)
+IS_MOE = N_EXPERTS is not None
 
 if IS_MOE:
-    print(f"MoE base detected (num_experts={_cfg.num_experts}) -> "
+    print(f"MoE base detected (num_experts={N_EXPERTS}) -> "
           "loading bf16 directly, no bnb quantization (see module docstring).")
     model = AutoModelForCausalLM.from_pretrained(
         BASE, torch_dtype=torch.bfloat16,
@@ -90,7 +95,7 @@ if IS_MOE:
     # can't reach them. r is divided across experts (256 here) so the total
     # adapter size stays sane; router is intentionally left untouched
     # (tuning it destabilizes token routing -- Unsloth/peft guidance).
-    n_experts = _cfg.num_experts
+    n_experts = N_EXPERTS
     expert_r = max(1, LORA_R // n_experts)
     if EXPERT_LORA:
         lora = LoraConfig(

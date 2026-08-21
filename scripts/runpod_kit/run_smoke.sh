@@ -35,8 +35,9 @@ python - <<'EOF'
 import json, os
 from transformers import AutoConfig
 cfg = AutoConfig.from_pretrained(os.environ["BASE_MODEL"])
-print("base:", os.environ["BASE_MODEL"], "| num_experts:", getattr(cfg, "num_experts", None),
-      "| layers:", getattr(cfg, "num_hidden_layers", None))
+txt = getattr(cfg, "text_config", None) or cfg  # VL composite config
+print("base:", os.environ["BASE_MODEL"], "| num_experts:", getattr(txt, "num_experts", None),
+      "| layers:", getattr(txt, "num_hidden_layers", None), "| arch:", cfg.architectures)
 n = sum(1 for _ in open("data/train.jsonl")); v = sum(1 for _ in open("data/valid.jsonl"))
 print(f"dataset ok: train={n} valid={v}")
 EOF
