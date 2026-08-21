@@ -27,6 +27,7 @@ python -c "import transformers, peft, trl; print('deps present:', transformers._
       bitsandbytes accelerate datasets ninja pillow
   pip install -q -U flash-linear-attention
   pip install -q causal-conv1d --no-build-isolation
+  pip install -q --no-deps "torchvision==0.23.0" --index-url https://download.pytorch.org/whl/cu128   # must match torch 2.8.0 (image mismatch broke transformers import, 21.08)
 }
 pip install -q pillow tilelang 2>/dev/null || true   # tilelang: fla backward on Hopper needs it (triton 3.4 bug #640)
 
