@@ -86,8 +86,23 @@ def fit_to_budget(head: list[dict], tail: list[dict], reply: dict, max_tokens: i
         tail = tail[2:]
 
 
+_ARC_CHARS = "0123456789ABCDEF"
+
+
+def frame_ascii_to_png_b64(ascii_grid: str, scale: int = 8) -> str:
+    """Rebuild the exact PNG the teacher saw from the trace's frame_seen."""
+    import base64
+    import numpy as np
+    from agent.harness.vision import grid_to_png_bytes
+    rows = [[_ARC_CHARS.index(ch) if ch in _ARC_CHARS else 0 for ch in line]
+            for line in ascii_grid.splitlines() if line]
+    grid = np.array(rows, dtype=np.int64)
+    return base64.b64encode(grid_to_png_bytes(grid, scale)).decode("ascii")
+
+
 def episode_examples(recs: list[dict], max_context_pairs: int = 8,
-                     strip_hints: bool = False, max_tokens: int = 0) -> list[dict]:
+                     strip_hints: bool = False, max_tokens: int = 0,
+                     vision: bool = False) -> list[dict]:
     # Lost turns (API failures, 21.08 soft harness) carry no reply/code --
     # they are debugging records, not dialogue turns.
     turns = [r for r in recs if r.get("turn", 0) > 0 and "turn_failed" not in r]
@@ -129,7 +144,18 @@ def episode_examples(recs: list[dict], max_context_pairs: int = 8,
             tail = tail[-max_context_pairs * 2:]
             msgs = fit_to_budget(head, tail, {"role": "assistant", "content": reply}, max_tokens)
             if msgs is not None:
-                examples.append({"turn": r.get("turn"), "messages": msgs})
+                ex = {"turn": r.get("turn"), "messages": msgs}
+                if vision:
+                    # The board the teacher LOOKED AT for this reply; the VL
+                    # trainer attaches it to the last user message exactly
+                    # like VisionLLM does at runtime. Traces predating
+                    # frame_seen (round 1) yield no vision example.
+                    if not r.get("frame_seen"):
+                        ex = None
+                    else:
+                        ex["image_b64"] = frame_ascii_to_png_b64(r["frame_seen"])
+                if ex is not None:
+                    examples.append(ex)
         dialogue.append({"role": "assistant", "content": reply})
         fb = "[python output]\n" + (r.get("sandbox_output") or "(empty)")
         if r.get("sandbox_error"):
@@ -160,6 +186,9 @@ def main() -> None:
                    help="hold this many random episodes (seeded) out as valid.jsonl "
                         "next to --out")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--vision", action="store_true",
+                   help="add image_b64 (PNG of the board the teacher saw, from frame_seen) "
+                        "to every example; examples without frame_seen are skipped")
     p.add_argument("--max-tokens", type=int, default=16000,
                    help="per-example token budget (~chars/2.5); older context pairs "
                         "are dropped to fit, examples that can't fit are skipped. "
@@ -191,7 +220,8 @@ def main() -> None:
         n_files += 1
         recs = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
         exs = episode_examples(recs, max_context_pairs=args.max_context_pairs,
-                               strip_hints=args.strip_hints, max_tokens=args.max_tokens)
+                               strip_hints=args.strip_hints, max_tokens=args.max_tokens,
+                               vision=args.vision)
         if not exs:
             continue
         eid = f"{path.parent.name}/{path.stem}"
