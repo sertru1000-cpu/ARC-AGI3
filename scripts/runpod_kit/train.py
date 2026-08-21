@@ -98,8 +98,10 @@ if IS_MOE:
     n_experts = N_EXPERTS
     expert_r = max(1, LORA_R // n_experts)
     if EXPERT_LORA:
+        # peft's ParamWrapper (target_parameters path) refuses lora_dropout != 0
+        # (smoke 21.08: "lora.ParamWrapper does not work with lora_dropout != 0").
         lora = LoraConfig(
-            r=LORA_R, lora_alpha=2 * LORA_R, lora_dropout=0.05,
+            r=LORA_R, lora_alpha=2 * LORA_R, lora_dropout=0.0,
             target_modules="all-linear",  # attention + shared-expert FFN (real nn.Linear)
             target_parameters=["mlp.experts.gate_up_proj", "mlp.experts.down_proj"],
             rank_pattern={
