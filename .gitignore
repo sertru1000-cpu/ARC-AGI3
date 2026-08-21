@@ -32,3 +32,6 @@ traces_test/
 scripts/runpod_kit/data/
 # Runtime cross-game journal
 cross_memory.json
+
+# Student-variant notebook build (generated like notebooks/submission.ipynb)
+notebooks_student/submission.ipynb
