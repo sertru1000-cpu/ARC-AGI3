@@ -1,47 +1,78 @@
-"""Splice the current `agent/my_agent.py` into `notebooks/submission.ipynb`.
+"""Build `notebooks/submission.ipynb` from agent/ sources.
 
-The notebook follows the exact pattern used by Kaggle's official sample
-("ARC3 Sample Submission - Stochastic Goose"):
+Notebook layout (LLM-brain submission):
+  1. Install `arc-agi` from the offline competition wheelhouse.
+  2. Unpack agent sources (my_agent.py + harness/*) from an embedded bundle.
+  3. Prepare the agents framework copy in /kaggle/working (slim __init__,
+     drop in MyAgent + harness).
+  4. Start a vLLM OpenAI server with Qwen3.6-27B-FP8 from the attached
+     datasets (Duck's wheelhouse + model snapshot) and smoke-test it.
+  5a. Phase A (commit): play two offline games with small budgets — a free
+      full-stack dress rehearsal — then write the dummy submission.parquet.
+  5b. Phase B (competition rerun): wait for the gateway and run the framework
+      against the hidden games.
 
-  Cell 1: install the `arc-agi` wheel from the offline competition dataset.
-  Cell 2: write `my_agent.py` to /kaggle/working/ — its body is THIS file.
-  Cell 3: if running inside the Kaggle competition rerun, wait for the
-          gateway sidecar, copy the framework into /kaggle/working/, register
-          MyAgent, and run `python main.py --agent myagent`.
-  Cell 4: otherwise (during commit / save-and-run-all), write a dummy
-          submission.parquet so Kaggle accepts the commit.
-
-You don't normally need to call this directly — `make submit` runs it for you.
+Env knobs at build time:
+  KAGGLE_ACCEL=cpu|t4|p100|rtx6000  (default rtx6000 — required for the FP8 model)
 """
 from __future__ import annotations
 
+import base64
 import json
+import os
 from pathlib import Path
 from textwrap import dedent
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CHANGE THIS ONE LINE TO PICK YOUR KAGGLE ACCELERATOR
-# Options:
-#   "cpu"      — no GPU. Good for the random starter or any non-ML agent.
-#   "t4"       — Nvidia T4 ×2 (default; matches Kaggle's sample submission).
-#   "p100"     — Nvidia P100 (single big-memory GPU).
-#   "rtx6000"  — Nvidia RTX 6000 (g4-standard-48). ARC-AGI-3 exclusive,
-#                burns GPU quota faster — use only when you're confident.
-# ─────────────────────────────────────────────────────────────────────────────
-ACCELERATOR = "t4"
+ACCELERATOR = os.getenv("KAGGLE_ACCEL", "rtx6000")
 
-# Internal mapping; don't edit unless Kaggle adds new options.
+# Which brain the notebook ships: "qwen" (Duck's Qwen3.6-27B-FP8 via wheelhouse
+# datasets) or "gptoss" (gpt-oss-120b from Kaggle Models, image-bundled vLLM —
+# the official ARC template config, MoE => ~3-4x faster decoding).
+BRAIN_MODEL = os.getenv("BRAIN_MODEL", "qwen").strip().lower()
+GPTOSS_MODEL_REF = "danielhanchen/gpt-oss-120b/Transformers/default/1"
+GPTOSS_MODEL_PATH = "/kaggle/input/models/danielhanchen/gpt-oss-120b/transformers/default/1"
+# vLLM arrives via this utility-script kernel (adds itself to PYTHONPATH);
+# the docker image is pinned to the one the official gpt-oss template uses.
+GPTOSS_VLLM_DEPS_KERNEL = "philipvonderlind/vllm-deps"
+GPTOSS_DOCKER_IMAGE = ("gcr.io/kaggle-images/python@sha256:"
+                       "e5452ce6268c2e8345cfe5141f31ca7ff47032aca46a7ea532bbb87481281d0c")
+
 _ACCELERATORS = {
-    "cpu":     {"name": "none",            "gpu": False},
-    "t4":      {"name": "nvidiaTeslaT4",   "gpu": True},
-    "p100":    {"name": "nvidiaTeslaP100", "gpu": True},
-    "rtx6000": {"name": "nvidiaRtx6000",   "gpu": True},
+    # machine_shape values are the server's canonical names (verified by
+    # setting the accelerator in the Kaggle UI and pulling metadata back).
+    "cpu":     {"name": "none",            "gpu": False, "shape": None},
+    "t4":      {"name": "nvidiaTeslaT4",   "gpu": True,  "shape": "NvidiaTeslaT4"},
+    "p100":    {"name": "nvidiaTeslaP100", "gpu": True,  "shape": "NvidiaTeslaP100"},
+    "rtx6000": {"name": "nvidiaRtx6000",   "gpu": True,  "shape": "NvidiaRtxPro6000"},
 }
 
+# Attached Kaggle datasets: Duck's public vLLM wheelhouse + Qwen snapshot.
+WHEELHOUSE_REF = "driessmit1/arc3-vllm-h100-wheelhouse-v3"
+# Model dataset: Duck's base Qwen by default; our distilled student via env
+# (BRAIN_MODEL=qwen MODEL_REF=sergueimakarov/arc3-student-v1-fp8 -> v23+).
+MODEL_REF = os.getenv("MODEL_REF", "driessmit1/vrfai-qwen3-6-27b-fp8-hf-snapshot")
+SERVED_MODEL_NAME = os.getenv("SERVED_MODEL_NAME", "vrfai/Qwen3.6-27B-FP8")
+# vLLM context window: Duck's VL base carries 64k; our text-only student's
+# native max_position_embeddings is 32k (config-derived, vLLM refuses more).
+model_max_len = os.getenv("MODEL_MAX_LEN", "65536")
+# Runtime LoRA (Duck's own deployment pattern): serve the proven base and
+# attach our student as an adapter. The wheelhouse vLLM has NO text-only
+# qwen3_5 class, so a merged text checkpoint cannot be served at all —
+# base+LoRA is the ONLY student path on this stack (learned via v23-v25).
+LORA_REF = os.getenv("LORA_REF", "")
+LORA_NAME = os.getenv("LORA_NAME", "student")
+lora_ref, lora_name = LORA_REF, LORA_NAME  # f-string placeholders in the cell
+# Phase A rehearsal game list (comma-separated ids).
+SMOKE_GAMES = os.getenv("SMOKE_GAMES", "sk48,tn36,m0r0,bp35,ls20,ft09,sp80,vc33")
+smoke_games = ", ".join(f'"{g.strip()}"' for g in SMOKE_GAMES.split(",") if g.strip())
+
 ROOT = Path(__file__).resolve().parents[1]
-AGENT_SRC = ROOT / "agent" / "my_agent.py"
+AGENT_DIR = ROOT / "agent"
 NOTEBOOK_PATH = ROOT / "notebooks" / "submission.ipynb"
 METADATA_PATH = ROOT / "notebooks" / "kernel-metadata.json"
+
+COMP_INPUT = "/kaggle/input/competitions/arc-prize-2026-arc-agi-3"
+FRAMEWORK_DST = "/kaggle/working/ARC-AGI-3-Agents"
 
 
 def code_cell(source: str) -> dict:
@@ -58,47 +89,55 @@ def markdown_cell(source: str) -> dict:
     return {"cell_type": "markdown", "metadata": {}, "source": source}
 
 
+def collect_sources() -> dict[str, str]:
+    """my_agent.py + every harness module, keyed by target-relative path."""
+    files = {"my_agent.py": (AGENT_DIR / "my_agent.py").read_text(encoding="utf-8")}
+    for p in sorted((AGENT_DIR / "harness").glob("*.py")):
+        files[f"harness/{p.name}"] = p.read_text(encoding="utf-8")
+    return files
+
+
 def build() -> dict:
-    if not AGENT_SRC.exists():
-        raise SystemExit(f"Could not find {AGENT_SRC}")
-    agent_body = AGENT_SRC.read_text()
+    files = collect_sources()
+    bundle_b64 = base64.b64encode(json.dumps(files).encode("utf-8")).decode("ascii")
 
     install_cell = code_cell(
-        "!pip install --no-index --find-links \\\n"
-        "    /kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels \\\n"
+        "!pip install --quiet --no-index --find-links \\\n"
+        f"    {COMP_INPUT}/arc_agi_3_wheels \\\n"
         "    arc-agi python-dotenv"
     )
 
-    # We write the agent to /tmp/ (not /kaggle/working/) so it does NOT appear
-    # as a notebook output. Otherwise the "Submit to Competition" UI would
-    # offer it as a candidate submission file alongside submission.parquet,
-    # and an unlucky default selection rejects the submission.
-    write_agent_cell = code_cell(
-        "%%writefile /tmp/my_agent.py\n" + agent_body
-    )
+    unpack_cell = code_cell(dedent(
+        f"""\
+        # Unpack agent sources (my_agent.py + harness/*) bundled at build time.
+        import base64, json
+        from pathlib import Path
 
-    run_cell_source = dedent(
-        """\
-        import os
+        FILES = json.loads(base64.b64decode("{bundle_b64}").decode("utf-8"))
+        root = Path("/tmp/agent_src")
+        for rel, src in FILES.items():
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(src, encoding="utf-8")
+        print(f"unpacked {{len(FILES)}} source files under {{root}}")
+        """
+    ))
 
-        if os.getenv('KAGGLE_IS_COMPETITION_RERUN'):
-            # Wait for the gateway sidecar to be ready.
-            !curl --fail --retry 999 --retry-all-errors --retry-delay 5 \\
-                  --retry-max-time 600 http://gateway:8001/api/games
+    prepare_cell = code_cell(dedent(
+        f"""\
+        # Framework copy in a writable dir + our agent and harness dropped in.
+        import shutil
+        from pathlib import Path
 
-            # Copy the framework into a writable location.
-            !cp -r /kaggle/input/competitions/arc-prize-2026-arc-agi-3/ARC-AGI-3-Agents \\
-                   /kaggle/working/ARC-AGI-3-Agents
+        src = Path("{COMP_INPUT}/ARC-AGI-3-Agents")
+        dst = Path("{FRAMEWORK_DST}")
+        if not dst.exists():
+            shutil.copytree(src, dst)
+        shutil.copy("/tmp/agent_src/my_agent.py", dst / "agents/templates/my_agent.py")
+        shutil.copytree("/tmp/agent_src/harness", dst / "harness", dirs_exist_ok=True)
 
-            # Drop our agent in as a framework template.
-            !cp /tmp/my_agent.py \\
-                /kaggle/working/ARC-AGI-3-Agents/agents/templates/my_agent.py
-
-            # Register MyAgent in the framework's agent registry. We rewrite
-            # __init__.py because the upstream version eagerly imports
-            # templates with deps we don't ship (langgraph, smolagents, etc.).
-            with open('/kaggle/working/ARC-AGI-3-Agents/agents/__init__.py', 'w') as f:
-                f.write(\"\"\"from typing import Type
+        # Slim registry: upstream __init__ eagerly imports heavy templates.
+        (dst / "agents/__init__.py").write_text('''from typing import Type
         from dotenv import load_dotenv
         from .agent import Agent, Playback
         from .swarm import Swarm
@@ -107,15 +146,13 @@ def build() -> dict:
 
         load_dotenv()
 
-        AVAILABLE_AGENTS: dict[str, Type[Agent]] = {
+        AVAILABLE_AGENTS: dict[str, Type[Agent]] = {{
             'random': Random,
             'myagent': MyAgent,
-        }
-        \"\"\")
+        }}
+        '''.replace('\\n        ', '\\n'), encoding="utf-8")
 
-            # Point the framework at the gateway sidecar.
-            with open('/kaggle/working/ARC-AGI-3-Agents/.env', 'w') as f:
-                f.write(\"\"\"SCHEME=http
+        (dst / ".env").write_text('''SCHEME=http
         HOST=gateway
         PORT=8001
         ARC_API_KEY=test-key-123
@@ -123,54 +160,362 @@ def build() -> dict:
         OPERATION_MODE=online
         ENVIRONMENTS_DIR=
         RECORDINGS_DIR=/kaggle/working/server_recording
-        \"\"\")
-
-            # Run it. The gateway records every action and emits submission.parquet.
-            !cd /kaggle/working/ARC-AGI-3-Agents && \\
-                MPLBACKEND=agg \\
-                python main.py --agent myagent
+        '''.replace('\\n        ', '\\n'), encoding="utf-8")
+        print("framework prepared at", dst)
         """
-    )
-    run_cell = code_cell(run_cell_source)
+    ))
 
-    dummy_submission_cell = code_cell(
-        dedent(
-            """\
-            import os
-            if not os.getenv('KAGGLE_IS_COMPETITION_RERUN'):
-                # Save-and-run-all (commit) mode: emit a dummy submission so the
-                # commit succeeds. The real submission.parquet is produced by the
-                # gateway during competition rerun.
-                import pandas as pd
-                submission = pd.DataFrame(
-                    data=[['1_0', '1', True, 1]],
-                    columns=['row_id', 'game_id', 'end_of_game', 'score'])
-                submission.to_parquet('/kaggle/working/submission.parquet', index=False)
-                submission.head()
-            """
-        )
-    )
+    gptoss_vllm_cell = code_cell(dedent(
+        f"""\
+        # Start vLLM with gpt-oss-120b from Kaggle Models. vllm itself is NOT
+        # bundled in the image -- the attached vllm-deps kernel only downloaded
+        # the wheels (pip download, no install) into /kaggle/input/vllm-deps/wheels;
+        # install them into a local target dir before importing vllm anywhere.
+        import json, os, subprocess, sys, time, urllib.request
+        from pathlib import Path
+
+        MODEL_PATH = "{GPTOSS_MODEL_PATH}"
+        SERVED = "gpt-oss-120b"
+        VLLM_BASE_URL = "http://127.0.0.1:1234/v1"
+        LOG = Path("/kaggle/working/vllm-server.log")
+        SITE_PACKAGES = Path("/kaggle/working/vllm-site-packages")
+
+        wheel_dir = None
+        for root in (Path("/kaggle/input"),):
+            for cand in root.rglob("*.whl"):
+                if cand.name.startswith("vllm-"):
+                    wheel_dir = cand.parent
+                    break
+        if wheel_dir is None:
+            raise FileNotFoundError("no vllm-*.whl found under /kaggle/input — is vllm-deps attached?")
+        if not (SITE_PACKAGES / ".installed").exists():
+            SITE_PACKAGES.mkdir(parents=True, exist_ok=True)
+            subprocess.run([sys.executable, "-m", "pip", "install", "--no-index",
+                            "--find-links", str(wheel_dir), "--target", str(SITE_PACKAGES),
+                            "--upgrade", "--ignore-installed", "--only-binary", ":all:",
+                            "--no-compile", "--disable-pip-version-check", "--no-warn-conflicts",
+                            "vllm", "openai", "openai-harmony"], check=True)
+            (SITE_PACKAGES / ".installed").write_text("ok")
+        print("vllm wheels installed from", wheel_dir)
+
+        # Offline tiktoken encodings for the harmony tokenizer.
+        enc_dir = None
+        for root in (Path("/kaggle/input"),):
+            for cand in root.rglob("cl100k_base.tiktoken"):
+                if (cand.parent / "o200k_base.tiktoken").exists():
+                    enc_dir = cand.parent
+                    break
+        if enc_dir:
+            os.environ["TIKTOKEN_ENCODINGS_BASE"] = str(enc_dir)
+            print("tiktoken encodings:", enc_dir)
+
+        cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server",
+               "--model", MODEL_PATH, "--served-model-name", SERVED,
+               "--host", "127.0.0.1", "--port", "1234",
+               "--max-num-seqs", "12", "--max-model-len", "64000",
+               "--kv-cache-dtype", "fp8", "--tensor-parallel-size", "1",
+               "--enforce-eager"]
+        env = os.environ.copy()
+        env["LIBRARY_PATH"] = "/usr/local/nvidia/lib64" + os.pathsep + env.get("LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = "/usr/local/nvidia/lib64" + os.pathsep + env.get("LD_LIBRARY_PATH", "")
+        env.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+        env["PYTHONPATH"] = str(SITE_PACKAGES) + os.pathsep + env.get("PYTHONPATH", "")
+        proc = subprocess.Popen(cmd, env=env, stdout=LOG.open("w"), stderr=subprocess.STDOUT)
+        print("vLLM starting, pid", proc.pid)
+
+        deadline = time.monotonic() + 1800
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                print(LOG.read_text()[-4000:])
+                raise RuntimeError("vLLM died during startup")
+            try:
+                with urllib.request.urlopen(VLLM_BASE_URL + "/models", timeout=5) as r:
+                    print("vLLM ready:", json.loads(r.read())["data"][0]["id"]); break
+            except Exception:
+                time.sleep(5)
+        else:
+            print(LOG.read_text()[-4000:])
+            raise TimeoutError("vLLM not ready in 1800s")
+
+        payload = {{"model": SERVED, "max_tokens": 200, "temperature": 0.0,
+                   "messages": [{{"role": "user", "content": "Reply with one word: ready?"}}]}}
+        reqo = urllib.request.Request(VLLM_BASE_URL + "/chat/completions",
+                                      data=json.dumps(payload).encode(),
+                                      headers={{"Content-Type": "application/json"}})
+        with urllib.request.urlopen(reqo, timeout=180) as r:
+            print("smoke reply:", json.loads(r.read())["choices"][0]["message"]["content"])
+
+        os.environ.update({{
+            "AGENT_BRAIN": "llm",
+            "LLM_BASE_URL": VLLM_BASE_URL,
+            "LLM_MODEL": SERVED,
+            "LLM_TIMEOUT_S": "300",
+            # Reasoning model: thinking + reply share this budget. 4096 left
+            # ~350-token replies with zero verify_theory calls (v18); give
+            # thinking real room and ask for deeper effort explicitly.
+            "LLM_MAX_TOKENS": "16384",
+            "LLM_REASONING_EFFORT": "high",
+            "ONLY_RESET_LEVELS": "true",
+        }})
+        """
+    ))
+
+    vllm_cell = code_cell(dedent(
+        f"""\
+        # Start a vLLM OpenAI server with Qwen3.6-27B-FP8 (offline wheels + weights).
+        import json, os, shutil, subprocess, sys, time, urllib.request
+        from pathlib import Path
+
+        WHEELHOUSE_REF = "{WHEELHOUSE_REF}"
+        MODEL_REF = "{MODEL_REF}"
+        SERVED_MODEL_NAME = "{SERVED_MODEL_NAME}"
+        VLLM_BASE_URL = "http://127.0.0.1:1234/v1"
+        WORKING = Path("/kaggle/working")
+        SITE_PACKAGES = WORKING / "vllm-site-packages"
+        LOG = WORKING / "vllm-server.log"
+
+        def dataset_path(ref):
+            owner, slug = ref.split("/", 1)
+            for c in (Path("/kaggle/input") / slug, Path("/kaggle/input/datasets") / owner / slug):
+                if c.exists():
+                    return c
+            raise FileNotFoundError(f"dataset {{ref}} not mounted — attach it to the notebook")
+
+        WHEELHOUSE = dataset_path(WHEELHOUSE_REF)
+        MODEL_PATH = dataset_path(MODEL_REF)
+        print("wheelhouse:", WHEELHOUSE)
+        print("model:", MODEL_PATH)
+
+        # Compat staging: checkpoints exported by transformers 5.x carry the
+        # NEW arch name (model_type=qwen3_5_text) and keep the chat template
+        # in a separate .jinja — the wheelhouse stack predates both. Build a
+        # symlink dir with a patched config instead of re-uploading 29GB.
+        import json as _json
+        cfg = _json.loads((MODEL_PATH / "config.json").read_text())
+        if cfg.get("model_type") == "qwen3_5_text":
+            staged = WORKING / "model-staged"
+            staged.mkdir(exist_ok=True)
+            for f in MODEL_PATH.iterdir():
+                dst = staged / f.name
+                if not dst.exists() and f.name not in ("config.json", "tokenizer_config.json"):
+                    os.symlink(f, dst)
+            cfg["model_type"] = "qwen3_5"
+            (staged / "config.json").write_text(_json.dumps(cfg, indent=2))
+            tokcfg = _json.loads((MODEL_PATH / "tokenizer_config.json").read_text())
+            tpl = MODEL_PATH / "chat_template.jinja"
+            if "chat_template" not in tokcfg and tpl.exists():
+                tokcfg["chat_template"] = tpl.read_text()
+            (staged / "tokenizer_config.json").write_text(_json.dumps(tokcfg, indent=2))
+            MODEL_PATH = staged
+            print("compat-staged model at", MODEL_PATH)
+
+        def vllm_env():
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(SITE_PACKAGES) + os.pathsep + env.get("PYTHONPATH", "")
+            # Kaggle GPU images keep libcuda off the default linker path; without
+            # this, flashinfer's JIT link step dies with "cannot find -lcuda".
+            env["LIBRARY_PATH"] = "/usr/local/nvidia/lib64" + os.pathsep + env.get("LIBRARY_PATH", "")
+            env["LD_LIBRARY_PATH"] = "/usr/local/nvidia/lib64" + os.pathsep + env.get("LD_LIBRARY_PATH", "")
+            env.update({{"USE_TF": "0", "TRANSFORMERS_NO_TF": "1",
+                        "TRANSFORMERS_NO_TORCHVISION": "1", "VLLM_NO_USAGE_STATS": "1"}})
+            return env
+
+        req = WHEELHOUSE / "requirements.lock"
+        if not (SITE_PACKAGES / ".installed").exists():
+            SITE_PACKAGES.mkdir(parents=True, exist_ok=True)
+            subprocess.run([sys.executable, "-m", "pip", "install", "--no-index",
+                            "--find-links", str(WHEELHOUSE), "--requirement", str(req),
+                            "--target", str(SITE_PACKAGES), "--upgrade", "--ignore-installed",
+                            "--only-binary", ":all:", "--no-compile",
+                            "--disable-pip-version-check", "--no-warn-conflicts"], check=True)
+            (SITE_PACKAGES / ".installed").write_text("ok")
+
+        cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server",
+               "--model", str(MODEL_PATH), "--served-model-name", SERVED_MODEL_NAME,
+               "--host", "127.0.0.1", "--port", "1234",
+               "--tensor-parallel-size", "1", "--generation-config", "vllm",
+               "--enable-prefix-caching", "--reasoning-parser", "qwen3",
+               "--default-chat-template-kwargs", '{{"preserve_thinking": true}}',
+               "--max-model-len", "{model_max_len}"]
+        RUNTIME_MODEL = SERVED_MODEL_NAME
+        LORA_REF = "{lora_ref}"
+        if LORA_REF:
+            LORA_PATH = dataset_path(LORA_REF)
+            cmd += ["--enable-lora", "--max-loras", "1", "--max-lora-rank", "16",
+                    "--lora-modules", "{lora_name}=" + str(LORA_PATH)]
+            RUNTIME_MODEL = "{lora_name}"
+            print("runtime LoRA:", LORA_PATH, "->", RUNTIME_MODEL)
+        proc = subprocess.Popen(cmd, env=vllm_env(),
+                                stdout=LOG.open("w"), stderr=subprocess.STDOUT)
+        print("vLLM starting, pid", proc.pid)
+
+        deadline = time.monotonic() + 900
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                print(LOG.read_text()[-4000:])
+                raise RuntimeError("vLLM server died during startup")
+            try:
+                with urllib.request.urlopen(VLLM_BASE_URL + "/models", timeout=5) as r:
+                    print("vLLM ready:", json.loads(r.read())["data"][0]["id"]); break
+            except Exception:
+                time.sleep(5)
+        else:
+            print(LOG.read_text()[-4000:])
+            raise TimeoutError("vLLM server not ready in 900s")
+
+        # Smoke completion.
+        payload = {{"model": RUNTIME_MODEL, "max_tokens": 64, "temperature": 0.0,
+                   "messages": [{{"role": "user", "content": "Reply with one word: ready?"}}]}}
+        reqo = urllib.request.Request(VLLM_BASE_URL + "/chat/completions",
+                                      data=json.dumps(payload).encode(),
+                                      headers={{"Content-Type": "application/json"}})
+        with urllib.request.urlopen(reqo, timeout=120) as r:
+            print("smoke reply:", json.loads(r.read())["choices"][0]["message"]["content"])
+
+        # Environment for the agent (inherited by ! subprocesses too).
+        os.environ.update({{
+            "AGENT_BRAIN": "llm",
+            "LLM_BASE_URL": VLLM_BASE_URL,
+            "LLM_MODEL": RUNTIME_MODEL,
+            "LLM_TIMEOUT_S": "300",
+            # Qwen thinking + reply share this budget; at 4096 the verifier
+            # checkpoint pressure made thinking eat it all -> empty replies
+            # (v21: 4-5 empty turns per game, episodes died to strikes).
+            "LLM_MAX_TOKENS": "16384",
+            "ONLY_RESET_LEVELS": "true",
+        }})
+        """
+    ))
+
+    smoke_cell = code_cell(dedent(
+        f"""\
+        # Phase A (commit) only: dress rehearsal on two offline games + dummy parquet.
+        import os, sys, time
+
+        if not os.getenv("KAGGLE_IS_COMPETITION_RERUN"):
+            os.environ.update({{"MY_AGENT_MAX_ACTIONS": "400", "MY_AGENT_MAX_TURNS": "60",
+                               "MY_AGENT_GAME_SECONDS": "720",  # mirror Phase B budgets
+                               "STALE_MINUTES": "60",  # keep scorecards alive for the whole rehearsal
+                               "MY_AGENT_CROSS_MEMORY_PATH": "/kaggle/working/cross_memory.json",
+                               "MY_AGENT_TRACE_DIR": "/kaggle/working/traces"}})
+            sys.path.insert(0, "{FRAMEWORK_DST}")
+            import arc_agi
+            from arc_agi import OperationMode
+            from agents import MyAgent
+
+            arc = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE,
+                                 environments_dir="{COMP_INPUT}/environment_files")
+            # Rehearsal set (build-time override via SMOKE_GAMES env).
+            # Historic dev set: sk48,tn36,m0r0,bp35,ls20,ft09,sp80,vc33.
+            # Student exams add lp85/sb26/wa30 — solvable games excluded
+            # from the SFT dataset, so they measure method transfer.
+            DEV = {{{smoke_games}}}
+            games = [e.game_id for e in arc.available_environments
+                     if e.game_id.split("-")[0] in DEV]
+            print("offline smoke on:", games)
+            for gid in games:
+                env = arc.make(gid)
+                agent = MyAgent(card_id="phaseA", game_id=gid, agent_name=f"smoke.{{gid}}",
+                                ROOT_URL="http://localhost", record=False, arc_env=env,
+                                tags=["phaseA-smoke"])
+                t0 = time.time()
+                agent.main()
+                f = agent.frames[-1]
+                print(f"{{gid}}: levels={{f.levels_completed}}/{{f.win_levels}} "
+                      f"actions={{agent.action_counter}} state={{f.state}} "
+                      f"({{time.time()-t0:.0f}}s)")
+                # Self-computed RHAE from the agent's own frame trace — no
+                # dependence on the Arcade's internal scorecard plumbing.
+                try:
+                    from arc_agi.scorecard import Card, Scorecard, EnvironmentScorecard
+                    from arcengine import GameState as GS
+                    card = Card(game_id=gid)
+                    run = -1
+                    prev_state = ""
+                    for e_ in agent.replay_log:
+                        if e_["id"] == 0:
+                            # Full reset only at session start or from WIN
+                            if run < 0 or prev_state.endswith("WIN"):
+                                run += 1
+                                card.inc_play_count(f"r{{run}}")
+                            else:
+                                card.inc_reset_count(f"r{{run}}")
+                        else:
+                            if run < 0:
+                                run = 0
+                                card.inc_play_count("r0")
+                            card.inc_action_count(f"r{{run}}")
+                        gd = f"r{{run}}"
+                        card.set_levels_completed(gd, int(e_["level"]))
+                        st = e_["state"].split(".")[-1]
+                        if st == "WIN":
+                            card.set_state(gd, GS.WIN)
+                        elif st == "GAME_OVER":
+                            card.set_state(gd, GS.GAME_OVER)
+                        prev_state = e_["state"]
+                    sc2 = Scorecard(card_id="x", api_key="k", cards={{gid: card}})
+                    esc = EnvironmentScorecard.from_scorecard(sc2, arc.available_environments)
+                    if esc.environments:
+                        e = esc.environments[0]
+                        msgs = {{r.message for r in e.runs if r.message}}
+                        print(f"  RHAE {{gid}}: {{e.score:.2f}} runs={{[round(r.score, 2) for r in e.runs]}}"
+                              + (f" note={{msgs}}" if msgs else ""))
+                    else:
+                        print(f"  RHAE {{gid}}: no card built (frames={{len(agent.frames)}})")
+                except Exception as exc:
+                    print("  RHAE self-compute failed:", repr(exc))
+
+            # Local RHAE scorecard: the engine scores public games against real
+            # human baselines — the same math the leaderboard uses.
+            try:
+                sc = arc.get_scorecard()
+                for e in sc.environments:
+                    print(f"RHAE score {{e.id}}: {{e.score:.2f}} "
+                          f"(runs: {{[round(r.score, 2) for r in e.runs]}})")
+                print(f"RHAE aggregate over played games: {{sc.score:.3f}}")
+            except Exception as exc:
+                print("scorecard unavailable:", exc)
+
+            import pandas as pd
+            pd.DataFrame([["1_0", "1", True, 1]],
+                         columns=["row_id", "game_id", "end_of_game", "score"]
+                         ).to_parquet("/kaggle/working/submission.parquet", index=False)
+            print("dummy submission.parquet written")
+        """
+    ))
+
+    rerun_cell = code_cell(dedent(
+        f"""\
+        # Phase B (competition rerun): play the hidden games via the gateway.
+        import os
+
+        if os.getenv("KAGGLE_IS_COMPETITION_RERUN"):
+            # Swarm runs every hidden game in its OWN THREAD, concurrently.
+            # Budgets are therefore per-thread against a SHARED wall window:
+            # the old 720s/game cap silently ended the whole run in ~12 min.
+            os.environ.update({{"MY_AGENT_PARALLEL": "1",
+                               "MY_AGENT_MAX_ACTIONS": "800", "MY_AGENT_MAX_TURNS": "250",
+                               "MY_AGENT_GAME_SECONDS": "21600",
+                               "MY_AGENT_TOTAL_SECONDS": "23400",  # 6.5h shared window
+                               "MY_AGENT_EXPECTED_GAMES": "30",
+                               "LLM_TIMEOUT_S": "600",  # 30-way queueing headroom
+                               "MY_AGENT_CROSS_MEMORY_PATH": "/kaggle/working/cross_memory.json",
+                               "MY_AGENT_TRACE_DIR": "/kaggle/working/traces"}})
+            !curl --fail --retry 999 --retry-all-errors --retry-delay 5 \\
+                  --retry-max-time 600 http://gateway:8001/api/games
+            !cd {FRAMEWORK_DST} && MPLBACKEND=agg python main.py --agent myagent
+        """
+    ))
 
     if ACCELERATOR not in _ACCELERATORS:
-        raise SystemExit(
-            f"Unknown ACCELERATOR={ACCELERATOR!r}. Pick one of: "
-            f"{sorted(_ACCELERATORS)}"
-        )
+        raise SystemExit(f"Unknown ACCELERATOR={ACCELERATOR!r}")
     accel = _ACCELERATORS[ACCELERATOR]
 
-    notebook = {
+    return {
         "metadata": {
-            "kernelspec": {
-                "language": "python",
-                "display_name": "Python 3",
-                "name": "python3",
-            },
-            "language_info": {
-                "name": "python",
-                "mimetype": "text/x-python",
-                "file_extension": ".py",
-                "pygments_lexer": "ipython3",
-            },
+            "kernelspec": {"language": "python", "display_name": "Python 3", "name": "python3"},
+            "language_info": {"name": "python", "mimetype": "text/x-python",
+                              "file_extension": ".py", "pygments_lexer": "ipython3"},
             "kaggle": {
                 "accelerator": accel["name"],
                 "isInternetEnabled": False,
@@ -183,36 +528,69 @@ def build() -> dict:
         "nbformat": 4,
         "cells": [
             markdown_cell(
-                "# ARC Prize 2026 — ARC-AGI-3 Submission\n\n"
-                "Built from `agent/my_agent.py` via `scripts/build_notebook.py`. "
-                "Do not edit cells directly — edit the source file and re-run "
-                "`make submit`."
+                f"# ARC Prize 2026 — ARC-AGI-3 Submission (brain: "
+                f"{'gpt-oss-120b' if BRAIN_MODEL == 'gptoss' else 'Qwen3.6-27B'} via vLLM)\n\n"
+                "Built from `agent/` via `scripts/build_notebook.py`. Do not edit cells "
+                "directly — edit the sources and rebuild."
             ),
             install_cell,
-            write_agent_cell,
-            run_cell,
-            dummy_submission_cell,
+            unpack_cell,
+            prepare_cell,
+            gptoss_vllm_cell if BRAIN_MODEL == "gptoss" else vllm_cell,
+            smoke_cell,
+            rerun_cell,
         ],
     }
-    return notebook
 
 
 def main() -> None:
     NOTEBOOK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    NOTEBOOK_PATH.write_text(json.dumps(build(), indent=1))
-    print(f"[build_notebook] Wrote {NOTEBOOK_PATH.relative_to(ROOT)}  "
-          f"(accelerator: {ACCELERATOR})")
+    NOTEBOOK_PATH.write_text(json.dumps(build(), indent=1), encoding="utf-8")
+    print(f"[build_notebook] Wrote {NOTEBOOK_PATH.relative_to(ROOT)}  (accelerator: {ACCELERATOR})")
 
-    # Keep notebooks/kernel-metadata.json in sync so the user never has to
-    # edit it just to flip CPU ↔ GPU.
     if METADATA_PATH.exists():
-        meta = json.loads(METADATA_PATH.read_text())
-        wanted = _ACCELERATORS[ACCELERATOR]["gpu"]
-        if meta.get("enable_gpu") != wanted:
-            meta["enable_gpu"] = wanted
-            METADATA_PATH.write_text(json.dumps(meta, indent=2) + "\n")
-            print(f"[build_notebook] Synced enable_gpu={wanted} in "
-                  f"{METADATA_PATH.relative_to(ROOT)}")
+        meta = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+        changed = False
+        wanted_gpu = _ACCELERATORS[ACCELERATOR]["gpu"]
+        if meta.get("enable_gpu") != wanted_gpu:
+            meta["enable_gpu"] = wanted_gpu
+            changed = True
+        if BRAIN_MODEL == "gptoss":
+            wanted_ds, wanted_models = [], [GPTOSS_MODEL_REF]
+            wanted_kernels = [GPTOSS_VLLM_DEPS_KERNEL]
+            wanted_docker = GPTOSS_DOCKER_IMAGE
+        else:
+            wanted_ds, wanted_models = [WHEELHOUSE_REF, MODEL_REF], []
+            if LORA_REF:
+                wanted_ds.append(LORA_REF)
+            wanted_kernels = []
+            wanted_docker = None
+        if meta.get("dataset_sources") != wanted_ds:
+            meta["dataset_sources"] = wanted_ds
+            changed = True
+        if meta.get("model_sources") != wanted_models:
+            meta["model_sources"] = wanted_models
+            changed = True
+        if meta.get("kernel_sources") != wanted_kernels:
+            meta["kernel_sources"] = wanted_kernels
+            changed = True
+        # None must REMOVE a stale pin, not keep it: the gptoss template image
+        # lacks nvcc, and the qwen path needs it for flashinfer's JIT (v20
+        # died on exactly this — 'nvcc: not found' during gemm_sm120 build).
+        if wanted_docker is None:
+            if "docker_image" in meta:
+                del meta["docker_image"]
+                changed = True
+        elif meta.get("docker_image") != wanted_docker:
+            meta["docker_image"] = wanted_docker
+            changed = True
+        wanted_shape = _ACCELERATORS[ACCELERATOR]["shape"]
+        if meta.get("machine_shape") != wanted_shape:
+            meta["machine_shape"] = wanted_shape
+            changed = True
+        if changed:
+            METADATA_PATH.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+            print(f"[build_notebook] Synced kernel metadata (gpu={wanted_gpu}, datasets={wanted_ds})")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,159 @@
+You are being asked to act as a critical second opinion / red-team reviewer for an
+ongoing ML engineering effort. Please be direct and skeptical — point out flawed
+assumptions, missing experiments, and blind spots rather than being agreeable.
+
+## The competition
+
+Kaggle ARC Prize 2026, ARC-AGI-3, interactive-agents track. An agent plays unknown,
+never-before-seen grid-based puzzle games (64x64 grid, 16 colors) with NO instructions
+— it must discover controls, mechanics, and goal purely by acting and observing. Games
+have multiple levels; action space is RESET, ACTION1-4 (directions), ACTION5 (interact),
+ACTION6(x,y) (click), ACTION7 (undo). 25 public games exist for local testing; scoring
+is against ~30 hidden games the agent never sees during development.
+
+Scoring (RHAE): per level, score = (human_actions_taken / ai_actions_taken)^2, capped at
+1.15x. Wasted actions are punished QUADRATICALLY relative to how a human would solve the
+same level. Incomplete levels cap the max achievable score. Final score = mean over
+games. So the goal isn't just "reach levels" — it's reaching them with an EFFICIENT,
+human-like action count, not brute force or blind exploration.
+
+Submission mechanics: 1 submission/day, resets 00:00 UTC. A held-out weekly GPU compute
+quota gates how much can even be validated before submitting (currently exhausted for
+this week). Accelerators available: T4x2 (default), P100, and RTX Pro 6000 96GB
+(confirmed available to this user).
+
+## Our architecture
+
+The agent is an LLM writing Python in a sandboxed REPL each turn (Duck/Milestone-1-
+winner-inspired "Duck-style loop"), not simple discrete action selection. Per turn: the
+model gets `current_frame` (grid as ASCII + segmented objects with color/bbox/centroid/
+adjacency/containment), `history`, `valid_actions`; it must reply with a structured
+"WORLD_MODEL" block (controls/prior/goal/plan/recent_findings/open_questions/
+cross_level_notes — 7 fields) then exactly one Python code block. That code can call
+`action([...])` — a single action name/dict or a BATCH (list) of several — which steps
+the real game engine and returns a diff/result. A `verify_theory(predict_fn)` tool lets
+the model test a hypothesized transition function against every recorded real transition
+for free (no game-action cost); a gate blocks batches larger than 3 actions until the
+model demonstrates verify accuracy >=0.6 or has made 3 honest attempts — meant to stop
+it gambling on unverified plans.
+
+We're deciding between two model strategies:
+1. A "student": a small (27B or 35B) open model LoRA-fine-tuned on traces distilled from
+   a large teacher (Gemini 3.1 Pro via Vertex API, ~$1-1.5/episode, used to expensively
+   solve games with full reasoning + our verifier tool, then that trajectory becomes SFT
+   training data for the cheap student to imitate "as if it had thought carefully" but
+   fast, within tight per-turn latency budgets).
+2. Or: just run a capable-enough base model directly (no distillation), if it turns out
+   to already have enough raw capability that training doesn't clearly help.
+
+## What we found today (chronological, condensed)
+
+1. Our first trained student (v1: Qwen3.6-27B dense + our LoRA adapter, served via vLLM
+   with the adapter loaded at runtime) scored 0 levels across every configuration tried,
+   including after fixing several real runtime bugs:
+   - The base model's "thinking" mode was still active at inference despite the student
+     being trained to answer directly — turns ballooned from ~16s to ~385s, causing
+     timeouts that killed episodes at ~10 turns. Fix: force `enable_thinking=false` in
+     the chat template. This alone fixed the timing but NOT the outcome — still 0 levels.
+   - Trace analysis found the model getting stuck in degenerate loops: one game (wa30)
+     spent 97% of its turns on IDENTICAL inspection-only code (`print(grid.ascii)`), up
+     to 53 times in a row, completely ignoring an existing text nudge
+     ("several turns passed without any real action...") injected after 2 stalled turns.
+   - Fix: a STRUCTURAL circuit-breaker — after N stalled turns, the harness stops asking
+     the LLM and just executes a random valid action itself (cycling click targets
+     instead of hammering one point). This measurably fixed the mechanics (one
+     previously-stuck game went from 15% to 96% of turns producing a real action) but
+     STILL didn't move the level count — 0/12 on a full wave even with healthier
+     behavior. This was the first strong signal the bottleneck might be model capability,
+     not harness bugs.
+
+2. Control experiment: served the SAME harness (verifier, stall-breaker, etc.) against a
+   bare, undistilled Qwen3.6-35B-A3B (MoE, 3B active/token) base model — no LoRA at all.
+   Result: 4 levels across 24 episodes (8 games x 3 reps), where the DISTILLED 27B got
+   zero across every run all day. One game (lp85) was rock-solid: 3/3 reps got level 1.
+   A second, bigger run (12 games x 2 reps, budget raised to Kaggle's actual production
+   ceiling of 200 turns / 800 actions instead of our earlier 80/400) got only 2/24 —
+   lp85 held (2/2) but a previously-partial game (sb26, 1/3 earlier) dropped to 0/2, and
+   NONE of the newly-added games (including ones we gave a hand-written human hint for)
+   produced anything. Bigger budget did NOT broaden coverage.
+
+3. Digging into WHY budget didn't help: many episodes were burning through the 800-action
+   cap in very few turns (e.g. one game spent all 800 actions in just 54 turns) via the
+   verify-gate's batch mechanism — once the gate opens, the model can submit large action
+   batches at once. Re-reading the Milestone-1 winner's ("Duck") open-sourced inference
+   code found a concrete, fixable bug on our side: Duck's action-batch execution stops
+   IMMEDIATELY if a result reports a level transition (not just game_over/win) — we only
+   checked game_over/win. So if a level-up happened mid-batch, our REMAINING queued
+   actions kept firing blind against the NEW level's completely different layout — pure
+   waste. Fixed and unit-tested (not yet verified live).
+
+4. Also adopted from re-reading Duck's source: richer object segmentation (adjacency
+   between objects regardless of color, direct containment/nesting — not just isolated
+   connected components), the 7-field world-model (added 3 fields: recent findings, open
+   questions, cross-level notes), and — the biggest architectural difference — Duck lets
+   the model make MULTIPLE tool calls within one logical "turn" (up to ~12 rounds),
+   observing the real result after each call before deciding the next one, via native
+   OpenAI-style tool-calling with each call sandboxed in its own subprocess. We do NOT
+   have this: our protocol is one Python code block per turn, so any multi-step plan the
+   model wants to execute has to be written blind, in advance, as Python control flow —
+   it cannot pause, look at a real intermediate result, and change its mind mid-turn
+   using fresh LLM reasoning. We just implemented a scoped port of this (multi-round
+   loop within one turn, using our existing text-protocol rather than replicating native
+   tool-calling verbatim, to avoid an untested dependency on our inference server's
+   tool-call support) — unit-tested, NOT yet verified against a live model. This is
+   running as a live experiment right now, in parallel with sending you this message.
+
+5. Separately found and are budgeting around: training a LoRA adapter directly on the
+   35B MoE model isn't a drop-in swap of our existing dense-27B training recipe. Modern
+   transformers versions store MoE expert weights as fused 3D tensors rather than
+   separate per-expert linear layers, which a common 4-bit quantization library (used for
+   memory-efficient QLoRA) silently fails to quantize for MoE architectures — a confirmed
+   upstream bug, not a config mistake — so a naive "same recipe, bigger model" attempt
+   would balloon memory instead of shrinking it. We adapted our training script to detect
+   MoE and (a) skip quantization, load in bf16 directly, (b) attach LoRA to the fused
+   expert parameters via the newer mechanism that supports non-Linear parameter targets.
+   Not yet tested live; VRAM requirements are meaningfully higher than our original
+   quantized-training budget assumed.
+
+## Where we are right now, and the open question we most want challenged
+
+We deliberately chose, tonight, to spend cheap iteration ($3-5/pod-hour, no training
+cost) squeezing the HARNESS and RUNTIME on the raw un-distilled base model as far as it
+goes, before committing a training run — the logic being: distillation is supposed to
+bake in behavior that's too slow/expensive to do live (the whole reason it's worth
+training a "student" at all is that a strong teacher's careful, verified reasoning is too
+slow per-turn to run live within a competition time budget) — so it seemed wasteful to
+spend the training budget before confirming what the RAW model can already do once
+obvious harness bugs are removed.
+
+So far this strategy has surfaced real, fixable engineering bugs (stall loops, batch
+waste on level-up, thin context trimming, thin world-model, thin segmentation) but has
+NOT yet produced a broad capability signal — only ONE game (lp85) shows solid,
+repeatable success; everything else is either zero or noisy-single-hits that don't
+reproduce.
+
+## What we'd like you to push back on
+
+1. Is "keep fixing the harness on the raw base before training" still the right call, or
+   is the evidence (5 levels total across ~60 episodes today, on ONE reliable game) now
+   strong enough to conclude this specific base model's raw capability ceiling has
+   basically been found, and further harness polishing (including the tool-loop change
+   we're testing right now) is unlikely to move it much?
+2. What would you want to see BEFORE trusting either conclusion? What's the smallest,
+   cheapest experiment that would most cleanly distinguish "harness still artificially
+   capping the model" from "the model genuinely can't do this task well"?
+3. Are we fooling ourselves with the RHAE efficiency framing — i.e., chasing "human-like
+   efficient solving" when we don't yet reliably solve ANYTHING? Should efficiency even
+   be a design concern right now, or is that premature optimization given the current
+   success rate?
+4. Any structural blind spot in how we're testing (e.g., is 2-3 reps per game actually
+   enough to trust a "0" as a real negative, given we've already seen one game flip
+   between 1/3 and 0/2 across two runs of the same harness)?
+5. Anything in the Duck-derived adoptions (segmentation, world-model fields, tool-loop,
+   terminal-stop-on-level-up) that looks like cargo-culting a competitor's implementation
+   detail without evidence it's actually load-bearing for THEIR success, as opposed to
+   just correlated with it?
+
+Be concrete and reference the specific numbers above where you disagree or want more
+evidence. We would rather hear "you're solving the wrong problem" now than after
+spending more GPU budget.

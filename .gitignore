@@ -20,3 +20,15 @@ reference/
 .DS_Store
 .idea/
 .vscode/
+
+# Local secrets + training data + local runs/renders
+.env
+data/
+runs/
+renders/
+traces_test/
+
+# Training data shipped inside the RunPod kit (regenerate with build_sft_dataset.py)
+scripts/runpod_kit/data/
+# Runtime cross-game journal
+cross_memory.json
