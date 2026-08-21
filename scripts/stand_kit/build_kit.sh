@@ -19,7 +19,7 @@ cp agent/__init__.py agent/my_agent.py "$KIT/agent/"
 cp agent/harness/*.py "$KIT/agent/harness/"
 
 cp scripts/run_stand.py scripts/run_oracle_probe.py "$KIT/scripts/"
-cp scripts/stand_kit/serve_and_run.sh "$KIT/"
+cp scripts/stand_kit/serve_and_run.sh scripts/stand_kit/serve_vl_and_run.sh "$KIT/"
 
 # Oracle-probe fuel: real successful teacher traces for our zero-level dead
 # games (20.08 diagnostic) -- just the specific jsonl files, not whole run
