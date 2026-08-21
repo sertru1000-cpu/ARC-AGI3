@@ -62,6 +62,18 @@ model_max_len = os.getenv("MODEL_MAX_LEN", "65536")
 LORA_REF = os.getenv("LORA_REF", "")
 LORA_NAME = os.getenv("LORA_NAME", "student")
 lora_ref, lora_name = LORA_REF, LORA_NAME  # f-string placeholders in the cell
+# Vision (21.08): the model sees the current board as a 512px nearest-neighbor
+# PNG each turn (VisionLLM). Teacher data was collected this way and the
+# VL student was trained this way -- the image MUST be on at runtime or the
+# student plays blind. VISION=0 reproduces the old text-only runs.
+VISION = os.getenv("VISION", "1") == "1"
+vision_flag = "1" if VISION else "0"
+# Thinking: "on" = Duck/base behaviour (preserve_thinking); "off" = empty
+# <think> block, exactly how the VL student was trained (stand 21.08).
+THINKING = os.getenv("THINKING", "on").strip().lower()
+chat_kwargs = '{"preserve_thinking": true}' if THINKING == "on" else '{"enable_thinking": false}'
+# LLM_TEMPERATURE passthrough (harness default 0.6; first student runs used 0.0).
+TEMPERATURE = os.getenv("TEMPERATURE", "")
 # Phase A rehearsal game list (comma-separated ids).
 SMOKE_GAMES = os.getenv("SMOKE_GAMES", "sk48,tn36,m0r0,bp35,ls20,ft09,sp80,vc33")
 smoke_games = ", ".join(f'"{g.strip()}"' for g in SMOKE_GAMES.split(",") if g.strip())
@@ -335,8 +347,10 @@ def build() -> dict:
                "--host", "127.0.0.1", "--port", "1234",
                "--tensor-parallel-size", "1", "--generation-config", "vllm",
                "--enable-prefix-caching", "--reasoning-parser", "qwen3",
-               "--default-chat-template-kwargs", '{{"preserve_thinking": true}}',
+               "--default-chat-template-kwargs", '{chat_kwargs}',
                "--max-model-len", "{model_max_len}"]
+        if "{vision_flag}" == "1":
+            cmd += ["--limit-mm-per-prompt", '{{"image": 1}}']
         RUNTIME_MODEL = SERVED_MODEL_NAME
         LORA_REF = "{lora_ref}"
         if LORA_REF:
@@ -372,6 +386,26 @@ def build() -> dict:
         with urllib.request.urlopen(reqo, timeout=120) as r:
             print("smoke reply:", json.loads(r.read())["choices"][0]["message"]["content"])
 
+        if "{vision_flag}" == "1":
+            # Vision smoke: the server must SEE before we spend a game on it.
+            import base64, io
+            from PIL import Image
+            img = Image.new("RGB", (512, 512), (255, 255, 255))
+            for x in range(32, 96):
+                for y in range(32, 96):
+                    img.putpixel((x, y), (249, 60, 49))
+            buf = io.BytesIO(); img.save(buf, format="PNG")
+            url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+            payload = {{"model": RUNTIME_MODEL, "max_tokens": 64, "temperature": 0.0,
+                       "messages": [{{"role": "user", "content": [
+                           {{"type": "image_url", "image_url": {{"url": url}}}},
+                           {{"type": "text", "text": "One sentence: what do you see and where?"}}]}}]}}
+            reqo = urllib.request.Request(VLLM_BASE_URL + "/chat/completions",
+                                          data=json.dumps(payload).encode(),
+                                          headers={{"Content-Type": "application/json"}})
+            with urllib.request.urlopen(reqo, timeout=180) as r:
+                print("vision smoke:", json.loads(r.read())["choices"][0]["message"]["content"])
+
         # Environment for the agent (inherited by ! subprocesses too).
         os.environ.update({{
             "AGENT_BRAIN": "llm",
@@ -383,7 +417,11 @@ def build() -> dict:
             # (v21: 4-5 empty turns per game, episodes died to strikes).
             "LLM_MAX_TOKENS": "16384",
             "ONLY_RESET_LEVELS": "true",
+            "MY_AGENT_VISION": "{vision_flag}",
+            "MY_AGENT_VISION_SCALE": "8",
         }})
+        if "{TEMPERATURE}":
+            os.environ["LLM_TEMPERATURE"] = "{TEMPERATURE}"
         """
     ))
 
