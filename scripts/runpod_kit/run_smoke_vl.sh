@@ -20,6 +20,7 @@ export MAX_LENGTH="${MAX_LENGTH:-16384}"
 export OUT_DIR="${OUT_DIR:-/workspace/smoke_vl_out}"
 export DATA_DIR="${DATA_DIR:-./data_vision}"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONUNBUFFERED=1   # loss lines must reach the log immediately (tee buffering hid them for ~45 min, 21.08)
 
 echo "== [0/3] deps =="
 python -c "import transformers, peft, trl; print('deps present:', transformers.__version__, peft.__version__)" 2>/dev/null || {

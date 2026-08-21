@@ -13,6 +13,7 @@ export TOKENIZERS_PARALLELISM=false
 export HF_HUB_ENABLE_HF_TRANSFER=0
 export PIP_CACHE_DIR=/root/.cache/pip
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONUNBUFFERED=1   # loss lines must reach the log immediately (tee buffering hid them for ~45 min, 21.08)
 export BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3.6-35B-A3B}"
 export DATA_DIR="${DATA_DIR:-./data_vision}"
 export OUT_DIR="${OUT_DIR:-/workspace/out_vl}"
