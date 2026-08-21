@@ -2,6 +2,7 @@
 # One-shot student training on a RunPod RTX Pro 6000 pod.
 # Usage:  export HF_TOKEN=hf_...; export HF_REPO=you/arc3-student-v1; bash run_all.sh
 set -euo pipefail
+export PIP_BREAK_SYSTEM_PACKAGES=1   # PEP 668 images (RunPod 2.8 template, 21.08)
 
 export HF_HOME=/workspace/hf          # cache on the persistent volume
 export TOKENIZERS_PARALLELISM=false

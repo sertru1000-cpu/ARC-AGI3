@@ -12,6 +12,7 @@
 #   EXPERT_LORA=0 bash run_smoke.sh   # fallback: experts frozen
 # Output: /workspace/smoke.log, final JSON line = the report to paste back.
 set -euo pipefail
+export PIP_BREAK_SYSTEM_PACKAGES=1   # PEP 668 images (RunPod 2.8 template, 21.08)
 
 export HF_HOME=/workspace/hf
 export TOKENIZERS_PARALLELISM=false
