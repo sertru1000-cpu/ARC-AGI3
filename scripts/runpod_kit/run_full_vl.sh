@@ -30,6 +30,7 @@ python -c "import transformers, peft, tilelang, fla" 2>/dev/null && echo "deps p
   pip install -q -U flash-linear-attention tilelang
   pip install -q causal-conv1d --no-build-isolation
   pip install -q --no-deps "torchvision==0.23.0" --index-url https://download.pytorch.org/whl/cu128   # must match torch 2.8.0 (image mismatch broke transformers import, 21.08)
+  pip uninstall -y -q torchaudio 2>/dev/null || true   # image torchaudio built against another torch -> undefined symbol on import (21.08)
 }
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
