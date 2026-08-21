@@ -95,6 +95,9 @@ EOF
 echo "== [4/4] exam matrix (vision on, teacher-like budgets) =="
 export LLM_BASE_URL=http://127.0.0.1:1234/v1 LLM_MODEL=student LLM_API_KEY=x
 export LLM_TIMEOUT_S=600 LLM_MAX_TOKENS=4096 PYTHONUNBUFFERED=1
+# First pass of a new student runs GREEDY: did it learn the REPL syntax and
+# the reply structure? Stochastic search comes only after that is proven.
+export LLM_TEMPERATURE="${LLM_TEMPERATURE:-0.0}"
 export MY_AGENT_VISION=1 MY_AGENT_VISION_SCALE=8
 export MY_AGENT_TURN_ACTION_CAP="${MY_AGENT_TURN_ACTION_CAP:-40}"
 export MY_AGENT_VERIFY_GATE_ATTEMPTS="${MY_AGENT_VERIFY_GATE_ATTEMPTS:-999}"
