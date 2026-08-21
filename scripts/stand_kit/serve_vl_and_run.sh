@@ -46,7 +46,15 @@ if [ ! -x "$VENV/bin/python" ]; then
   "$VENV/bin/pip" install -q "vllm==0.19.0"
 fi
 "$VENV/bin/python" -c "import vllm, torch; print('vllm', vllm.__version__, 'torch', torch.__version__)"
-pip install -q arc-agi arcengine numpy requests python-dotenv pillow   # game engine for run_stand (system python)
+# Game engine (arcengine) ships wheels for Python 3.12 only; the pod image may
+# be 3.11 -> a uv-managed 3.12 venv for run_stand.py.
+STAND_PY=/workspace/venv-stand/bin/python
+if [ ! -x "$STAND_PY" ]; then
+  pip install -q uv
+  uv venv --python 3.12 /workspace/venv-stand
+  uv pip install --python "$STAND_PY" arc-agi arcengine numpy requests python-dotenv pillow
+fi
+"$STAND_PY" -c "import arcengine, arc_agi, numpy; print('engine ok, python', __import__('sys').version.split()[0])"
 
 echo "== [3/4] serve (bf16 merged, images on, thinking off) =="
 nohup "$VENV/bin/python" -m vllm.entrypoints.openai.api_server \
@@ -99,7 +107,7 @@ CONCURRENCY="${CONCURRENCY:-8}"
 MAX_TURNS="${MAX_TURNS:-120}"
 GAME_SECONDS="${GAME_SECONDS:-5400}"
 MAX_ACTIONS="${MAX_ACTIONS:-1600}"
-python scripts/run_stand.py \
+"$STAND_PY" scripts/run_stand.py \
     --games "$GAMES" --reps "$REPS" --concurrency "$CONCURRENCY" --label "$LABEL" \
     --max-turns "$MAX_TURNS" --game-seconds "$GAME_SECONDS" --max-actions "$MAX_ACTIONS" \
     2>&1 | tee /workspace/stand_vl.log
