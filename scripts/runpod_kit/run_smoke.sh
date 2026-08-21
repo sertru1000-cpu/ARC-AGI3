@@ -26,7 +26,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 echo "== [0/3] deps (same pins as run_all.sh) =="
 pip install -q -U "torch==2.8.0" "transformers==5.15.0" "trl>=0.17" peft \
     bitsandbytes accelerate datasets ninja
-pip install -q -U flash-linear-attention
+pip install -q -U flash-linear-attention tilelang   # tilelang: fla backward on Hopper (triton 3.4 bug #640)
 pip install -q causal-conv1d --no-build-isolation
 
 echo "== [1/3] sanity =="

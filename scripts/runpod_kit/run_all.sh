@@ -17,7 +17,7 @@ echo "== [0/4] deps =="
 #    INSTALLED torch (--no-build-isolation), with ninja for speed.
 pip install -q -U "torch==2.8.0" "transformers==5.15.0" "trl>=0.17" peft \
     bitsandbytes accelerate datasets ninja
-pip install -q -U flash-linear-attention
+pip install -q -U flash-linear-attention tilelang   # tilelang: fla backward on Hopper (triton 3.4 bug #640)
 pip install -q causal-conv1d --no-build-isolation
 # hf_transfer hung on a shard mid-download; plain downloader is slower but robust.
 export HF_HUB_ENABLE_HF_TRANSFER=0

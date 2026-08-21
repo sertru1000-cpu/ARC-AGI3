@@ -28,7 +28,7 @@ python -c "import transformers, peft, trl; print('deps present:', transformers._
   pip install -q -U flash-linear-attention
   pip install -q causal-conv1d --no-build-isolation
 }
-pip install -q pillow 2>/dev/null || true
+pip install -q pillow tilelang 2>/dev/null || true   # tilelang: fla backward on Hopper needs it (triton 3.4 bug #640)
 
 echo "== [1/3] sanity =="
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
