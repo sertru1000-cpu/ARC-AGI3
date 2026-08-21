@@ -38,14 +38,18 @@ EOF
 fi
 du -sh "$MERGED"
 
-echo "== [2/4] vLLM stack =="
-python -c "import vllm; print('vllm', vllm.__version__)" 2>/dev/null || {
-  pip install -q --ignore-installed blinker
-  pip install -q "vllm==0.19.0" arc-agi arcengine numpy requests python-dotenv pillow
-}
+echo "== [2/4] vLLM stack (own venv: must not disturb the training env's torch) =="
+VENV=/workspace/venv-vllm
+if [ ! -x "$VENV/bin/python" ]; then
+  python -m venv "$VENV"
+  "$VENV/bin/pip" install -q -U pip
+  "$VENV/bin/pip" install -q "vllm==0.19.0"
+fi
+"$VENV/bin/python" -c "import vllm, torch; print('vllm', vllm.__version__, 'torch', torch.__version__)"
+pip install -q arc-agi arcengine numpy requests python-dotenv pillow   # game engine for run_stand (system python)
 
 echo "== [3/4] serve (bf16 merged, images on, thinking off) =="
-nohup python -m vllm.entrypoints.openai.api_server \
+nohup "$VENV/bin/python" -m vllm.entrypoints.openai.api_server \
     --model "$MERGED" --served-model-name student \
     --host 127.0.0.1 --port 1234 \
     --reasoning-parser qwen3 \
