@@ -33,6 +33,7 @@ try:
     from agent.harness.probe import probe_actions
     from agent.harness.prompts import DEATH_REPLAY_NOTE, LEVEL_UP_NOTE, memo_digest
     from agent.harness.speedrun import ReplayStep, build_replay_plan, execute_replay
+    from agent.harness.vision import VisionLLM
 except ImportError:  # Kaggle notebook: harness modules are inlined beside us
     from harness.explorer import HeuristicExplorer  # type: ignore
     from harness.journal import REFLECTION_PROMPT, CrossGameJournal  # type: ignore
@@ -42,6 +43,7 @@ except ImportError:  # Kaggle notebook: harness modules are inlined beside us
     from harness.prompts import DEATH_REPLAY_NOTE, LEVEL_UP_NOTE, memo_digest  # type: ignore
     from harness.sandbox import Sandbox  # type: ignore
     from harness.speedrun import ReplayStep, build_replay_plan, execute_replay  # type: ignore
+    from harness.vision import VisionLLM  # type: ignore
 
 import numpy as np
 
@@ -185,7 +187,6 @@ class MyAgent(Agent):
         # every LLM request. Call-time only -- message history and traces stay
         # text-only, so SFT data for the (text-only) student is unaffected.
         if VISION_ENABLED:
-            from agent.harness.vision import VisionLLM
             backend = VisionLLM(
                 backend, lambda: sandbox.current.grid if sandbox.current is not None else None,
                 scale=VISION_SCALE)
