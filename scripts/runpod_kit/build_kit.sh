@@ -6,15 +6,20 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 KIT="$ROOT/scripts/runpod_kit"
+# Two positional args replace the TEXT dataset; --vision puts them in
+# data_vision/ instead (train_vl.py reads DATA_DIR=./data_vision).
+DEST="data"
+if [ "${1:-}" = "--vision" ]; then DEST="data_vision"; shift; fi
 if [ $# -ge 2 ]; then
-  cp "$1" "$KIT/data/train.jsonl"; cp "$2" "$KIT/data/valid.jsonl"
-  echo "dataset replaced: $(wc -l < "$1") train / $(wc -l < "$2") valid"
+  mkdir -p "$KIT/$DEST"
+  cp "$1" "$KIT/$DEST/train.jsonl"; cp "$2" "$KIT/$DEST/valid.jsonl"
+  echo "$DEST replaced: $(wc -l < "$1") train / $(wc -l < "$2") valid"
 fi
 "$ROOT/.venv/Scripts/python.exe" - "$KIT" <<'EOF'
 import ast, sys, pathlib
-for f in ("train.py", "convert.py"):
+for f in ("train.py", "convert.py", "train_vl.py", "check_student.py"):
     ast.parse(pathlib.Path(sys.argv[1], f).read_text(encoding="utf-8"))
-print("syntax ok: train.py convert.py")
+print("syntax ok: train.py convert.py train_vl.py check_student.py")
 EOF
 OUT="$ROOT/data/runpod-kit.tgz"
 tar --owner=0 --group=0 --exclude='__pycache__' -czf "$OUT" \

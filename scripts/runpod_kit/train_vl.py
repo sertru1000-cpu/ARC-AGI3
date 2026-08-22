@@ -37,13 +37,13 @@ from torch.utils.data import Dataset
 from transformers import (AutoConfig, AutoModelForImageTextToText, AutoProcessor,
                           Trainer, TrainingArguments)
 
-BASE = os.getenv("BASE_MODEL", "Qwen/Qwen3.6-35B-A3B")
+BASE = os.getenv("BASE_MODEL", "Qwen/Qwen3.6-27B")  # dense VL: the only base our stack can both TRAIN and DEPLOY
 DATA = os.getenv("DATA_DIR", "./data")
 OUT = os.getenv("OUT_DIR", "/workspace/out_vl")
 MAX_STEPS = int(os.getenv("MAX_STEPS", "0"))
 MAX_LENGTH = int(os.getenv("MAX_LENGTH", "16384"))
 LR = float(os.getenv("LR", "1e-4"))
-LORA_R = int(os.getenv("LORA_R", "16"))
+LORA_R = int(os.getenv("LORA_R", "32"))  # v6 used 16 and under-fit (replies 41% of target length)
 EXPERT_LORA = os.getenv("EXPERT_LORA", "1") == "1"
 IMAGE_SCALE = int(os.getenv("IMAGE_SCALE", "8"))
 SMOKE = MAX_STEPS > 0

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # FULL training of the vision student (train_vl.py), unattended:
 #   deps -> train (EXPERT_LORA=0, 16k ctx, EPOCHS epochs, checkpoints every
-#   100 steps on /workspace) -> tarball of the adapter -> DONE marker ->
+#   100 steps on /workspace) -> tarball -> ACCEPTANCE GATE -> DONE marker ->
 #   wait up to FETCH_WAIT_MIN for /workspace/FETCHED (the VM scp's the tarball
 #   and touches it) -> stop this pod via the RunPod API (RUNPOD_API_KEY).
 # Usage: RUNPOD_API_KEY=rpa_... POD_ID=... bash run_full_vl.sh
@@ -14,7 +14,7 @@ export HF_HUB_ENABLE_HF_TRANSFER=0
 export PIP_CACHE_DIR=/root/.cache/pip
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONUNBUFFERED=1   # loss lines must reach the log immediately (tee buffering hid them for ~45 min, 21.08)
-export BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3.6-35B-A3B}"
+export BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3.6-27B}"
 export DATA_DIR="${DATA_DIR:-./data_vision}"
 export OUT_DIR="${OUT_DIR:-/workspace/out_vl}"
 export EPOCHS="${EPOCHS:-2}"
@@ -43,6 +43,11 @@ echo "== [2/4] pack adapter =="
 cd /workspace && tar -czf /workspace/adapter_vl_final.tgz -C "$OUT_DIR" adapter_final && ls -la /workspace/adapter_vl_final.tgz
 cp /workspace/full_vl_train.log "$OUT_DIR"/ 2>/dev/null || true
 echo "=== DONE $(date -u +%H:%M:%S)"
+
+echo "== [2b/4] acceptance gate (free -- no Kaggle quota) =="
+# v6 shipped under-fit and only Kaggle told us. These three numbers say it
+# here: reply length, WORLD_MODEL rate and action() density vs the targets.
+ADAPTER="$OUT_DIR/adapter_final" DATA="$DATA_DIR/valid.jsonl"   python check_student.py 2>&1 | tee /workspace/check_student.log ||   echo "!!! ACCEPTANCE FAILED -- checkpoint is under-fit, do NOT deploy (see /workspace/check_student.log)"
 
 echo "== [3/4] wait for fetch (max ${FETCH_WAIT_MIN} min) =="
 for i in $(seq 1 $((FETCH_WAIT_MIN * 6))); do
