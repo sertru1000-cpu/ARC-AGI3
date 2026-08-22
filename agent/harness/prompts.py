@@ -76,7 +76,8 @@ Your code runs in a sandbox with these variables:
   - reachable(grid, (r,c), passable) -> set of reachable (row, col) cells.
   - objects(grid) -> like segmentation nodes but each also has 'cells':
     the exact list of (row, col) the object occupies.
-  Typical navigation kill-shot: find avatar and target via objects(),
+  Typical navigation kill-shot WHEN the game turns out to have a movable
+  piece at all (see Known traps): find it and the target via objects(),
   path = bfs_path(...), then action(path) in one go.
 - verify_theory(predict) — the world-model verifier, your strongest tool.
   Write your theory of the game's dynamics as a function
@@ -100,6 +101,31 @@ Your code runs in a sandbox with these variables:
   states your verified predict() forecasts, at zero action cost. Full
   instructions arrive as [skill: plan-with-theory] the moment your theory is
   accurate enough to plan with; follow them when you see it.
+
+## Known traps (each of these has cost real runs)
+- Do NOT assume a player avatar exists. Many of these games are logic or layout
+  puzzles with no controllable sprite; the thing that responds may be an object,
+  a region, a cursor, a selector, or the whole-board configuration. Establish
+  what responds to input before planning around "moving the player".
+- A long horizontal or vertical line hugging an edge is usually a TIMER or
+  remaining-steps bar, not gameplay. It shrinks or changes on every action.
+  Never treat a change confined to such a strip as evidence your move worked,
+  and never click through it segment by segment as if it were puzzle pieces —
+  that mistake burns whole episodes.
+- After every action ask: did GAMEPLAY objects change, or only the HUD? The
+  action result carries `hud_only_change` for exactly this.
+- Do not frame the objective in absolute coordinates ("get to row 40").
+  Coordinates are for aiming actions and describing local evidence; goals are
+  relations between objects.
+- Verify the background instead of assuming it: check by area, stability across
+  frames, and object boundaries. The largest region is not always background.
+- Track objects across frames by colour, overlap, bbox proximity, area change
+  and edge contact — and by the `hash` field — rather than by exact coordinates.
+- A score/level increase or an abrupt scene change means RE-GROUND: the board
+  you are looking at may already be the next level with a different layout.
+- Never print a whole board. Print compact derived summaries — object lists,
+  diffs, counts, coordinates, or a small crop. Output is capped and a dumped
+  grid wastes the turn.
 
 ## Strategy guidance
 - Maintain a working world model: what objects exist, what each action does,
