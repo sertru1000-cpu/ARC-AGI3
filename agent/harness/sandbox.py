@@ -232,7 +232,15 @@ class Sandbox:
         """
         import time as _t
 
+        # The internal check must NOT count as a gate attempt. verify_gate_open
+        # also unlocks on `verify_attempts >= gate_escape_attempts`, so without
+        # this, three plan_with_theory calls carrying a throwaway predict would
+        # open the action gate on effort alone -- a second door to exactly the
+        # dodge we scrubbed out of the training data. A genuinely accurate
+        # theory still opens the gate, because last_verify is left to update.
+        _attempts_before = self.verify_attempts
         check = self._verify_theory(predict, actions)
+        self.verify_attempts = _attempts_before
         acc = check.get("accuracy")
         if acc is None or acc < min_accuracy:
             return {"plan": None, "verified_accuracy": acc,

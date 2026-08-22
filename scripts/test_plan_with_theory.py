@@ -136,6 +136,18 @@ def main() -> None:
     check(res["plan"] is None and "goal() raised" in res["reason"],
           "a broken goal() is reported clearly")
 
+    # --- planning must not become a back door through the action gate -----
+    # verify_gate_open() also unlocks on effort (verify_attempts >= 3), so if
+    # the internal check counted, three throwaway plan calls would open the
+    # gate for long action() batches without any working theory.
+    sb3 = make_sandbox()
+    for _ in range(4):
+        sb3._plan_with_theory(wrong, at((4, 7)), actions=["UP", "RIGHT"])
+    check(sb3.verify_attempts == 0, f"planning does not spend gate attempts ({sb3.verify_attempts})")
+    check(not sb3.verify_gate_open(), "a bad theory cannot open the gate by planning repeatedly")
+    sb3._verify_theory(move)
+    check(sb3.verify_gate_open(), "an accurate theory still opens the gate normally")
+
     # --- reachable from model code under the documented name --------------
     # The prompt tells the model to call plan_with_theory(...); if it is not
     # in the sandbox scope that instruction is a lie.
