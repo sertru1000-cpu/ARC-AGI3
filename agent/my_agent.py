@@ -270,6 +270,7 @@ class MyAgent(Agent):
         self.policy.start(probe_summary, cross_note)
 
         turns = 0
+        stop_reason: str | None = None  # set by break paths; else classified after the loop
         last_level = sandbox.current.level if sandbox.current else 0
         while (
             self.frames[-1].state is not GameState.WIN
@@ -338,7 +339,39 @@ class MyAgent(Agent):
                 break
             if self.policy.no_code_strikes >= MAX_NO_CODE_STRIKES:
                 logger.warning(f"{self.game_id}: model stopped emitting code, ending game")
+                stop_reason = "no_code"
                 break
+
+        # WHY the game ended. Without this the only way to tell "ran out of
+        # wall-clock" from "ran out of turns" is to diff log timestamps by
+        # hand, and on a Phase B rerun the logs are barely reachable at all.
+        # If time_cap shows up across many games, the shared window is the
+        # binding budget and PHASE_B_TOTAL_SECONDS is set too low (or the
+        # margin under Kaggle's 9 h cap is too thin).
+        elapsed = _time.time() - self.timer
+        if stop_reason is None:
+            if self.frames[-1].state is GameState.WIN:
+                stop_reason = "win"
+            elif self._budget_left() <= 0:
+                stop_reason = "action_cap"
+            elif turns >= MAX_LLM_TURNS:
+                stop_reason = "turn_cap"
+            elif elapsed >= my_seconds:
+                stop_reason = "time_cap"
+            else:
+                stop_reason = "other"
+        logger.info(
+            f"{self.game_id}: END reason={stop_reason} turns={turns}/{MAX_LLM_TURNS} "
+            f"actions_left={self._budget_left()} "
+            f"elapsed={elapsed:.0f}s/{my_seconds:.0f}s "
+            f"level={sandbox.current.level if sandbox.current else 0}/{win_levels}"
+        )
+        if self.policy is not None and self.policy.trace:
+            self.policy.trace.write({"event": "game_end", "reason": stop_reason,
+                                     "turns": turns, "elapsed_s": round(elapsed),
+                                     "allowance_s": round(my_seconds),
+                                     "actions_left": self._budget_left(),
+                                     "level": sandbox.current.level if sandbox.current else 0})
 
         try:
             self._speedrun_if_won()
