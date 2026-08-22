@@ -92,6 +92,20 @@ PHASE_A_GAME_SECONDS = int(os.getenv("PHASE_A_GAME_SECONDS", "720"))
 # MAX_TURNS x measured sec/turn or time silently truncates the run.
 PHASE_A_MAX_TURNS = int(os.getenv("PHASE_A_MAX_TURNS", "60"))
 PHASE_A_MAX_ACTIONS = int(os.getenv("PHASE_A_MAX_ACTIONS", "400"))
+
+# ── Phase B (the real submission rerun) ──────────────────────────────────────
+# Kaggle's hard limit for this competition is 9 h of notebook run-time (quoted
+# from Code Requirements 22.08 -- third-party summaries claiming 6 h are wrong).
+# TOTAL_SECONDS is the agent's own window and starts AFTER the stack is up, so
+# the budget is: 9 h - startup (~15 min) - final write (~5 min) - margin.
+# 28800 (8 h) leaves ~40 min, of which one stuck turn can eat LLM_TIMEOUT_S.
+PHASE_B_TOTAL_SECONDS = int(os.getenv("PHASE_B_TOTAL_SECONDS", "28800"))
+# Per-game cap. Must NOT be below TOTAL: games run concurrently and each may
+# use the whole remaining window, so a lower value silently truncates long
+# games (at 21600 vs a 28800 window every game died 2 h early).
+PHASE_B_GAME_SECONDS = int(os.getenv("PHASE_B_GAME_SECONDS", str(PHASE_B_TOTAL_SECONDS)))
+PHASE_B_MAX_TURNS = int(os.getenv("PHASE_B_MAX_TURNS", "250"))
+PHASE_B_MAX_ACTIONS = int(os.getenv("PHASE_B_MAX_ACTIONS", "800"))
 # Scorecards idle-expire after this; must outlive the longest game.
 PHASE_A_STALE_MINUTES = max(60, PHASE_A_GAME_SECONDS // 60 + 30)
 
@@ -569,9 +583,10 @@ def build() -> dict:
             # Budgets are therefore per-thread against a SHARED wall window:
             # the old 720s/game cap silently ended the whole run in ~12 min.
             os.environ.update({{"MY_AGENT_PARALLEL": "1",
-                               "MY_AGENT_MAX_ACTIONS": "800", "MY_AGENT_MAX_TURNS": "250",
-                               "MY_AGENT_GAME_SECONDS": "21600",
-                               "MY_AGENT_TOTAL_SECONDS": "23400",  # 6.5h shared window
+                               "MY_AGENT_MAX_ACTIONS": "{PHASE_B_MAX_ACTIONS}",
+                               "MY_AGENT_MAX_TURNS": "{PHASE_B_MAX_TURNS}",
+                               "MY_AGENT_GAME_SECONDS": "{PHASE_B_GAME_SECONDS}",
+                               "MY_AGENT_TOTAL_SECONDS": "{PHASE_B_TOTAL_SECONDS}",  # shared window, 9h Kaggle cap
                                "MY_AGENT_EXPECTED_GAMES": "30",
                                "LLM_TIMEOUT_S": "600",  # 30-way queueing headroom
                                "MY_AGENT_CROSS_MEMORY_PATH": "/kaggle/working/cross_memory.json",
