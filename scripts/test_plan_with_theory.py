@@ -195,7 +195,7 @@ def test_plan_checkpoint_skill() -> None:
         def chat(self, messages, max_tokens=2048, temperature=0.6):
             return self.replies.pop(0) if self.replies else "```python\npass\n```"
 
-    def policy_with(gate_open: bool) -> LLMPolicy:
+    def policy_with(gate_open: bool, accuracy: float = 0.9) -> LLMPolicy:
         sb = make_sandbox()
 
         class _Res:
@@ -207,7 +207,7 @@ def test_plan_checkpoint_skill() -> None:
 
         sb.run_code = lambda code: _Res()          # type: ignore[method-assign]
         sb.verify_gate_open = lambda: gate_open    # type: ignore[method-assign]
-        sb.last_verify = {"accuracy": 0.9, "tested": 6}
+        sb.last_verify = {"accuracy": accuracy, "tested": 6}
         p = LLMPolicy(backend=_LLM(["```python\nprint(1)\n```"] * 6),
                       sandbox=sb, game_id="synth", win_levels=1)
         p.messages = [{"role": "system", "content": "S"}, {"role": "user", "content": "U"}]
@@ -221,9 +221,20 @@ def test_plan_checkpoint_skill() -> None:
     check("[skill: plan-with-theory]" in last_user(p), "the named skill fires once the theory is verified")
     check("0.9" in last_user(p), "quotes the accuracy it was verified at")
 
-    p = policy_with(gate_open=False)
+    # Keyed on real accuracy, NOT on verify_gate_open(): the gate also opens on
+    # three honest attempts, and v36 then told vc33 "your theory is VERIFIED
+    # (accuracy 0.0)" eight times while suppressing the advice it actually
+    # needed.
+    p = policy_with(gate_open=False, accuracy=0.0)
     p.play_turn()
-    check("[skill: plan-with-theory]" not in last_user(p), "stays silent while the theory is unverified")
+    check("[skill: plan-with-theory]" not in last_user(p), "stays silent while accuracy is 0.0")
+
+    p = policy_with(gate_open=True, accuracy=0.0)
+    p.play_turn()
+    check("[skill: plan-with-theory]" not in last_user(p),
+          "and stays silent when the gate opened on EFFORT rather than accuracy")
+    check("[theory checkpoint]" in last_user(p).lower() or "predict(" in last_user(p),
+          "the theory nag is no longer suppressed in that case")
 
     # A turn that actually plans must silence it for the next few turns.
     p = policy_with(gate_open=True)

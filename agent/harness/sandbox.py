@@ -34,6 +34,13 @@ from .perception import Segmentation, grid_diff, latest_grid, segment
 from .toolbox import bfs_path, objects, reachable
 
 # ── model-facing action vocabulary ────────────────────────────────────────
+# How many wrong cells a transition may carry and still count as predicted.
+# Two of 4096 is HUD noise, not a mechanic; see _verify_theory.
+HUD_TOLERANCE_CELLS = int(os.getenv("MY_AGENT_HUD_TOLERANCE_CELLS", "0"))
+# Changed cells needed on ONE edge before it is called a HUD bar. Below
+# this a piece merely crossed the boundary and must not be masked away.
+MIN_HUD_BAR_CELLS = int(os.getenv("MY_AGENT_MIN_HUD_BAR_CELLS", "4"))
+
 TO_ENGINE = {
     "UP": "ACTION1",
     "DOWN": "ACTION2",
@@ -363,6 +370,52 @@ class Sandbox:
         # perfect. Cap it well below the smallest plausible play area.
         return mask if 0 < int(mask.sum()) <= max(64, mask.size // 100) else None
 
+    def _hud_edge_cells(self, min_transitions: int = 6):
+        """Changing cells on the outer ring — where these games draw the HUD.
+
+        The ticking-cell rule above misses the commonest shape: a DEPLETING
+        TIMER BAR. Each of its cells flips once, when the bar reaches it, so no
+        "changes every turn" test sees it — yet vc33 failed every transition on
+        1-2 such cells in row 0 across v35 and v36, which kept the action gate
+        shut. perception.py already carries the same intuition as `border_only`
+        ("all changes hug the outer border -- HUD?"), and the cross-game journal
+        measured an edge strip to be a HUD timer in 68 of 145 games.
+
+        Guarded so a game genuinely played on the border is not erased: the
+        interior must change somewhere too, and the mask stays small.
+        """
+        log = self.transition_log
+        if len(log) < min_transitions:
+            return None
+        changed = None
+        for before, _n, _d, after in log:
+            if before.shape != after.shape:
+                return None
+            d = before != after
+            changed = d if changed is None else (changed | d)
+        if changed is None or changed.ndim != 2:
+            return None
+        h, w = changed.shape
+        ring = np.zeros_like(changed)
+        ring[0, :] = ring[-1, :] = True
+        ring[:, 0] = ring[:, -1] = True
+        if not (changed & ~ring).any():
+            # No interior motion at all: the board IS the border, and masking
+            # it would forgive every theory.
+            return None
+        # Per EDGE, not per ring: a bar lights up many cells along one edge,
+        # while a piece crossing the boundary touches one or two. Without this
+        # the mask hid a real mechanic -- a dot leaving column 0 -- in testing.
+        edge = np.zeros_like(changed)
+        lines = [(changed[0, :], (0, slice(None))), (changed[h - 1, :], (h - 1, slice(None))),
+                 (changed[:, 0], (slice(None), 0)), (changed[:, w - 1], (slice(None), w - 1))]
+        for line, where in lines:
+            if int(line.sum()) >= MIN_HUD_BAR_CELLS:
+                edge[where] |= line
+        if not edge.any() or int(edge.sum()) > max(64, 2 * max(h, w)):
+            return None
+        return edge
+
     def _verify_theory(self, predict, actions: Any = None) -> dict:
         """Test a transition theory against every recorded real transition.
 
@@ -371,9 +424,13 @@ class Sandbox:
         Returns accuracy + up to 3 counterexamples. Costs zero env actions.
         """
         wanted = {a.upper() for a in actions} if actions else None
-        tested = matched = errors = 0
+        tested = matched = exact = errors = 0
+        near_misses: list[int] = []
         mismatches: list[dict] = []
         ignore = self._clocklike_cells()
+        edge = self._hud_edge_cells()
+        if edge is not None:
+            ignore = edge if ignore is None else (ignore | edge)
         for before, name, data, after in self.transition_log:
             if wanted and name not in wanted:
                 continue
@@ -382,13 +439,29 @@ class Sandbox:
                 pred = predict(before.copy(), name, dict(data) if data else None)
                 pred = np.asarray(pred, dtype=np.int8)
                 if pred.shape == after.shape:
-                    diff = pred != after
-                    if ignore is not None:
-                        diff = diff & ~ignore
+                    raw = pred != after
+                    # exact_accuracy stays the STRICT number, measured before
+                    # any masking -- otherwise both figures collapse into one
+                    # and the report hides how much the mask is doing.
+                    if not raw.any():
+                        exact += 1
+                    diff = raw & ~ignore if ignore is not None else raw
                 else:
                     diff = None
-                if diff is not None and not bool(diff.any()):
+                n_wrong = int(diff.sum()) if diff is not None else None
+                if n_wrong == 0:
                     matched += 1
+                elif n_wrong is not None and n_wrong <= HUD_TOLERANCE_CELLS:
+                    # A theory right about the mechanics and wrong about a few
+                    # HUD pixels is a working theory. vc33 (v35/v36) scored 0.0
+                    # over 20+ transitions while every miss was 1-2 cells of a
+                    # DEPLETING TIMER BAR in row 0 -- each of whose cells changes
+                    # exactly once, so no "ticks every turn" mask can catch it.
+                    # Tolerating a couple of cells needs no guess about where a
+                    # given game draws its HUD. Both numbers are reported, so
+                    # nothing is hidden from the model or from us.
+                    matched += 1
+                    near_misses.append(n_wrong)
                 elif len(mismatches) < 3:
                     if pred.shape != after.shape:
                         mismatches.append({"action": name, "error": f"shape {pred.shape} != {after.shape}"})
@@ -407,11 +480,18 @@ class Sandbox:
                     mismatches.append({"action": name, "error": repr(exc)[:200]})
         out = {
             "transitions_tested": tested,
-            "exact_matches": matched,
+            "exact_matches": exact,
             "accuracy": round(matched / tested, 3) if tested else None,
+            "exact_accuracy": round(exact / tested, 3) if tested else None,
             "predict_errors": errors,
             "counterexamples": mismatches,
         }
+        if near_misses:
+            out["near_misses"] = len(near_misses)
+            out["tolerance_cells"] = HUD_TOLERANCE_CELLS
+            out["note"] = (f"{len(near_misses)} transition(s) counted as correct while missing "
+                           f"<= {HUD_TOLERANCE_CELLS} cells -- HUD/timer pixels are not worth "
+                           "modelling. 'exact_accuracy' is the strict number.")
         if ignore is not None:
             # Say so, or the model burns turns trying to model a clock that is
             # already forgiven -- and reading a counterexample list that no

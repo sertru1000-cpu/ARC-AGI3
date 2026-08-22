@@ -56,6 +56,9 @@ RUN_CODE_TOOL = {
 # How many turns without a plan_with_theory call before the plan checkpoint
 # fires again. 3 mirrors how often THEORY_CHECKPOINT nags on the other side.
 PLAN_NAG_EVERY = int(os.getenv("MY_AGENT_PLAN_NAG_EVERY", "3"))
+# Planning is only meaningful over a theory that actually predicts. Matches the
+# planner's own min_accuracy so the skill never advises what the tool refuses.
+PLAN_MIN_ACCURACY = float(os.getenv("MY_AGENT_PLAN_MIN_ACCURACY", "0.6"))
 
 CODE_BLOCK_RE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.DOTALL)
 WORLD_MODEL_RE = re.compile(
@@ -531,17 +534,27 @@ class LLMPolicy:
         # (better) theory EVERY turn until accuracy >= 0.6 or 3 attempts spent
         # (every-3rd was ignored for 15+ turns; a 0.0-accuracy dummy attempt
         # must not silence the nudge either).
-        if (not self.sandbox.verify_gate_open()
-                and len(self.sandbox.transition_log) >= 6):
+        # Keyed on accuracy, not on the gate: the gate ALSO opens after three
+        # honest attempts, and that hatch used to silence this nag even when the
+        # theory predicted nothing (vc33, v36: accuracy 0.0, five attempts, no
+        # further guidance). Permission to act and quality of theory are
+        # different questions and should not share one switch.
+        if ((self.sandbox.last_verify or {}).get("accuracy") or 0) < PLAN_MIN_ACCURACY \
+                and len(self.sandbox.transition_log) >= 6:
             content += "\n\n" + THEORY_CHECKPOINT
         # Mirror of the above for the OTHER half of the workflow: once the
         # theory is verified, push the model to plan with it instead of
         # falling back to one-probe-per-turn. Re-fires every few turns if it
         # drifts back; the tool alone was ignored 9-verifies-to-0-plans (v34).
-        elif (self.sandbox.verify_gate_open()
+        # Keyed on REAL accuracy, not verify_gate_open(): the gate also opens on
+        # three honest attempts, so v36 told vc33 "your theory is VERIFIED
+        # (accuracy 0.0)" eight times -- nonsense advice that also displaced the
+        # only correct advice, since this used to be an `elif`. Both bugs cost
+        # that episode: it executed 5 actions in 20 turns.
+        _acc = (self.sandbox.last_verify or {}).get("accuracy") or 0
+        if (_acc >= PLAN_MIN_ACCURACY
                 and self.turns - self.last_plan_turn >= PLAN_NAG_EVERY):
-            lv = self.sandbox.last_verify or {}
-            content += "\n\n" + PLAN_CHECKPOINT.format(acc=lv.get("accuracy"))
+            content += "\n\n" + PLAN_CHECKPOINT.format(acc=_acc)
             self.plan_checkpoints += 1
         if not wm_match:
             content += (

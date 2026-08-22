@@ -74,7 +74,7 @@ def main() -> None:
     res = sb._verify_theory(theory_ignoring_hud)
     check(res["accuracy"] == 1.0,
           f"a theory right about the game scores 1.0 despite the ticking HUD (got {res['accuracy']})")
-    check(res.get("ignored_ticking_cells") == 1, "the ticking cell is reported as ignored")
+    check(res.get("ignored_ticking_cells", 0) >= 1, "the ticking cell is reported as ignored")
     check(res.get("ignored_rows") == [0], f"and its row is named: {res.get('ignored_rows')}")
     check("do not try to predict them" in res.get("note", ""), "the model is told not to model it")
     check(sb.verify_gate_open(), "so the action gate finally opens")
@@ -120,3 +120,44 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def test_depleting_bar() -> None:
+    """The vc33 case: a timer BAR whose cells each change exactly once.
+
+    No "changes every turn" mask can catch it -- cell (0,63) flips 7->4 once
+    and never again -- yet it failed every transition under exact matching and
+    held the action gate shut across v35 and v36. Tolerating a couple of wrong
+    cells needs no guess about where a game draws its HUD.
+    """
+    sb = Sandbox(env_step=lambda *a: None, budget_left=lambda: 100)
+    grid = np.zeros((SIZE, SIZE), dtype=np.int8)
+    grid[8, 0] = DOT
+    grid[0, 8:] = 7                       # a full timer bar
+    for i in range(10):
+        after = grid.copy()
+        after[8, i] = 0
+        after[8, i + 1] = DOT
+        after[0, SIZE - 1 - i] = 4        # the bar depletes one cell per action
+        sb.transition_log.append((grid, "RIGHT", None, after))
+        grid = after
+
+    check(sb._clocklike_cells() is None,
+          "no cell ticks every turn, so the mask correctly finds nothing")
+    res = sb._verify_theory(theory_ignoring_hud)
+    check(res["exact_accuracy"] == 0.0, "strict matching still calls it 0.0 -- as it did on vc33")
+    check(res["accuracy"] == 1.0, f"tolerance recognises the theory as working (got {res['accuracy']})")
+    check(res.get("ignored_ticking_cells", 0) >= 1, "the bar cells are reported as ignored")
+    check(sb.verify_gate_open(), "so the action gate opens and the agent may act in batches")
+
+    # A theory wrong about the MECHANICS is still caught, bar or no bar.
+    def wrong(g, action, data=None):
+        out = g.copy()
+        out[0, SIZE - 1] = 4              # only ever touches the HUD
+        return out
+
+    res = sb._verify_theory(wrong)
+    check(res["accuracy"] == 0.0, "a theory that ignores the dot is still rejected")
+
+
+test_depleting_bar()
+
