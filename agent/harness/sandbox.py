@@ -206,6 +206,123 @@ class Sandbox:
         self.valid_actions = names
 
     # ── world-model verifier ──────────────────────────────────────────────
+    def _plan_with_theory(self, predict, goal, actions: Any = None,
+                          max_depth: int = 6, max_nodes: int = 1500,
+                          min_accuracy: float = 0.6,
+                          time_budget: float = 8.0) -> dict:
+        """Search for an action sequence using the model's OWN verified theory.
+
+        Until now a theory was only ever a key to the action-batch gate: the
+        model tuned predict() until verify_theory hit 0.6, the gate opened,
+        and the verified world model was thrown away. This turns it into a
+        planner. Search is pure simulation -- it spends ZERO engine actions,
+        which is exactly the trade we want, since actions are scored
+        quadratically and thinking time is our scarcest resource.
+
+            predict(grid, action, data) -> next grid   (same as verify_theory)
+            goal(grid) -> bool                         (what you are aiming at)
+
+        Returns {'plan': [...] | None, ...}. The plan is a list of specs that
+        action() accepts verbatim, so the usual next line is action(res['plan']).
+
+        The theory is re-verified here first and planning is REFUSED below
+        min_accuracy: planning over an unverified theory is just fantasy with
+        extra steps, and the refusal keeps the intended order theorise ->
+        verify -> plan.
+        """
+        import time as _t
+
+        check = self._verify_theory(predict, actions)
+        acc = check.get("accuracy")
+        if acc is None or acc < min_accuracy:
+            return {"plan": None, "verified_accuracy": acc,
+                    "reason": (f"theory not good enough to plan with: accuracy {acc} "
+                               f"< {min_accuracy} on {check.get('transitions_tested')} "
+                               "transitions. Refine predict() against the "
+                               "counterexamples from verify_theory first."),
+                    "counterexamples": check.get("counterexamples")}
+
+        if self.current is None:
+            return {"plan": None, "reason": "no current frame"}
+
+        # Default branching set: the directional/interact actions. CLICK is
+        # excluded unless the caller names targets explicitly -- 64x64 click
+        # positions would blow up the branching factor to 4096.
+        if actions:
+            specs = list(actions)
+        else:
+            specs = [a for a in self.valid_actions if a.upper() not in ("CLICK", "RESET")]
+        if not specs:
+            return {"plan": None, "reason": "no candidate actions to search over"}
+
+        def _split(spec):
+            if isinstance(spec, str):
+                return spec.upper(), None
+            if isinstance(spec, dict):
+                name = str(spec.get("action", "")).upper()
+                data = {k: int(v) for k, v in spec.items() if k in ("x", "y")} or None
+                return name, data
+            raise ValueError(f"bad action spec for planning: {spec!r}")
+
+        start = self.current.grid
+        try:
+            if goal(start.copy()):
+                return {"plan": [], "verified_accuracy": acc, "nodes_expanded": 0,
+                        "reason": "already at the goal"}
+        except Exception as exc:
+            return {"plan": None, "reason": f"goal() raised on the current grid: {exc!r}"}
+
+        deadline = _t.monotonic() + time_budget
+        seen = {start.tobytes()}
+        frontier = [(start, [])]
+        nodes = pred_errors = 0
+        while frontier:
+            nxt = []
+            for grid, path in frontier:
+                if len(path) >= max_depth:
+                    continue
+                for spec in specs:
+                    if nodes >= max_nodes or _t.monotonic() > deadline:
+                        return {"plan": None, "verified_accuracy": acc,
+                                "nodes_expanded": nodes, "predict_errors": pred_errors,
+                                "reason": (f"budget spent ({nodes} states, depth "
+                                           f"<= {len(path) + 1}) without reaching the goal. "
+                                           "Try a looser goal(), a larger max_depth, or a "
+                                           "smaller action set.")}
+                    name, data = _split(spec)
+                    nodes += 1
+                    try:
+                        pred = np.asarray(predict(grid.copy(), name,
+                                                  dict(data) if data else None),
+                                          dtype=np.int8)
+                    except Exception:
+                        pred_errors += 1
+                        continue
+                    if pred.shape != start.shape:
+                        pred_errors += 1
+                        continue
+                    key = pred.tobytes()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    plan = path + [spec]
+                    try:
+                        if goal(pred.copy()):
+                            return {"plan": plan, "depth": len(plan),
+                                    "verified_accuracy": acc, "nodes_expanded": nodes,
+                                    "predict_errors": pred_errors, "reason": None}
+                    except Exception as exc:
+                        return {"plan": None, "nodes_expanded": nodes,
+                                "reason": f"goal() raised: {exc!r}"}
+                    nxt.append((pred, plan))
+            frontier = nxt
+        return {"plan": None, "verified_accuracy": acc, "nodes_expanded": nodes,
+                "predict_errors": pred_errors,
+                "reason": (f"exhausted {nodes} reachable states within depth {max_depth} "
+                           "without reaching the goal -- the goal may be unreachable "
+                           "with these actions, or the theory may miss the mechanic "
+                           "that matters.")}
+
     def _verify_theory(self, predict, actions: Any = None) -> dict:
         """Test a transition theory against every recorded real transition.
 
@@ -401,6 +518,7 @@ class Sandbox:
             "reachable": reachable,
             "objects": objects,
             "verify_theory": self._verify_theory,
+            "plan_with_theory": self._plan_with_theory,
             "transition_count": len(self.transition_log),
             "result": None,
         }
