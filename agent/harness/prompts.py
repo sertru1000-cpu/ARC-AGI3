@@ -89,17 +89,17 @@ Your code runs in a sandbox with these variables:
   Workflow: theorize -> verify -> study counterexamples -> refine -> PLAN.
   Store good theories in memo['theory_code'] (as source text) so they
   survive between turns.
-
-- plan_with_theory(predict, goal) — searches for an action sequence over the
-  states your verified predict() forecasts, at zero action cost. Full
-  instructions arrive as [skill: plan-with-theory] the moment your theory is
-  accurate enough to plan with; follow them when you see it.
   Verify EARLY: after ~6-10 recorded transitions, checking a first rough
   theory is cheaper than acting on a wrong one. ENFORCED: once 10+
   transitions are recorded, action() batches longer than 3 are rejected
   until your theory reaches accuracy >= 0.6 on verify_theory (or you have
   made 3 genuine attempts). A throwaway predict() that scores 0.0 does NOT
   open the gate — refine against the counterexamples.
+
+- plan_with_theory(predict, goal) — searches for an action sequence over the
+  states your verified predict() forecasts, at zero action cost. Full
+  instructions arrive as [skill: plan-with-theory] the moment your theory is
+  accurate enough to plan with; follow them when you see it.
 
 ## Strategy guidance
 - Maintain a working world model: what objects exist, what each action does,
@@ -208,7 +208,29 @@ NUDGE_NO_ACTION = (
 # the mirror image: it fires exactly when the theory is finally good enough,
 # which is also why the full how-to no longer sits in the system prompt
 # burning context on every single turn.
-PLAN_CHECKPOINT = (
+def load_skill(name: str, fallback: str) -> str:
+    """Read a skill from agent/skills/<name>.md, dropping its YAML front matter.
+
+    Skills are prose, so they live as documents rather than string literals --
+    which is also the shape a skills LIBRARY needs if we ever harvest more.
+    `build_notebook.collect_sources()` ships the directory into the Kaggle
+    bundle; if packaging ever misses it we degrade to the fallback and say so
+    loudly rather than silently dropping the skill in a live run.
+    """
+    import pathlib
+    p = pathlib.Path(__file__).resolve().parent.parent / "skills" / f"{name}.md"
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        print(f"[prompts] WARNING: skill {name!r} not found at {p} -- using fallback")
+        return fallback
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        text = parts[2] if len(parts) > 2 else text
+    return text.strip()
+
+
+_PLAN_FALLBACK = (
     "[skill: plan-with-theory] Your theory is VERIFIED (accuracy {acc}). Stop probing "
     "one action at a time and search with it instead. Write goal(grid) -> bool "
     "for the state you want -- a colour gone, a piece on its target square, the "
@@ -224,6 +246,8 @@ PLAN_CHECKPOINT = (
     "the same moves found by trial and error: the score divides the human action "
     "count by yours and squares it."
 )
+
+PLAN_CHECKPOINT = load_skill("plan-with-theory", _PLAN_FALLBACK)
 
 THEORY_CHECKPOINT = (
     "[theory checkpoint] You have plenty of recorded transitions but no "

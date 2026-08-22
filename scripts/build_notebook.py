@@ -133,10 +133,19 @@ def markdown_cell(source: str) -> dict:
 
 
 def collect_sources() -> dict[str, str]:
-    """my_agent.py + every harness module, keyed by target-relative path."""
+    """my_agent.py, every harness module, and the skills/ documents.
+
+    Skills are prose loaded at runtime by prompts.load_skill(), so they must
+    ship too -- globbing only *.py would leave the agent falling back to a stub
+    in the one place it matters, a live competition run.
+    """
     files = {"my_agent.py": (AGENT_DIR / "my_agent.py").read_text(encoding="utf-8")}
     for p in sorted((AGENT_DIR / "harness").glob("*.py")):
         files[f"harness/{p.name}"] = p.read_text(encoding="utf-8")
+    for p in sorted((AGENT_DIR / "skills").glob("*.md")):
+        files[f"skills/{p.name}"] = p.read_text(encoding="utf-8")
+    if not any(k.startswith("skills/") for k in files):
+        raise SystemExit("FATAL: no skills/*.md collected — the agent would ship without them")
     return files
 
 
@@ -178,6 +187,11 @@ def build() -> dict:
             shutil.copytree(src, dst)
         shutil.copy("/tmp/agent_src/my_agent.py", dst / "agents/templates/my_agent.py")
         shutil.copytree("/tmp/agent_src/harness", dst / "harness", dirs_exist_ok=True)
+        # skills/ must sit NEXT TO harness/, because prompts.load_skill() looks
+        # for it at Path(__file__).parent.parent / "skills". Unpacking it under
+        # /tmp without copying here would silently fall back to a stub.
+        shutil.copytree("/tmp/agent_src/skills", dst / "skills", dirs_exist_ok=True)
+        print("skills shipped:", sorted(p.name for p in (dst / "skills").glob("*.md")))
 
         # Slim registry: upstream __init__ eagerly imports heavy templates.
         (dst / "agents/__init__.py").write_text('''from typing import Type
