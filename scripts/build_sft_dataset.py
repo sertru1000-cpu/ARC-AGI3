@@ -64,6 +64,76 @@ _HINT_PARA_RE = re.compile(r"\n*\[human hint\][^\n]*(\n(?!\[)[^\n]+)*", re.IGNOR
 _HINT_MENTION_RE = re.compile(r"\bhint(ed|s)?\b|as (the )?(human|user) (said|suggested|told)",
                               re.IGNORECASE)
 
+# ── reformatting: drop fruitless inspections + gate-dodge predicts ─────────
+# See docs/student_vs_teacher_analysis.md #5.2: the student learned "modal
+# turn = look-only" because inspection turns and the dummy-predict gate-dodge
+# ritual outnumber decisive turns in the SFT target distribution.
+
+_TRIVIAL_RETURN_RE = re.compile(r"return\s+(grid|g)(\.copy\(\))?\s*$")
+
+
+def _predict_bodies(code: str) -> list[str]:
+    """Extract the body of every top-level `def predict(...)` in the code
+    (indentation-delimited, since the sandbox executes plain Python)."""
+    lines = code.splitlines()
+    bodies: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)def predict\(", lines[i])
+        if m:
+            indent = len(m.group(1))
+            body: list[str] = []
+            i += 1
+            while i < len(lines):
+                line = lines[i]
+                if line.strip() and (len(line) - len(line.lstrip())) <= indent:
+                    break
+                body.append(line)
+                i += 1
+            bodies.append("\n".join(body))
+        else:
+            i += 1
+    return bodies
+
+
+def is_dummy_predict(code: str) -> bool:
+    """A `predict(grid, action, data)` whose entire body is a no-op return --
+    the gate-dodge used to fake a passing verify_theory accuracy without a
+    real transition theory (analysis doc #4: `def predict(...): return
+    grid.copy()`, called just to unlock long action batches)."""
+    for body in _predict_bodies(code):
+        stmts = [ln.strip() for ln in body.splitlines()
+                 if ln.strip() and not ln.strip().startswith("#")]
+        if stmts and all(_TRIVIAL_RETURN_RE.fullmatch(s) for s in stmts):
+            return True
+    return False
+
+
+def is_fruitless_inspection(turns: list[dict], i: int) -> bool:
+    """A zero-action turn that doesn't precede a productive (acting) turn --
+    i.e. it's part of a stalled inspection run, not the normal one-turn look
+    before an action. The teacher's real productive pattern is diff-then-act;
+    a turn that neither acts nor is immediately followed by acting teaches
+    the student nothing about that pattern."""
+    r = turns[i]
+    if r.get("actions_executed", 0) > 0:
+        return False
+    nxt = turns[i + 1] if i + 1 < len(turns) else None
+    return not (nxt and nxt.get("actions_executed", 0) > 0)
+
+
+def is_decisive(turns: list[dict], i: int) -> bool:
+    """A turn worth upweighting: it batches multiple actions in one turn, or
+    a level-up follows within 2 turns."""
+    r = turns[i]
+    if r.get("actions_executed", 0) >= 2:
+        return True
+    level = r.get("level", 0)
+    for j in range(i + 1, min(i + 3, len(turns))):
+        if turns[j].get("level", 0) > level:
+            return True
+    return False
+
 
 CHARS_PER_TOKEN = 2.5  # measured on our grid-heavy data (MLX rehearsal, 18.08)
 
@@ -102,7 +172,12 @@ def frame_ascii_to_png_b64(ascii_grid: str, scale: int = 8) -> str:
 
 def episode_examples(recs: list[dict], max_context_pairs: int = 8,
                      strip_hints: bool = False, max_tokens: int = 0,
-                     vision: bool = False) -> list[dict]:
+                     vision: bool = False, drop_fruitless: bool = False,
+                     drop_dummy_predict: bool = False,
+                     upweight_decisive_factor: int = 1,
+                     stats: dict | None = None) -> list[dict]:
+    if stats is None:
+        stats = {}
     # Lost turns (API failures, 21.08 soft harness) carry no reply/code --
     # they are debugging records, not dialogue turns.
     turns = [r for r in recs if r.get("turn", 0) > 0 and "turn_failed" not in r]
@@ -133,11 +208,18 @@ def episode_examples(recs: list[dict], max_context_pairs: int = 8,
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": first_user},
     ]
-    for r in turns:
+    for i, r in enumerate(turns):
         reply = inject_prior(r.get("reply") or "")
         good = bool(r.get("code")) and not r.get("sandbox_error")
         if good and strip_hints and _HINT_MENTION_RE.search(reply):
             good = False  # reply leans on the hint explicitly -- skip as a target
+        stats["turns_considered"] = stats.get("turns_considered", 0) + 1
+        if good and drop_fruitless and is_fruitless_inspection(turns, i):
+            good = False
+            stats["fruitless_dropped"] = stats.get("fruitless_dropped", 0) + 1
+        if good and drop_dummy_predict and is_dummy_predict(r.get("code") or ""):
+            good = False
+            stats["dummy_predict_dropped"] = stats.get("dummy_predict_dropped", 0) + 1
         if good:
             # Trim context the same way the runtime does.
             head, tail = dialogue[:2], dialogue[2:]
@@ -155,7 +237,14 @@ def episode_examples(recs: list[dict], max_context_pairs: int = 8,
                     else:
                         ex["image_b64"] = frame_ascii_to_png_b64(r["frame_seen"])
                 if ex is not None:
-                    examples.append(ex)
+                    decisive = is_decisive(turns, i)
+                    stats["kept"] = stats.get("kept", 0) + 1
+                    if decisive:
+                        stats["decisive"] = stats.get("decisive", 0) + 1
+                    reps = upweight_decisive_factor if decisive else 1
+                    for _ in range(reps):
+                        examples.append(dict(ex))
+                    stats["decisive_dup"] = stats.get("decisive_dup", 0) + (reps - 1)
         dialogue.append({"role": "assistant", "content": reply})
         fb = "[python output]\n" + (r.get("sandbox_output") or "(empty)")
         if r.get("sandbox_error"):
@@ -196,6 +285,16 @@ def main() -> None:
     p.add_argument("--since", default="",
                    help="only trace dirs whose name contains a timestamp >= this "
                         "(YYYYMMDD_HHMMSS), e.g. 20260821_000000 for the vision era")
+    p.add_argument("--drop-fruitless-inspection", action="store_true",
+                   help="drop zero-action turns that don't immediately precede an "
+                        "acting turn (stalled-inspection runs, not the normal "
+                        "look-before-you-act pattern)")
+    p.add_argument("--drop-dummy-predict", action="store_true",
+                   help="drop turns whose code defines a no-op predict() used only "
+                        "to fake a passing verify_theory gate check")
+    p.add_argument("--upweight-decisive-factor", type=int, default=1,
+                   help="duplicate 'decisive' examples this many times: turns that "
+                        "batch >=2 actions, or are followed by a level-up within 2 turns")
     args = p.parse_args()
 
     import random
@@ -206,6 +305,7 @@ def main() -> None:
 
     episodes: list[tuple[str, str, list[dict]]] = []  # (game, episode_id, examples)
     n_files = n_skipped_holdout = 0
+    agg_stats: dict[str, int] = {}
     for path in sorted(Path(args.src).rglob("*.jsonl")):
         if path.name.startswith("_"):
             continue
@@ -219,9 +319,16 @@ def main() -> None:
             continue
         n_files += 1
         recs = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        ep_stats: dict[str, int] = {}
         exs = episode_examples(recs, max_context_pairs=args.max_context_pairs,
                                strip_hints=args.strip_hints, max_tokens=args.max_tokens,
-                               vision=args.vision)
+                               vision=args.vision,
+                               drop_fruitless=args.drop_fruitless_inspection,
+                               drop_dummy_predict=args.drop_dummy_predict,
+                               upweight_decisive_factor=args.upweight_decisive_factor,
+                               stats=ep_stats)
+        for k, v in ep_stats.items():
+            agg_stats[k] = agg_stats.get(k, 0) + v
         if not exs:
             continue
         eid = f"{path.parent.name}/{path.stem}"
@@ -263,6 +370,17 @@ def main() -> None:
           f"(incl. {n_dup} upweight duplicates), valid {n_valid} examples "
           f"from {len(valid_ids)} episodes")
     print("episodes per game (train):", dict(sorted(per_game.items())))
+    if args.drop_fruitless_inspection or args.drop_dummy_predict or args.upweight_decisive_factor > 1:
+        considered = agg_stats.get("turns_considered", 0)
+        fruitless = agg_stats.get("fruitless_dropped", 0)
+        dummy = agg_stats.get("dummy_predict_dropped", 0)
+        kept = agg_stats.get("kept", 0)
+        decisive = agg_stats.get("decisive", 0)
+        decisive_dup = agg_stats.get("decisive_dup", 0)
+        frac = decisive / kept if kept else 0.0
+        print(f"reformat: {considered} candidate turns -> dropped {fruitless} fruitless-inspection, "
+              f"{dummy} dummy-predict -> {kept} kept ({kept + decisive_dup} after decisive upweight); "
+              f"decisive {decisive}/{kept} ({frac:.1%})")
     print(f"dataset: {out}  valid: {valid_path if n_valid else '(none)'}")
 
 

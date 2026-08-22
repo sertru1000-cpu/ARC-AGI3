@@ -77,6 +77,11 @@ TEMPERATURE = os.getenv("TEMPERATURE", "")
 # Phase A rehearsal game list (comma-separated ids).
 SMOKE_GAMES = os.getenv("SMOKE_GAMES", "sk48,tn36,m0r0,bp35,ls20,ft09,sp80,vc33")
 smoke_games = ", ".join(f'"{g.strip()}"' for g in SMOKE_GAMES.split(",") if g.strip())
+# Phase A concurrency (22.08): games used to run one after another (8 x 720s
+# = 96 min of quota per commit). vLLM batches requests and Phase B already
+# runs 30 threads against it, so the rehearsal plays N games at once too —
+# same pattern as scripts/run_stand.py. 1 = old sequential behaviour.
+PHASE_A_PARALLEL = int(os.getenv("PHASE_A_PARALLEL", "8"))
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_DIR = ROOT / "agent"
@@ -427,15 +432,21 @@ def build() -> dict:
 
     smoke_cell = code_cell(dedent(
         f"""\
-        # Phase A (commit) only: dress rehearsal on two offline games + dummy parquet.
+        # Phase A (commit) only: dress rehearsal on offline games + dummy parquet.
         import os, sys, time
+        from concurrent.futures import ThreadPoolExecutor
 
         if not os.getenv("KAGGLE_IS_COMPETITION_RERUN"):
+            PARALLEL = {PHASE_A_PARALLEL}
             os.environ.update({{"MY_AGENT_MAX_ACTIONS": "400", "MY_AGENT_MAX_TURNS": "60",
                                "MY_AGENT_GAME_SECONDS": "720",  # mirror Phase B budgets
                                "STALE_MINUTES": "60",  # keep scorecards alive for the whole rehearsal
                                "MY_AGENT_CROSS_MEMORY_PATH": "/kaggle/working/cross_memory.json",
                                "MY_AGENT_TRACE_DIR": "/kaggle/working/traces"}})
+            if PARALLEL > 1:
+                # Per-thread budgets against a shared vLLM, exactly like Phase B;
+                # the LLM timeout gets Phase B's queueing headroom as well.
+                os.environ.update({{"MY_AGENT_PARALLEL": "1", "LLM_TIMEOUT_S": "600"}})
             sys.path.insert(0, "{FRAMEWORK_DST}")
             import arc_agi
             from arc_agi import OperationMode
@@ -450,18 +461,31 @@ def build() -> dict:
             DEV = {{{smoke_games}}}
             games = [e.game_id for e in arc.available_environments
                      if e.game_id.split("-")[0] in DEV]
-            print("offline smoke on:", games)
-            for gid in games:
+            print(f"offline smoke on: {{games}} ({{PARALLEL}} at a time)")
+
+            def play(gid):
                 env = arc.make(gid)
                 agent = MyAgent(card_id="phaseA", game_id=gid, agent_name=f"smoke.{{gid}}",
                                 ROOT_URL="http://localhost", record=False, arc_env=env,
                                 tags=["phaseA-smoke"])
                 t0 = time.time()
-                agent.main()
+                try:
+                    agent.main()
+                except Exception as exc:  # one broken game must not sink the rehearsal
+                    print(f"{{gid}}: CRASHED {{exc!r}} ({{time.time()-t0:.0f}}s)")
+                    return gid, agent
                 f = agent.frames[-1]
                 print(f"{{gid}}: levels={{f.levels_completed}}/{{f.win_levels}} "
                       f"actions={{agent.action_counter}} state={{f.state}} "
-                      f"({{time.time()-t0:.0f}}s)")
+                      f"({{time.time()-t0:.0f}}s)", flush=True)
+                return gid, agent
+
+            t_all = time.time()
+            with ThreadPoolExecutor(max_workers=max(1, PARALLEL)) as pool:
+                played = list(pool.map(play, games))
+            print(f"rehearsal wall time: {{time.time()-t_all:.0f}}s")
+
+            for gid, agent in played:
                 # Self-computed RHAE from the agent's own frame trace — no
                 # dependence on the Arcade's internal scorecard plumbing.
                 try:

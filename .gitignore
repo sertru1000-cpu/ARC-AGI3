@@ -35,3 +35,6 @@ cross_memory.json
 
 # Student-variant notebook build (generated like notebooks/submission.ipynb)
 notebooks_student/submission.ipynb
+
+# Personal Claude Code permission overrides (not for the team)
+.claude/settings.local.json
