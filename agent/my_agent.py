@@ -364,13 +364,17 @@ class MyAgent(Agent):
             f"{self.game_id}: END reason={stop_reason} turns={turns}/{MAX_LLM_TURNS} "
             f"actions_left={self._budget_left()} "
             f"elapsed={elapsed:.0f}s/{my_seconds:.0f}s "
-            f"level={sandbox.current.level if sandbox.current else 0}/{win_levels}"
+            f"level={sandbox.current.level if sandbox.current else 0}/{win_levels} "
+            f"no_code_retries={getattr(self.policy, 'no_code_retries', 0)} "
+            f"repeats_blocked={getattr(self.policy, 'repeats_blocked', 0)}"
         )
         if self.policy is not None and self.policy.trace:
             self.policy.trace.write({"event": "game_end", "reason": stop_reason,
                                      "turns": turns, "elapsed_s": round(elapsed),
                                      "allowance_s": round(my_seconds),
                                      "actions_left": self._budget_left(),
+                                     "no_code_retries": getattr(self.policy, "no_code_retries", 0),
+                                     "repeats_blocked": getattr(self.policy, "repeats_blocked", 0),
                                      "level": sandbox.current.level if sandbox.current else 0})
 
         try:

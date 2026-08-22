@@ -16,7 +16,9 @@ from .llm import LLMBackend, Message
 from .perception import salient_click_targets
 from .prompts import (
     NUDGE_NO_ACTION,
+    NUDGE_EMPTY_REPLY,
     NUDGE_NO_CODE,
+    NUDGE_REPEATED_CODE,
     SYSTEM_PROMPT,
     THEORY_CHECKPOINT,
     TOOL_LOOP_ADDENDUM,
@@ -108,6 +110,41 @@ class LLMPolicy:
     # of hammering the same point (20.08 stand: a CLICK-only game got forced
     # 9x in a row, every single one at the grid center — zero new info).
     forced_click_idx: int = 0
+    # A3 (22.08): byte-identical code on consecutive turns means the context
+    # is a fixed point -- the board barely changed, so the same prompt yields
+    # the same argmax reply (student v6 repeated one block 38x on ft09). We
+    # break the fixed point by refusing the duplicate and SAYING so, which
+    # changes the context itself. Only fruitless repeats are blocked: a repeat
+    # whose previous run DID execute actions is legitimate (stepping RIGHT
+    # turn after turn is how several of these games are played).
+    last_code: str | None = None
+    last_code_turn: int = 0
+    last_code_output: str = ""
+    last_code_actions: int = 0
+    repeats_blocked: int = 0
+    # A2 (22.08): a reply with no code costs a whole turn AND a strike, and
+    # turns are the scarce resource (~40 per hidden game in Phase B). Ask once
+    # more inside the same turn before spending either.
+    retry_no_code: bool = field(
+        default_factory=lambda: os.getenv("MY_AGENT_NO_CODE_RETRY", "1") != "0")
+    no_code_retries: int = 0
+
+    def _no_code_nudge(self, reply: str) -> str:
+        """The right corrective for WHY this reply carried no code.
+
+        Three distinct causes need three different asks: a truly empty reply
+        means the thinking budget swallowed everything, a lone opening fence
+        means the output hit max_tokens mid-code (repeating "send a code
+        block" just reproduces the same overlong reply and spirals into five
+        strikes), and anything else is an ordinary format miss.
+        """
+        if not reply.strip():
+            return NUDGE_EMPTY_REPLY
+        if "```python" in reply and reply.count("```") % 2 == 1:
+            return ("Your reply was CUT OFF mid-code (output token limit) so no "
+                    "code ran. Resend a MUCH SHORTER python block: fewer comments, "
+                    "split the work over several turns if needed.")
+        return NUDGE_NO_CODE
 
     def _frame_seen(self) -> str | None:
         """ASCII of the board the model is looking at for THIS call. Stored
@@ -391,17 +428,27 @@ class LLMPolicy:
                 self.sandbox.memo.setdefault("world_model", {}).update(parsed)
 
         m = CODE_BLOCK_RE.search(reply)
+        if not m and self.retry_no_code:
+            # A2: a code-less reply wastes the whole turn AND earns a strike.
+            # One extra LLM call is far cheaper than a turn, so ask again in
+            # THIS turn with the corrective note already in context. Measured
+            # 22.08: 10% of base turns and 31% of the 35B's produced nothing,
+            # and 3 of the 35B's 12 games died on no_code strikes.
+            self.messages[-1] = {
+                "role": "assistant",
+                "content": "(reply lacked the required python block)",
+            }
+            self.messages.append({"role": "user", "content": self._no_code_nudge(reply)})
+            self.no_code_retries += 1
+            reply = self.backend.chat(self.messages, max_tokens=self.max_tokens,
+                                      temperature=self.temperature)
+            self.messages.append({"role": "assistant", "content": reply})
+            wm_match = wm_match or WORLD_MODEL_RE.search(reply)
+            m = CODE_BLOCK_RE.search(reply)
+
         if not m:
             self.no_code_strikes += 1
-            # A lone opening fence = the reply hit max_tokens mid-code. Asking
-            # for "a code block" again reproduces the same overlong reply and
-            # spirals into 5 strikes; ask for SHORTER code instead.
-            truncated = "```python" in reply and reply.count("```") % 2 == 1
-            nudge = (
-                "Your reply was CUT OFF mid-code (output token limit) so no "
-                "code ran. Resend a MUCH SHORTER python block: fewer comments, "
-                "split the work over several turns if needed."
-            ) if truncated else NUDGE_NO_CODE
+            nudge = self._no_code_nudge(reply)
             # Replace the degenerate reply in-context: leaving it verbatim
             # teaches the model to keep emitting code-less replies.
             self.messages[-1] = {
@@ -420,7 +467,33 @@ class LLMPolicy:
 
         self.no_code_strikes = 0
         code = m.group(1)
+
+        # A3: refuse a byte-identical repeat of code that achieved nothing.
+        # Executing it again would return the same output and leave the
+        # context a fixed point, which is exactly how the 38x and 118x loops
+        # formed. Refusing it and saying so changes the context instead.
+        if (self.last_code is not None and code.strip() == self.last_code.strip()
+                and self.last_code_actions == 0):
+            self.repeats_blocked += 1
+            self.stall_turns += 1
+            out = (self.last_code_output or "(no output)").strip()
+            if len(out) > 400:
+                out = out[:400] + " ...(truncated)"
+            self.messages.append({"role": "user", "content": NUDGE_REPEATED_CODE.format(
+                turn=self.last_code_turn, output=out)})
+            self._trim()
+            if self.trace:
+                self.trace.write({
+                    "turn": self.turns, "reply": reply, "code": code,
+                    "repeat_blocked": True, "repeat_of_turn": self.last_code_turn,
+                    "frame_seen": frame_seen,
+                })
+            return {"actions": 0, "win": False, "error": None}
+
         res = self.sandbox.run_code(code)
+        self.last_code, self.last_code_turn = code, self.turns
+        self.last_code_output = res.output or ""
+        self.last_code_actions = res.actions_executed
 
         if res.actions_executed == 0:
             self.stall_turns += 1

@@ -175,6 +175,22 @@ NUDGE_NO_CODE = (
     "code block that inspects the state or calls action([...])."
 )
 
+NUDGE_EMPTY_REPLY = (
+    "Your last reply arrived EMPTY -- no text at all reached the harness. "
+    "Answer NOW, briefly: the WORLD_MODEL lines, then one short python block. "
+    "Keep reasoning to a minimum; an unfinished thought is worth nothing here."
+)
+
+# A2/A3 (22.08): a turn that produces nothing still consumes the turn budget,
+# and turns are our scarcest resource (the base gets ~40 per hidden game).
+NUDGE_REPEATED_CODE = (
+    "[harness] That code is byte-identical to what you ran on turn {turn}, "
+    "which executed no actions. Its output was: {output} -- running it again "
+    "cannot tell you anything new, so it was NOT executed this turn. Write "
+    "DIFFERENT code: probe a different action, inspect a different part of "
+    "the board, or act on what you already know."
+)
+
 NUDGE_NO_ACTION = (
     "Reminder: several turns passed without any real action. Inspection is "
     "cheap but only action() advances the game. If unsure, probe one valid "
