@@ -178,3 +178,64 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_plan_checkpoint_skill() -> None:
+    """C1 as a triggered skill: the tool alone was ignored in v34 (9 verify
+    calls, 0 plan calls), so the harness now nags exactly when the theory is
+    good enough to plan with -- the mirror of THEORY_CHECKPOINT."""
+    from agent.harness.llm_policy import LLMPolicy, PLAN_NAG_EVERY
+
+    class _LLM:
+        name = "scripted"
+
+        def __init__(self, replies):
+            self.replies = list(replies)
+
+        def chat(self, messages, max_tokens=2048, temperature=0.6):
+            return self.replies.pop(0) if self.replies else "```python\npass\n```"
+
+    def policy_with(gate_open: bool) -> LLMPolicy:
+        sb = make_sandbox()
+
+        class _Res:
+            output = "ok"
+            error = None
+            actions_executed = 1
+            interrupted = None
+            win = False
+
+        sb.run_code = lambda code: _Res()          # type: ignore[method-assign]
+        sb.verify_gate_open = lambda: gate_open    # type: ignore[method-assign]
+        sb.last_verify = {"accuracy": 0.9, "tested": 6}
+        p = LLMPolicy(backend=_LLM(["```python\nprint(1)\n```"] * 6),
+                      sandbox=sb, game_id="synth", win_levels=1)
+        p.messages = [{"role": "system", "content": "S"}, {"role": "user", "content": "U"}]
+        return p
+
+    def last_user(p):
+        return [m["content"] for m in p.messages if m["role"] == "user"][-1]
+
+    p = policy_with(gate_open=True)
+    p.play_turn()
+    check("[skill: plan-with-theory]" in last_user(p), "the named skill fires once the theory is verified")
+    check("0.9" in last_user(p), "quotes the accuracy it was verified at")
+
+    p = policy_with(gate_open=False)
+    p.play_turn()
+    check("[skill: plan-with-theory]" not in last_user(p), "stays silent while the theory is unverified")
+
+    # A turn that actually plans must silence it for the next few turns.
+    p = policy_with(gate_open=True)
+    p.backend.replies = ["```python\nres = plan_with_theory(predict, goal)\n```",
+                         "```python\nprint(1)\n```"]
+    p.play_turn()
+    check(p.last_plan_turn == p.turns, "a plan_with_theory call is recorded")
+    p.play_turn()
+    check("[skill: plan-with-theory]" not in last_user(p),
+          f"silent for {PLAN_NAG_EVERY} turns after the model plans")
+
+    print("[OK] plan checkpoint fires only when planning is possible and overdue")
+
+
+test_plan_checkpoint_skill()

@@ -90,25 +90,10 @@ Your code runs in a sandbox with these variables:
   Store good theories in memo['theory_code'] (as source text) so they
   survive between turns.
 
-- plan_with_theory(predict, goal) — turn a verified theory into a plan.
-  Do NOT simulate sequences in your head: this searches for you, breadth
-  first, over the states YOUR predict() forecasts, and costs zero actions.
-      res = plan_with_theory(predict, lambda g: (g == 3).sum() == 0)
-      if res['plan']: action(res['plan'])
-  goal(grid) -> bool says what you are aiming at (a colour gone, a piece
-  on a target square, the HUD counter advanced). Returns {'plan': [...]
-  or None, 'depth', 'nodes_expanded', 'reason'}; the plan is a list of
-  specs action() takes verbatim.
-  Options: actions=[...] to choose the branching set (defaults to the
-  directional/interact actions; pass explicit CLICK dicts to search over
-  chosen targets), max_depth (6), max_nodes (1500), min_accuracy (0.6).
-  It re-verifies first and REFUSES to plan below min_accuracy — planning
-  on an unverified theory is guesswork. When it returns no plan, `reason`
-  says whether the budget ran out (loosen goal, raise max_depth) or the
-  goal is unreachable under your theory (the theory is missing the
-  mechanic that matters).
-  A found plan is worth far more than the same moves discovered by trial:
-  the score divides the human action count by yours and squares it.
+- plan_with_theory(predict, goal) — searches for an action sequence over the
+  states your verified predict() forecasts, at zero action cost. Full
+  instructions arrive as [skill: plan-with-theory] the moment your theory is
+  accurate enough to plan with; follow them when you see it.
   Verify EARLY: after ~6-10 recorded transitions, checking a first rough
   theory is cheaper than acting on a wrong one. ENFORCED: once 10+
   transitions are recorded, action() batches longer than 3 are rejected
@@ -213,6 +198,31 @@ NUDGE_NO_ACTION = (
     "Reminder: several turns passed without any real action. Inspection is "
     "cheap but only action() advances the game. If unsure, probe one valid "
     "action and study the diff."
+)
+
+# C1 as a triggered skill (22.08). The tool alone was ignored: v34 called
+# verify_theory 9 times in 20 turns and plan_with_theory zero times, because
+# the model's learned groove is inspect -> theorise -> verify -> poke, and the
+# planner is not in it. verify_theory gets used because STRUCTURE pushes it
+# (the action gate blocks batches, THEORY_CHECKPOINT nags every turn). This is
+# the mirror image: it fires exactly when the theory is finally good enough,
+# which is also why the full how-to no longer sits in the system prompt
+# burning context on every single turn.
+PLAN_CHECKPOINT = (
+    "[skill: plan-with-theory] Your theory is VERIFIED (accuracy {acc}). Stop probing "
+    "one action at a time and search with it instead. Write goal(grid) -> bool "
+    "for the state you want -- a colour gone, a piece on its target square, the "
+    "HUD counter advanced -- then: "
+    "res = plan_with_theory(predict, goal) ; if res['plan']: action(res['plan']). "
+    "The search explores the states your own predict() forecasts and costs ZERO "
+    "actions; the plan comes back as specs action() takes verbatim. Options: "
+    "actions=[...] to choose the branching set (defaults to the directional and "
+    "interact actions; pass explicit CLICK dicts to search over chosen targets), "
+    "max_depth (6), max_nodes (1500). If it finds nothing, res['reason'] tells "
+    "you whether to loosen goal(), raise max_depth, or fix a theory that is "
+    "missing the mechanic that matters. A searched plan scores far better than "
+    "the same moves found by trial and error: the score divides the human action "
+    "count by yours and squares it."
 )
 
 THEORY_CHECKPOINT = (

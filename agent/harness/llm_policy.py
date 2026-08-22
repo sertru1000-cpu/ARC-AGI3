@@ -19,6 +19,7 @@ from .prompts import (
     NUDGE_EMPTY_REPLY,
     NUDGE_NO_CODE,
     NUDGE_REPEATED_CODE,
+    PLAN_CHECKPOINT,
     SYSTEM_PROMPT,
     THEORY_CHECKPOINT,
     TOOL_LOOP_ADDENDUM,
@@ -51,6 +52,10 @@ RUN_CODE_TOOL = {
         },
     },
 }
+
+# How many turns without a plan_with_theory call before the plan checkpoint
+# fires again. 3 mirrors how often THEORY_CHECKPOINT nags on the other side.
+PLAN_NAG_EVERY = int(os.getenv("MY_AGENT_PLAN_NAG_EVERY", "3"))
 
 CODE_BLOCK_RE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.DOTALL)
 WORLD_MODEL_RE = re.compile(
@@ -122,6 +127,10 @@ class LLMPolicy:
     last_code_output: str = ""
     last_code_actions: int = 0
     repeats_blocked: int = 0
+    # C1-as-a-skill: the turn plan_with_theory was last called, so the
+    # checkpoint below can nag again once the model drifts back to poking.
+    last_plan_turn: int = -99
+    plan_checkpoints: int = 0
     # A2 (22.08): a reply with no code costs a whole turn AND a strike, and
     # turns are the scarce resource (~40 per hidden game in Phase B). Ask once
     # more inside the same turn before spending either.
@@ -490,6 +499,8 @@ class LLMPolicy:
                 })
             return {"actions": 0, "win": False, "error": None}
 
+        if "plan_with_theory(" in code:
+            self.last_plan_turn = self.turns
         res = self.sandbox.run_code(code)
         self.last_code, self.last_code_turn = code, self.turns
         self.last_code_output = res.output or ""
@@ -523,6 +534,15 @@ class LLMPolicy:
         if (not self.sandbox.verify_gate_open()
                 and len(self.sandbox.transition_log) >= 6):
             content += "\n\n" + THEORY_CHECKPOINT
+        # Mirror of the above for the OTHER half of the workflow: once the
+        # theory is verified, push the model to plan with it instead of
+        # falling back to one-probe-per-turn. Re-fires every few turns if it
+        # drifts back; the tool alone was ignored 9-verifies-to-0-plans (v34).
+        elif (self.sandbox.verify_gate_open()
+                and self.turns - self.last_plan_turn >= PLAN_NAG_EVERY):
+            lv = self.sandbox.last_verify or {}
+            content += "\n\n" + PLAN_CHECKPOINT.format(acc=lv.get("accuracy"))
+            self.plan_checkpoints += 1
         if not wm_match:
             content += (
                 "\n\nFormat reminder: begin every reply with the WORLD_MODEL "
