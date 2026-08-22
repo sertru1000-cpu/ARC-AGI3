@@ -82,6 +82,12 @@ smoke_games = ", ".join(f'"{g.strip()}"' for g in SMOKE_GAMES.split(",") if g.st
 # runs 30 threads against it, so the rehearsal plays N games at once too —
 # same pattern as scripts/run_stand.py. 1 = old sequential behaviour.
 PHASE_A_PARALLEL = int(os.getenv("PHASE_A_PARALLEL", "8"))
+# Wall-clock cap per rehearsal game. 720 mirrored the OLD sequential Phase B;
+# with N games sharing one GPU a turn takes far longer (25-way, no thinking:
+# 36 s/turn -> 9-49 turns in 720 s), so "did it reach 60 turns" needs more.
+PHASE_A_GAME_SECONDS = int(os.getenv("PHASE_A_GAME_SECONDS", "720"))
+# Scorecards idle-expire after this; must outlive the longest game.
+PHASE_A_STALE_MINUTES = max(60, PHASE_A_GAME_SECONDS // 60 + 30)
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_DIR = ROOT / "agent"
@@ -439,8 +445,8 @@ def build() -> dict:
         if not os.getenv("KAGGLE_IS_COMPETITION_RERUN"):
             PARALLEL = {PHASE_A_PARALLEL}
             os.environ.update({{"MY_AGENT_MAX_ACTIONS": "400", "MY_AGENT_MAX_TURNS": "60",
-                               "MY_AGENT_GAME_SECONDS": "720",  # mirror Phase B budgets
-                               "STALE_MINUTES": "60",  # keep scorecards alive for the whole rehearsal
+                               "MY_AGENT_GAME_SECONDS": "{PHASE_A_GAME_SECONDS}",
+                               "STALE_MINUTES": "{PHASE_A_STALE_MINUTES}",  # keep scorecards alive for the whole rehearsal
                                "MY_AGENT_CROSS_MEMORY_PATH": "/kaggle/working/cross_memory.json",
                                "MY_AGENT_TRACE_DIR": "/kaggle/working/traces"}})
             if PARALLEL > 1:
