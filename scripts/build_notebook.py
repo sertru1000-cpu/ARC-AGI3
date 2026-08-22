@@ -86,6 +86,12 @@ PHASE_A_PARALLEL = int(os.getenv("PHASE_A_PARALLEL", "8"))
 # with N games sharing one GPU a turn takes far longer (25-way, no thinking:
 # 36 s/turn -> 9-49 turns in 720 s), so "did it reach 60 turns" needs more.
 PHASE_A_GAME_SECONDS = int(os.getenv("PHASE_A_GAME_SECONDS", "720"))
+# Turn/action caps. 60/400 was the old rehearsal budget; Phase B itself runs
+# 250/800, so a "what would it score at submission budget" probe sets those.
+# Whichever cap binds first ends the game -- keep GAME_SECONDS above
+# MAX_TURNS x measured sec/turn or time silently truncates the run.
+PHASE_A_MAX_TURNS = int(os.getenv("PHASE_A_MAX_TURNS", "60"))
+PHASE_A_MAX_ACTIONS = int(os.getenv("PHASE_A_MAX_ACTIONS", "400"))
 # Scorecards idle-expire after this; must outlive the longest game.
 PHASE_A_STALE_MINUTES = max(60, PHASE_A_GAME_SECONDS // 60 + 30)
 
@@ -444,7 +450,8 @@ def build() -> dict:
 
         if not os.getenv("KAGGLE_IS_COMPETITION_RERUN"):
             PARALLEL = {PHASE_A_PARALLEL}
-            os.environ.update({{"MY_AGENT_MAX_ACTIONS": "400", "MY_AGENT_MAX_TURNS": "60",
+            os.environ.update({{"MY_AGENT_MAX_ACTIONS": "{PHASE_A_MAX_ACTIONS}",
+                               "MY_AGENT_MAX_TURNS": "{PHASE_A_MAX_TURNS}",
                                "MY_AGENT_GAME_SECONDS": "{PHASE_A_GAME_SECONDS}",
                                "STALE_MINUTES": "{PHASE_A_STALE_MINUTES}",  # keep scorecards alive for the whole rehearsal
                                "MY_AGENT_CROSS_MEMORY_PATH": "/kaggle/working/cross_memory.json",

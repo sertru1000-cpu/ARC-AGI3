@@ -174,7 +174,6 @@ def episode_examples(recs: list[dict], max_context_pairs: int = 8,
                      strip_hints: bool = False, max_tokens: int = 0,
                      vision: bool = False, drop_fruitless: bool = False,
                      drop_dummy_predict: bool = False,
-                     upweight_decisive_factor: int = 1,
                      stats: dict | None = None) -> list[dict]:
     if stats is None:
         stats = {}
@@ -241,10 +240,11 @@ def episode_examples(recs: list[dict], max_context_pairs: int = 8,
                     stats["kept"] = stats.get("kept", 0) + 1
                     if decisive:
                         stats["decisive"] = stats.get("decisive", 0) + 1
-                    reps = upweight_decisive_factor if decisive else 1
-                    for _ in range(reps):
-                        examples.append(dict(ex))
-                    stats["decisive_dup"] = stats.get("decisive_dup", 0) + (reps - 1)
+                    # Only TAG here; all duplication happens in main() so the
+                    # per-game and per-turn upweights can be combined with
+                    # max() instead of multiplying (4x compounding, 22.08).
+                    ex["decisive"] = decisive
+                    examples.append(ex)
         dialogue.append({"role": "assistant", "content": reply})
         fb = "[python output]\n" + (r.get("sandbox_output") or "(empty)")
         if r.get("sandbox_error"):
@@ -295,6 +295,11 @@ def main() -> None:
     p.add_argument("--upweight-decisive-factor", type=int, default=1,
                    help="duplicate 'decisive' examples this many times: turns that "
                         "batch >=2 actions, or are followed by a level-up within 2 turns")
+    p.add_argument("--max-multiplier", type=int, default=2,
+                   help="hard cap on how many copies of one turn may reach the file. "
+                        "--upweight and --upweight-decisive-factor are combined with "
+                        "max(), not multiplied, so a decisive turn in an upweighted "
+                        "game is not duplicated twice over")
     args = p.parse_args()
 
     import random
@@ -325,7 +330,6 @@ def main() -> None:
                                vision=args.vision,
                                drop_fruitless=args.drop_fruitless_inspection,
                                drop_dummy_predict=args.drop_dummy_predict,
-                               upweight_decisive_factor=args.upweight_decisive_factor,
                                stats=ep_stats)
         for k, v in ep_stats.items():
             agg_stats[k] = agg_stats.get(k, 0) + v
@@ -353,13 +357,19 @@ def main() -> None:
                     fva.write(json.dumps(ex, ensure_ascii=False) + "\n")
                     n_valid += 1
                 continue
-            reps = args.upweight_factor if game in upweight else 1
-            for _ in range(reps):
-                for ex in exs:
+            game_reps = args.upweight_factor if game in upweight else 1
+            for ex in exs:
+                # A turn can qualify for BOTH upweights (decisive turn inside a
+                # full-win game). Multiplying them gave 4x copies of 188 turns
+                # and made 47% of the file duplicates -- take the strongest
+                # reason instead, and never exceed --max-multiplier.
+                reps = max(game_reps,
+                           args.upweight_decisive_factor if ex.get("decisive") else 1)
+                reps = min(reps, args.max_multiplier)
+                for _ in range(reps):
                     ftr.write(json.dumps(ex, ensure_ascii=False) + "\n")
                     n_train += 1
-            if reps > 1:
-                n_dup += len(exs) * (reps - 1)
+                n_dup += reps - 1
 
     per_game: dict[str, int] = {}
     for game, eid, exs in episodes:
