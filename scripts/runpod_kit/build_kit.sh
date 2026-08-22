@@ -21,6 +21,14 @@ for f in ("train.py", "convert.py", "train_vl.py", "check_student.py"):
     ast.parse(pathlib.Path(sys.argv[1], f).read_text(encoding="utf-8"))
 print("syntax ok: train.py convert.py train_vl.py check_student.py")
 EOF
+# Shell scripts must ship with LF endings: bash reads a trailing CR as part
+# of the option name and dies on `set -euo pipefail` (a failed pod launch,
+# 22.08). Octal 015 is used below so this check can never itself carry a CR.
+for f in "$KIT"/*.sh; do
+  if [ "$(tr -cd '' < "$f" | wc -c)" != "0" ]; then
+    echo "FATAL: CRLF in $(basename "$f") -- convert it to LF before packing"; exit 1
+  fi
+done
 OUT="$ROOT/data/runpod-kit.tgz"
 tar --owner=0 --group=0 --exclude='__pycache__' -czf "$OUT" \
     -C "$ROOT/scripts" --transform 's,^runpod_kit,runpod-kit,' runpod_kit

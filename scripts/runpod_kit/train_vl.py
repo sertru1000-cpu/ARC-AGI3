@@ -35,17 +35,23 @@ from PIL import Image
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import Dataset
 from transformers import (AutoConfig, AutoModelForImageTextToText, AutoProcessor,
-                          Trainer, TrainingArguments)
+                          BitsAndBytesConfig, Trainer, TrainingArguments)
 
 BASE = os.getenv("BASE_MODEL", "Qwen/Qwen3.6-27B")  # dense VL: the only base our stack can both TRAIN and DEPLOY
 DATA = os.getenv("DATA_DIR", "./data")
 OUT = os.getenv("OUT_DIR", "/workspace/out_vl")
 MAX_STEPS = int(os.getenv("MAX_STEPS", "0"))
-MAX_LENGTH = int(os.getenv("MAX_LENGTH", "16384"))
+MAX_LENGTH = int(os.getenv("MAX_LENGTH", "12288"))
+# 16384 OOMs on a 96 GB card: the loss materialises a seq x vocab(152k)
+# logits tensor -- 13.5 GB in one allocation on top of 54 GB of weights
+# (RTX PRO 6000, 22.08). 12288 keeps the median example (11450 tokens)
+# untruncated and the tensor near 10 GB. Truncation drops OLDEST context,
+# never the target reply.
 LR = float(os.getenv("LR", "1e-4"))
 LORA_R = int(os.getenv("LORA_R", "32"))  # v6 used 16 and under-fit (replies 41% of target length)
 EXPERT_LORA = os.getenv("EXPERT_LORA", "1") == "1"
 IMAGE_SCALE = int(os.getenv("IMAGE_SCALE", "8"))
+QUANT_4BIT = os.getenv("QUANT_4BIT", "1") == "1"
 SMOKE = MAX_STEPS > 0
 if SMOKE:
     print(f"SMOKE MODE (VL): max_steps={MAX_STEPS}, max_length={MAX_LENGTH}, base={BASE}")
@@ -147,9 +153,27 @@ train_ds = VLDataset(f"{DATA}/train.jsonl")
 eval_ds = VLDataset(f"{DATA}/valid.jsonl")
 print(f"dataset: train={len(train_ds)} valid={len(eval_ds)} (with images)")
 
-model = AutoModelForImageTextToText.from_pretrained(
-    BASE, dtype=torch.bfloat16, device_map="auto", attn_implementation="sdpa",
-)
+# 4-bit weights (QLoRA). bf16 weights of the dense 27B are 54 GB, leaving under
+# 40 GB for activations and the vocab-sized logits -- OOM on a 96 GB card at
+# both 16k and 12k context (22.08). NF4 puts the weights near 16 GB. The vision
+# tower stays unquantised: it is frozen anyway and quantising it risks the image
+# path. MoE is excluded -- bitsandbytes cannot quantise fused expert tensors
+# (bitsandbytes#1849).
+if QUANT_4BIT and not IS_MOE:
+    print("loading in 4-bit (NF4); vision tower kept in bf16", flush=True)
+    model = AutoModelForImageTextToText.from_pretrained(
+        BASE,
+        quantization_config=BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.bfloat16,
+            llm_int8_skip_modules=["visual", "lm_head"]),
+        dtype=torch.bfloat16, device_map="auto", attn_implementation="sdpa",
+    )
+else:
+    print(f"loading in bf16 (QUANT_4BIT={QUANT_4BIT}, MoE={IS_MOE})", flush=True)
+    model = AutoModelForImageTextToText.from_pretrained(
+        BASE, dtype=torch.bfloat16, device_map="auto", attn_implementation="sdpa",
+    )
 model.config.use_cache = False
 
 # Freeze everything; LoRA decides what trains. Vision tower + merger stay frozen.
@@ -198,7 +222,7 @@ args = TrainingArguments(
     bf16=True,
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},
-    logging_steps=1 if SMOKE else 10,
+    logging_steps=1 if SMOKE else int(os.getenv("LOG_STEPS", "20")),
     eval_strategy="no" if SMOKE else "steps",  # smoke: no 112-example eval pass
     eval_steps=100,
     save_steps=MAX_STEPS if SMOKE else 100,

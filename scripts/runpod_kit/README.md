@@ -157,3 +157,8 @@ tail -f /workspace/smoke_console.log
 не Terminate, если полный прогон пойдёт на том же сетапе (веса останутся на volume).
 Полный прогон тем же китом: `bash run_all.sh` с `BASE_MODEL=Qwen/Qwen3.6-35B-A3B`
 (и подменённым `data/` — см. `build_kit.sh <train> <valid>`).
+
+# NOTE: shell scripts here MUST keep LF endings -- bash reads "set -euo pipefail"
+# as an invalid option and the whole script dies on line 8. Patching them with
+# Python on Windows silently rewrites LF to CRLF (write_text translates newlines);
+# use write_bytes, and build_kit.sh verifies before packing.
