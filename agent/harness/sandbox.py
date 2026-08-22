@@ -331,6 +331,38 @@ class Sandbox:
                            "with these actions, or the theory may miss the mechanic "
                            "that matters.")}
 
+    def _clocklike_cells(self, min_transitions: int = 6, share: float = 0.8):
+        """Cells that change in almost EVERY transition, whatever the action.
+
+        A HUD timer strip ticks once per action and has nothing to do with the
+        mechanics, but exact-grid matching let one such cell fail a whole
+        transition: vc33 in v35 scored accuracy 0.0 over 27 transitions while
+        every counterexample was one or two cells wide and every one of them
+        sat in row 0. The theory was right about the game and wrong about the
+        clock, and the harness called that a total failure -- which kept the
+        action gate shut, which forced one-probe-per-turn, which is the very
+        passivity we spent the day chasing.
+
+        Derived from the transition log rather than hardcoding "row 0": HUD
+        strips sit in different places per game, and some games have none.
+        Returns a boolean mask (True = ignore) or None when there is not
+        enough evidence yet.
+        """
+        log = self.transition_log
+        if len(log) < min_transitions:
+            return None
+        counts = None
+        for before, _name, _data, after in log:
+            if before.shape != after.shape:
+                return None
+            changed = before != after
+            counts = changed.astype(np.int32) if counts is None else counts + changed
+        mask = counts >= int(len(log) * share)
+        # A mask that swallows a large part of the board is not a clock, it is
+        # a game where everything moves; ignoring it would make any theory look
+        # perfect. Cap it well below the smallest plausible play area.
+        return mask if 0 < int(mask.sum()) <= max(64, mask.size // 100) else None
+
     def _verify_theory(self, predict, actions: Any = None) -> dict:
         """Test a transition theory against every recorded real transition.
 
@@ -341,6 +373,7 @@ class Sandbox:
         wanted = {a.upper() for a in actions} if actions else None
         tested = matched = errors = 0
         mismatches: list[dict] = []
+        ignore = self._clocklike_cells()
         for before, name, data, after in self.transition_log:
             if wanted and name not in wanted:
                 continue
@@ -348,13 +381,19 @@ class Sandbox:
             try:
                 pred = predict(before.copy(), name, dict(data) if data else None)
                 pred = np.asarray(pred, dtype=np.int8)
-                if pred.shape == after.shape and bool((pred == after).all()):
+                if pred.shape == after.shape:
+                    diff = pred != after
+                    if ignore is not None:
+                        diff = diff & ~ignore
+                else:
+                    diff = None
+                if diff is not None and not bool(diff.any()):
                     matched += 1
                 elif len(mismatches) < 3:
                     if pred.shape != after.shape:
                         mismatches.append({"action": name, "error": f"shape {pred.shape} != {after.shape}"})
                     else:
-                        wrong = np.argwhere(pred != after)
+                        wrong = np.argwhere(diff)
                         sample = [(int(r), int(c), int(pred[r, c]), int(after[r, c]))
                                   for r, c in wrong[:4]]
                         mismatches.append({
@@ -373,6 +412,15 @@ class Sandbox:
             "predict_errors": errors,
             "counterexamples": mismatches,
         }
+        if ignore is not None:
+            # Say so, or the model burns turns trying to model a clock that is
+            # already forgiven -- and reading a counterexample list that no
+            # longer mentions those cells would just be confusing.
+            rows = sorted({int(r) for r, _ in np.argwhere(ignore)})
+            out["ignored_ticking_cells"] = int(ignore.sum())
+            out["ignored_rows"] = rows[:4]
+            out["note"] = ("cells that change on every action (HUD/timer) are excluded "
+                           "from this score -- do not try to predict them")
         self.verify_attempts += 1
         # Keep the BEST attempt for the gate: a later worse theory must not
         # revoke an already-earned unlock.

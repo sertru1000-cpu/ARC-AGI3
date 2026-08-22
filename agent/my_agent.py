@@ -366,7 +366,8 @@ class MyAgent(Agent):
             f"elapsed={elapsed:.0f}s/{my_seconds:.0f}s "
             f"level={sandbox.current.level if sandbox.current else 0}/{win_levels} "
             f"no_code_retries={getattr(self.policy, 'no_code_retries', 0)} "
-            f"repeats_blocked={getattr(self.policy, 'repeats_blocked', 0)}"
+            f"repeats_blocked={getattr(self.policy, 'repeats_blocked', 0)} "
+            f"plan_checkpoints={getattr(self.policy, 'plan_checkpoints', 0)}"
         )
         if self.policy is not None and self.policy.trace:
             self.policy.trace.write({"event": "game_end", "reason": stop_reason,
@@ -375,6 +376,7 @@ class MyAgent(Agent):
                                      "actions_left": self._budget_left(),
                                      "no_code_retries": getattr(self.policy, "no_code_retries", 0),
                                      "repeats_blocked": getattr(self.policy, "repeats_blocked", 0),
+                                     "plan_checkpoints": getattr(self.policy, "plan_checkpoints", 0),
                                      "level": sandbox.current.level if sandbox.current else 0})
 
         try:
