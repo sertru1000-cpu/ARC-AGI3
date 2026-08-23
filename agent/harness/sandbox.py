@@ -246,7 +246,14 @@ class Sandbox:
         # dodge we scrubbed out of the training data. A genuinely accurate
         # theory still opens the gate, because last_verify is left to update.
         _attempts_before = self.verify_attempts
-        check = self._verify_theory(predict, actions)
+        # `actions` may hold dict specs (e.g. a CLICK target), which
+        # _verify_theory's {a.upper() for a in actions} filter cannot handle
+        # (dicts have no .upper()) -- reduce each to its bare action name.
+        verify_actions = (
+            [a if isinstance(a, str) else str(a.get("action", "")).upper() for a in actions]
+            if actions else None
+        )
+        check = self._verify_theory(predict, verify_actions)
         self.verify_attempts = _attempts_before
         acc = check.get("accuracy")
         if acc is None or acc < min_accuracy:
