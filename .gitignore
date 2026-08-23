@@ -14,6 +14,7 @@ logs.log
 
 # Generated artefacts
 notebooks/submission.ipynb
+atlas_src/dataset-metadata.json
 reference/
 
 # OS / editors
