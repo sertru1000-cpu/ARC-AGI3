@@ -80,7 +80,13 @@ ATLAS_FALLBACK_GAME_CAP_S = 7920.0     # applied only if the bundle carries none
 # Wall-clock guard for the submission rerun. Unlike the offline run, a rerun
 # gets soft_end_time=None, so the per-game cap is the ONLY thing standing
 # between us and Kaggle killing the notebook at 9 h with no result.
-ATLAS_SUBMISSION_BUDGET_S = 27000.0   # ~7.5 h of the 9 h, rest is setup+slack
+ATLAS_SUBMISSION_BUDGET_S = 28800.0   # 8 h of the 9 h hard cap -- 1h margin
+                                       # for setup (dataset mount, wheelhouse
+                                       # install if not cached, vLLM start +
+                                       # smoke test measured at ~5 min alone).
+                                       # Raised from 7.5h/1.19-score run
+                                       # 23.08 -- user's call, more play time
+                                       # over more safety margin.
 ATLAS_MIN_GAME_CAP_S = 1800.0
 
 print("atlas: solver config as it came from the bundle:")
@@ -106,11 +112,12 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 900.0  # 15 min/run; 25 games / 14 concurrency = 2
-                                  # waves, so ~30 min total. Stalls in the v1
-                                  # run showed up from the first few actions
-                                  # (action 1, 14, 16), so 15 min/game is
-                                  # plenty to see whether they still happen.
+ATLAS_CALIBRATION_CAP_S = 1800.0  # 30 min/run; 900s measured ~30 min total
+                                   # (22-23.08 calibrations), so this doubles
+                                   # to ~1h total at the same concurrency=14.
+                                   # Enough runway for verify_theory/
+                                   # plan_with_theory/memo to actually get
+                                   # exercised, not just the timeout check.
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S
     print(f"atlas: Phase A calibration cap -- max_runtime_s_per_game = {ATLAS_CALIBRATION_CAP_S:.0f}s")
@@ -122,7 +129,9 @@ def atlas_fit_game_cap(n_games: int) -> None:
     Called from the submission branch, where the game list only becomes known
     after Kaggle's gateway answers. Never raises the cap -- only lowers it.
     """
+    import json
     import math
+    from datetime import datetime, timezone
 
     concurrency = max(1, int(bm.solver.concurrency))
     waves = max(1, math.ceil(max(1, int(n_games)) / concurrency))
@@ -134,6 +143,33 @@ def atlas_fit_game_cap(n_games: int) -> None:
         f"per-game cap {current:.0f}s -> {fitted:.0f}s"
     )
     bm.solver.max_runtime_s_per_game = fitted
+
+    # atlas: minimal_diagnostics=True on a real submission means the usual
+    # summary.txt/transcripts never get written, and kernels output/logs may
+    # not even reach a live competition rerun at all (unconfirmed -- the CLI
+    # showed only the stale prior Phase A commit's files after 22.08's
+    # submission finished). Write this anyway, on the chance it survives:
+    # the one fact we actually want out of a real run is n_games itself.
+    try:
+        diagnostics_path = WORKING_DIR / "atlas_submission_diagnostics.json"
+        diagnostics_path.write_text(
+            json.dumps(
+                {
+                    "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "n_games": int(n_games),
+                    "concurrency": concurrency,
+                    "waves": waves,
+                    "submission_budget_s": ATLAS_SUBMISSION_BUDGET_S,
+                    "per_game_cap_before_s": current,
+                    "per_game_cap_after_s": fitted,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"atlas: wrote {diagnostics_path}")
+    except Exception as exc:
+        print(f"atlas: could not write submission diagnostics: {exc!r}")
 
 
 print("atlas: effective solver config:")

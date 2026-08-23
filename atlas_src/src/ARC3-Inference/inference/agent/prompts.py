@@ -93,6 +93,7 @@ PYTHON_ADDENDUM = (
     "- `verify_theory(predict, actions=None)` tests a `predict(grid, action) -> next_grid` function you write against every recorded real transition, for free (zero environment actions). `grid` and the returned prediction are plain lists of rows of int color values (same values as `current_frame.grid`/`last_transition.before_frame.grid`); `action` is the exact string seen on `transitions[i].action` (e.g. `'UP'`, `'MOUSE(row=4, col=7)'`). It returns `{'accuracy': ..., 'transitions_tested': ..., 'counterexamples': [...]}` -- refine `predict()` against the counterexamples rather than guessing blind.\n"
     "- Once `predict()` scores at least 0.6 accuracy, `plan_with_theory(predict, goal, actions=None, max_depth=6)` searches for an action sequence entirely in simulation -- also zero environment actions. `goal(grid) -> bool` describes what you are aiming at. It refuses to plan below 0.6 accuracy (planning on an unverified theory is guessing with extra steps) and returns `{'plan': [...] | None, ...}`; when a plan is found it is a list of specs `action(...)` accepts verbatim, so the usual next line is `action(res['plan'])`. `MOUSE` is excluded from the default candidate set (64x64 targets would blow up branching) -- pass explicit `{'action': 'MOUSE', 'row': r, 'col': c}` specs in `actions` to plan toward a click.\n"
     "- This is a genuine alternative to writing your own BFS by hand: once you trust a `predict()`, `plan_with_theory` searches over its predicted states for you and hands back a ready-to-execute plan.\n"
+    "- `memo` is a dict (starts empty) that survives across every `python` call for the rest of this game -- unlike everything else here, it is NOT reset each call. Use it to remember things you would otherwise have to re-derive: `memo['tried_targets'] = memo.get('tried_targets', []) + [(row, col)]`. Only JSON-safe values survive (dicts, lists, strings, numbers, booleans, null); anything else is silently stringified when read back next turn, so keep it small and simple.\n"
     "- Optimize for the shortest reliable sequence that advances the current goal as described by your world model. If confidence is low, program a discriminating probe and revise the world model from the result.\n"
     "- Once the important state variables and action effects are sufficiently understood, stop probing and search in the inferred state space.\n"
     "- Inspect current and history frames from Python instead of describing frames freehand.\n"
@@ -107,6 +108,32 @@ PYTHON_ADDENDUM = (
     "- `action(...)` accepts an ordered list of one or more actions. Once your code has selected a reliable sequence, it is often useful to batch it.\n"
     "- You can also call `action(...)` multiple times in one Python snippet, including inside loops. Each call updates the preloaded variables before execution continues.\n"
     "- If an action result reports `game_over`, `run_complete`, `level_completed`, or `done`, stop acting immediately and re-ground on the next turn.\n"
+)
+
+# atlas: injected by tool_agent.py into a specific turn's prompt (not static
+# prompt furniture) when the harness's own state says the model has drifted
+# back to poking instead of using verify_theory/plan_with_theory. Mentioning
+# a tool once in static instructions gets it used in ~0.2% of turns (measured
+# on our own harness's C0 mechanism); a harness-triggered reminder that
+# reappears until the model acts is the fix that actually worked there.
+ATLAS_THEORY_CHECKPOINT = (
+    "[atlas checkpoint] You have several recorded transitions but no predict() "
+    "verified at accuracy >= 0.6 yet. THIS turn: write predict(grid, action) "
+    "encoding your best theory of the dynamics and call verify_theory(predict); "
+    "if you already tried, refine predict() against the counterexamples it "
+    "returned and call verify_theory again. A partial theory "
+    "(verify_theory(predict, actions=['UP', 'DOWN'])) is fine. Do not skip "
+    "this turn -- probing without a theory wastes actions that are scored "
+    "quadratically."
+)
+
+ATLAS_PLAN_CHECKPOINT_TEMPLATE = (
+    "[atlas checkpoint] Your predict() verified at accuracy {acc:.2f}. Stop "
+    "probing one action at a time and search with it instead: write "
+    "goal(grid) -> bool for the state you want, then call "
+    "plan_with_theory(predict, goal); if res['plan'] is not None, run "
+    "action(res['plan']). The search costs zero real actions and a searched "
+    "plan scores far better than the same moves found by trial and error."
 )
 
 COMPACT_TOOL_SESSION_ADDENDUM = (

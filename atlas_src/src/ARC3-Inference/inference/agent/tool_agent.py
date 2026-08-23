@@ -15,6 +15,8 @@ import requests
 
 from inference.agent.action_names import to_engine_action, to_model_action
 from inference.agent.prompts import (
+    ATLAS_PLAN_CHECKPOINT_TEMPLATE,
+    ATLAS_THEORY_CHECKPOINT,
     COMPACT_TOOL_SESSION_ADDENDUM,
     GAME_OVERVIEW_ADDENDUM,
     PYTHON_ADDENDUM,
@@ -23,6 +25,131 @@ from inference.agent.prompts import (
     TOOL_CALL_FORMAT_GUIDANCE,
     VISUAL_GAME_ADDENDUM,
 )
+
+# atlas: how many python-tool calls may pass without a plan_with_theory( call
+# before the checkpoint nags again. Mirrors our own harness's PLAN_NAG_EVERY.
+_ATLAS_PLAN_NAG_EVERY = 3
+# Below this many python-tool calls, transitions probably haven't accumulated
+# enough for verify_theory to be worth nagging about yet.
+_ATLAS_THEORY_NAG_AFTER_CALLS = 4
+_ATLAS_ACCURACY_RE = re.compile(r"['\"]accuracy['\"]\s*:\s*([0-9]*\.?[0-9]+)")
+
+# atlas A4: action-effect summary, computed from history_entries (already
+# available to the host each turn) rather than asked of the model. Backlog
+# note (22.08, ported from public non-LLM ARC-AGI-3 notebooks -- stochasticgoose's
+# ActionEffectAttention, ForgeNet): the transition data needed to answer "what
+# does each action change" already exists in the frame history; nobody was
+# aggregating it, so the model re-derives the obvious by trial and error every
+# episode instead of getting a head start. Only look at the last N history
+# entries -- cheap, and biases toward the CURRENT level's mechanics rather
+# than diluting with a level that may play by different rules.
+_ATLAS_ACTION_EFFECT_HISTORY_WINDOW = 60
+_ATLAS_ACTION_EFFECT_MIN_TRANSITIONS = 4
+_ATLAS_ACTION_EFFECT_HUD_SHARE = 0.7
+_ATLAS_MOUSE_ACTION_RE = re.compile(r"^MOUSE\(row=(-?\d+), col=(-?\d+)\)$")
+
+
+def _atlas_action_effect_summary(history_entries: list[HistoryEntry]) -> list[str]:
+    window = history_entries[-(_ATLAS_ACTION_EFFECT_HISTORY_WINDOW + 1):]
+    per_action: dict[str, list[tuple[tuple[int, int] | None, list[tuple[int, int]]]]] = {}
+    changed_counts: dict[tuple[int, int], int] = {}
+    total = 0
+    board_cells = 0
+    for prev, cur in zip(window, window[1:]):
+        action = (cur.action or "").strip()
+        before, after = prev.frame, cur.frame
+        if not action or before is None or after is None:
+            continue
+        before_grid, after_grid = before.grid, after.grid
+        if len(before_grid) != len(after_grid):
+            continue
+        board_cells = max(board_cells, len(after_grid) * (len(after_grid[0]) if after_grid else 0))
+        changed: list[tuple[int, int]] = []
+        for r, (before_row, after_row) in enumerate(zip(before_grid, after_grid)):
+            if len(before_row) != len(after_row):
+                continue
+            for c, (b, a) in enumerate(zip(before_row, after_row)):
+                if b != a:
+                    changed.append((r, c))
+                    changed_counts[(r, c)] = changed_counts.get((r, c), 0) + 1
+        total += 1
+        mouse_match = _ATLAS_MOUSE_ACTION_RE.match(action)
+        if mouse_match:
+            base, click = "MOUSE", (int(mouse_match.group(1)), int(mouse_match.group(2)))
+        else:
+            base, click = action.split("(", 1)[0].strip().upper(), None
+        per_action.setdefault(base, []).append((click, changed))
+
+    if total < _ATLAS_ACTION_EFFECT_MIN_TRANSITIONS:
+        return []
+
+    # HUD cells first, so per-action stats below can exclude them -- without
+    # this, a HUD cell that changes on every transition contaminates every
+    # action's bbox (and MOUSE's relative-to-click bbox) with its own
+    # unrelated position, defeating the whole point of separating mechanic
+    # from noise.
+    hud_cells = {
+        cell for cell, count in changed_counts.items() if count / total >= _ATLAS_ACTION_EFFECT_HUD_SHARE
+    }
+    if not (hud_cells and 0 < len(hud_cells) <= max(64, board_cells // 100)):
+        hud_cells = set()
+
+    def _bbox(cells: list[tuple[int, int]]) -> str:
+        rows = [r for r, _ in cells]
+        cols = [c for _, c in cells]
+        return f"rows {min(rows)}..{max(rows)}, cols {min(cols)}..{max(cols)}"
+
+    lines = ["Action-effect summary (aggregated from recent history, costs nothing to read):"]
+    for base in sorted(per_action):
+        entries = [(click, [cell for cell in changed if cell not in hud_cells]) for click, changed in per_action[base]]
+        n = len(entries)
+        avg_changed = sum(len(changed) for _, changed in entries) / n
+        if base == "MOUSE":
+            relative_cells = [
+                (r - click[0], c - click[1])
+                for click, changed in entries
+                if click is not None
+                for r, c in changed
+            ]
+            if relative_cells:
+                lines.append(
+                    f"- MOUSE ({n} clicks): avg {avg_changed:.1f} cell(s) change, "
+                    f"relative to the click point mostly within {_bbox(relative_cells)}."
+                )
+            else:
+                lines.append(f"- MOUSE ({n} clicks): avg {avg_changed:.1f} cell(s) change; none recorded yet.")
+        else:
+            all_cells = [cell for _, changed in entries for cell in changed]
+            if all_cells:
+                lines.append(f"- {base} ({n}x): avg {avg_changed:.1f} cell(s) change, mostly within {_bbox(all_cells)}.")
+            else:
+                lines.append(f"- {base} ({n}x): no cell ever changed -- likely a no-op here.")
+
+    if hud_cells:
+        rows = sorted({r for r, _ in hud_cells})
+        lines.append(
+            f"- {len(hud_cells)} cell(s) change in >={_ATLAS_ACTION_EFFECT_HUD_SHARE:.0%} of ALL recent "
+            f"transitions regardless of action (rows {rows[:6]}{', ...' if len(rows) > 6 else ''}) "
+            "-- likely a HUD/timer element, not gameplay; excluded from the stats above."
+        )
+
+    # The mirror of the HUD line: cells that NEVER changed in ANY observed
+    # transition, regardless of action. Reported as the bounding box of
+    # everything that DID ever change (the "active region") rather than
+    # listing every static cell -- knowing where the mechanic can't possibly
+    # be narrows the search space the same way knowing where it lives does.
+    if changed_counts and board_cells:
+        active_rows = [r for r, _ in changed_counts]
+        active_cols = [c for _, c in changed_counts]
+        static_cells = board_cells - len(changed_counts)
+        if static_cells > 0:
+            lines.append(
+                f"- {static_cells}/{board_cells} cell(s) ({static_cells / board_cells:.0%}) never "
+                f"changed in any observed transition -- everything outside rows "
+                f"{min(active_rows)}..{max(active_rows)}, cols {min(active_cols)}..{max(active_cols)} "
+                "has been static; the mechanic can only live inside that region."
+            )
+    return lines
 
 from inference.agent.vision_context import (
     current_grid_image_enabled,
@@ -1106,6 +1233,17 @@ class ToolAgent:
         self._last_step_summary: dict[str, Any] | None = None
         self._last_action_result: dict[str, Any] | None = None
         self._summarized_knowledge = _empty_world_model()
+        # atlas: harness-triggered nags for verify_theory/plan_with_theory --
+        # see _run_python_tool and _build_user_prompt. Counts python-tool
+        # calls, not turns (a turn can invoke python zero or more times).
+        self._atlas_python_call_index = 0
+        self._atlas_last_plan_call_index = -99
+        self._atlas_last_verified_accuracy: float | None = None
+        # atlas: persistent scratch memory across turns, this episode only --
+        # mirrors our own harness's Sandbox.memo. See python_tool_sandbox.py
+        # for the round-trip (their sandbox is a fresh subprocess per turn,
+        # so this can't live there; it lives here and gets threaded through).
+        self._atlas_memo: dict[str, Any] = {}
         # Explicit ctor arg (e.g. from a pickled HarnessSolver deployed to
         # Kaggle) takes precedence over the local process environment, so the
         # flag state chosen at deploy time survives the trip into the kernel.
@@ -1147,6 +1285,10 @@ class ToolAgent:
             self._last_step_summary = None
             self._last_action_result = None
             self._summarized_knowledge = _empty_world_model()
+            self._atlas_python_call_index = 0
+            self._atlas_last_plan_call_index = -99
+            self._atlas_last_verified_accuracy = None
+            self._atlas_memo = {}
             self._noop_guard = NoopGuard() if self._hard_noop_guard_enabled else None
             self.animation_counters = {}
             self._reset_animation_hint_state()
@@ -1471,6 +1613,39 @@ class ToolAgent:
         )
         lines.extend(self._summarized_knowledge_lines())
         lines.append("end of world model. ")
+        # atlas: harness-triggered nags, not static prompt furniture -- a
+        # tool mentioned once in instructions and never enforced gets used in
+        # ~0.2% of turns (measured on our own harness's C0 mechanism before
+        # this same fix). Only one checkpoint fires per turn: verifying comes
+        # before planning, so a still-unverified theory takes priority.
+        if (
+            self._atlas_last_verified_accuracy is None
+            or self._atlas_last_verified_accuracy < 0.6
+        ) and self._atlas_python_call_index >= _ATLAS_THEORY_NAG_AFTER_CALLS:
+            lines.append(ATLAS_THEORY_CHECKPOINT)
+            print(f"atlas: theory checkpoint injected (action_num={action_num})", flush=True)
+        elif (
+            self._atlas_last_verified_accuracy is not None
+            and self._atlas_last_verified_accuracy >= 0.6
+            and self._atlas_python_call_index - self._atlas_last_plan_call_index
+            >= _ATLAS_PLAN_NAG_EVERY
+        ):
+            lines.append(
+                ATLAS_PLAN_CHECKPOINT_TEMPLATE.format(acc=self._atlas_last_verified_accuracy)
+            )
+            print(
+                f"atlas: plan checkpoint injected (action_num={action_num}, "
+                f"acc={self._atlas_last_verified_accuracy:.2f})",
+                flush=True,
+            )
+        action_effect_lines = _atlas_action_effect_summary(history_entries)
+        if action_effect_lines:
+            print(
+                f"atlas: action-effect summary injected (action_num={action_num}, "
+                f"{len(action_effect_lines)} line(s))",
+                flush=True,
+            )
+        lines.extend(action_effect_lines)
         if action_num == 0:
             lines.append(
                 "Ground yourself in `current_frame` before acting, but start with a compact structural summary rather than restating the full frame."
@@ -1728,6 +1903,10 @@ class ToolAgent:
                     if isinstance(persisted_action_result, dict)
                     else {}
                 ),
+                # atlas: only read by the sandbox bootstrap's initial setup,
+                # never by its per-action _refresh_state -- harmless to also
+                # include it in the post-action state payload below.
+                "memo": self._atlas_memo,
             }
 
         terminal_action_result: dict[str, Any] | None = None
@@ -1943,6 +2122,52 @@ class ToolAgent:
         payload: dict[str, Any] = {"tool": "python"}
         rendered_stdout = str(sandbox_result.get("stdout", "") or "")
         rendered_error = str(sandbox_result.get("error", "") or "")
+
+        # atlas: round-trip memo. Only overwrite on a dict reply -- a
+        # timed-out or crashed-before-reply subprocess sends no memo at all,
+        # and the previous turns' accumulated memo must survive that, not
+        # get silently wiped.
+        returned_memo = sandbox_result.get("memo")
+        if isinstance(returned_memo, dict):
+            if returned_memo != self._atlas_memo:
+                print(
+                    f"atlas: model wrote to memo (call #{self._atlas_python_call_index + 1}, "
+                    f"keys={sorted(returned_memo.keys())})",
+                    flush=True,
+                )
+            self._atlas_memo = returned_memo
+
+        # atlas: track verify_theory/plan_with_theory usage for the
+        # checkpoint nags in _build_user_prompt. Best-effort accuracy
+        # extraction: prefer a structured `result` dict (the model did
+        # `result = verify_theory(...)`), else regex the stdout repr (the
+        # model printed the dict, or a plan_with_theory result that also
+        # carries 'verified_accuracy'... 'accuracy' covers both keys' tails).
+        self._atlas_python_call_index += 1
+        if "plan_with_theory(" in code:
+            self._atlas_last_plan_call_index = self._atlas_python_call_index
+            print(f"atlas: model called plan_with_theory( (call #{self._atlas_python_call_index})", flush=True)
+        if "verify_theory(" in code:
+            sandbox_payload_result = sandbox_result.get("result")
+            accuracy = None
+            if isinstance(sandbox_payload_result, dict) and isinstance(
+                sandbox_payload_result.get("accuracy"), (int, float)
+            ):
+                accuracy = float(sandbox_payload_result["accuracy"])
+            else:
+                match = _ATLAS_ACCURACY_RE.search(rendered_stdout)
+                if match:
+                    try:
+                        accuracy = float(match.group(1))
+                    except ValueError:
+                        accuracy = None
+            print(
+                f"atlas: model called verify_theory( (call #{self._atlas_python_call_index}, "
+                f"parsed accuracy={accuracy})",
+                flush=True,
+            )
+            if accuracy is not None:
+                self._atlas_last_verified_accuracy = accuracy
         if rendered_error:
             payload["error"] = rendered_error
             if rendered_stdout:

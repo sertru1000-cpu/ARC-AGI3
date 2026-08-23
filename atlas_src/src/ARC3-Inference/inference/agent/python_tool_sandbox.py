@@ -332,6 +332,16 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             "result": None,
         }
         runtime_globals["__builtins__"]["__import__"] = _safe_import
+        # atlas: persistent scratch memory for THIS episode. Set once here,
+        # from what the host round-tripped from the end of the previous
+        # turn -- deliberately NOT touched by _refresh_state below, which
+        # re-fires after every action() call. current_frame/history SHOULD
+        # be replaced after each action (they describe the live game state);
+        # memo is the model's own variable, mutated in place by its code, and
+        # resetting it mid-turn on every action() call would silently erase
+        # whatever it just stored.
+        initial_memo = (initial.get("state") or {}).get("memo")
+        runtime_globals["memo"] = initial_memo if isinstance(initial_memo, dict) else {}
 
         def _refresh_state(state_payload):
             current_frame = _frame_from_payload(state_payload.get("current_frame"))
@@ -596,6 +606,7 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                     "stdout": stdout.getvalue(),
                     "result": _json_safe(runtime_globals.get("result")),
                     "action_results": _json_safe(action_results),
+                    "memo": _json_safe(runtime_globals.get("memo")),
                 }
             )
         except Exception as exc:
@@ -605,6 +616,11 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                     "error": _sanitize_exception(exc),
                     "stdout": stdout.getvalue(),
                     "action_results": _json_safe(action_results),
+                    # atlas: round-trip memo even on a raised exception -- a
+                    # crash midway through a turn's code should not erase
+                    # whatever the model had already stored via memo[...]=...
+                    # before the line that raised.
+                    "memo": _json_safe(runtime_globals.get("memo")),
                 }
             )
 
@@ -806,6 +822,7 @@ def run_sandboxed_python(
                     "result": message.get("result"),
                     "error": str(message.get("error", "") or ""),
                     "action_results": list(message.get("action_results") or host_action_results),
+                    "memo": message.get("memo"),
                 }
 
             _wait_for_process_exit(process)
