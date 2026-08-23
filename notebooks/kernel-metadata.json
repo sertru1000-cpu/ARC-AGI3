@@ -12,7 +12,7 @@
   "keywords": [],
   "dataset_sources": [
     "driessmit1/arc3-vllm-h100-wheelhouse-v3",
-    "driessmit1/vrfai-qwen3-6-27b-fp8-hf-snapshot"
+    "jakobbrggen/qwen3-8-27b-fp8-hf-snapshot"
   ],
   "kernel_sources": [],
   "competition_sources": [
