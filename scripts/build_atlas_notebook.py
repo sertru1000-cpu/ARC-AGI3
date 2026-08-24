@@ -112,12 +112,11 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 1800.0  # 30 min/run; 900s measured ~30 min total
-                                   # (22-23.08 calibrations), so this doubles
-                                   # to ~1h total at the same concurrency=14.
-                                   # Enough runway for verify_theory/
-                                   # plan_with_theory/memo to actually get
-                                   # exercised, not just the timeout check.
+ATLAS_CALIBRATION_CAP_S = 900.0    # 900s measured ~30 min total (22-23.08
+                                   # calibrations) at concurrency=14, 2 waves.
+                                   # Back down from 1800s (~1h) -- 24.08 user's
+                                   # call, back to a quick 30-min sanity check
+                                   # for version 8's ceiling-formula revert.
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S
     print(f"atlas: Phase A calibration cap -- max_runtime_s_per_game = {ATLAS_CALIBRATION_CAP_S:.0f}s")

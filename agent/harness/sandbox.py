@@ -132,6 +132,30 @@ def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
     return _builtins.__import__(name, globals, locals, fromlist, level)
 
 
+def _plan_extrapolation_note(plan):
+    """verify_theory only checks single, already-observed transitions.
+
+    A found plan's first step predicts from the REAL current board; every
+    step after that predicts from a state predict() imagined, never actually
+    visited. If the mechanic saturates, collides, or otherwise changes over
+    multiple moves, that composition can be wrong even when verify_theory
+    reported high accuracy (seen live on the Duck fork: a 7-step plan
+    verified at 1.0 accuracy still failed mid-plan because the pushed object
+    stopped moving partway through).
+    """
+    if len(plan) <= 1:
+        return None
+    return (
+        f"plan chains {len(plan)} predicted steps, but verify_theory only checked single "
+        "already-observed transitions -- step 1 predicts from the real board, steps 2+ "
+        "predict from states predict() imagined and that were never actually visited. If "
+        "the mechanic saturates, collides, or changes after a few moves, predict() may not "
+        "compose correctly that far ahead. Consider running the plan in smaller chunks and "
+        "checking board_changed/valid_actions between them instead of firing all "
+        f"{len(plan)} steps in one action(res['plan']) call."
+    )
+
+
 @dataclass
 class Sandbox:
     """Executes model code against a live environment adapter.
@@ -231,6 +255,12 @@ class Sandbox:
 
         Returns {'plan': [...] | None, ...}. The plan is a list of specs that
         action() accepts verbatim, so the usual next line is action(res['plan']).
+        When the plan has more than one step, res['note'] warns that
+        verify_theory only checked single already-observed transitions --
+        steps beyond the first predict from simulated states nothing ever
+        actually visited, so a multi-step plan can still fail mid-way if the
+        mechanic saturates or changes over several moves even at high
+        verified_accuracy.
 
         The theory is re-verified here first and planning is REFUSED below
         min_accuracy: planning over an unverified theory is just fantasy with
@@ -290,7 +320,7 @@ class Sandbox:
         try:
             if goal(start.copy()):
                 return {"plan": [], "verified_accuracy": acc, "nodes_expanded": 0,
-                        "reason": "already at the goal"}
+                        "reason": "already at the goal", "note": None}
         except Exception as exc:
             return {"plan": None, "reason": f"goal() raised on the current grid: {exc!r}"}
 
@@ -332,7 +362,8 @@ class Sandbox:
                         if goal(pred.copy()):
                             return {"plan": plan, "depth": len(plan),
                                     "verified_accuracy": acc, "nodes_expanded": nodes,
-                                    "predict_errors": pred_errors, "reason": None}
+                                    "predict_errors": pred_errors, "reason": None,
+                                    "note": _plan_extrapolation_note(plan)}
                     except Exception as exc:
                         return {"plan": None, "nodes_expanded": nodes,
                                 "reason": f"goal() raised: {exc!r}"}

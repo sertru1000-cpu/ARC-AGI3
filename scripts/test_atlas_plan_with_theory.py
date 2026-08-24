@@ -137,6 +137,26 @@ def main() -> None:
     if payload["plan"] != ["RIGHT", "RIGHT"]:
         _fail("plan_with_theory success", f"expected a 2-step RIGHT plan, got {payload!r}")
     _ok(f"plan_with_theory finds the 2-step plan {payload['plan']} (accuracy {payload['verified_accuracy']})")
+    if not payload.get("note") or "2 predicted steps" not in payload["note"]:
+        _fail("multi-step note", f"expected a note warning about chained predictions, got {payload!r}")
+    _ok("a >1-step plan carries a note warning verify_theory only checked single transitions")
+
+    # 5b. plan_with_theory: a 1-step plan carries no extrapolation note (nothing chained).
+    one_step_target = _shift_right(grids[-1])
+    code = (
+        "def predict(grid, action):\n"
+        "    return [row[-1:] + row[:-1] for row in grid]\n"
+        f"def goal(grid):\n"
+        f"    return grid == {one_step_target!r}\n"
+        "result = plan_with_theory(predict, goal, actions=['RIGHT'], max_depth=3)\n"
+    )
+    result = _run(code, history_grids=grids, valid_actions=["RIGHT", "UP"])
+    if result.get("error"):
+        _fail("plan_with_theory 1-step", result["error"])
+    payload = result["result"]
+    if payload["plan"] != ["RIGHT"] or payload.get("note") is not None:
+        _fail("plan_with_theory 1-step", f"expected a 1-step plan with note=None, got {payload!r}")
+    _ok("a 1-step plan carries no extrapolation note -- nothing was chained")
 
     # 6. plan_with_theory: MOUSE spec is fed to predict() in display-string form.
     # Needs at least one MOUSE transition in history, or verify_theory's

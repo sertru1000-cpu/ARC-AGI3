@@ -13,7 +13,7 @@ GAME_OVERVIEW_ADDENDUM = (
     "- You are solving a multi-level grid puzzle game. \n"
     "- You are called repeatedly over the course of a run. Treat each turn as one observe-plan-act cycle: re-understand the current state from the newest frame, update your working world model in Python, choose the next best action or short sequence against the goal as currently understood, execute it, and expect to re-evaluate on the next turn from the updated state.\n"
     "- Your job is to solve the entire game by clearing every level, not just the current screen.\n"
-    "- Levels often build on earlier mechanics, but layouts and interactions can still change between levels.\n"
+    "- On every LEVEL-UP, expect the level to be structurally harder, not just relocated. Entity and goal counts often multiply (one pair -> three pairs, one opponent -> three -- re-count them on the new board). Dependency chains also tend to get longer, so a wrong assumption made early can silently break something several steps later without an obvious signal at the point of the mistake. The rule you just verified with predict() may not be the rule that applies now -- re-verify it, and re-derive which region of the board is invariant/static, before trusting a plan or theory carried over from the previous level.\n"
     "- Optimize for as few in-game actions as possible while still being reliable.\n"
     "- In this environment, boards are presented as 64 x 64 color grids rendered with ARC color symbols.\n"
     f"- Color legend: {ARC_COLOR_LEGEND}.\n"
@@ -92,6 +92,7 @@ PYTHON_ADDENDUM = (
     "- IMPORTANT: Especially when the game is about making an agent navigate to a target, it is usually safer to write an explicit search algorithm such as BFS. More generally, when the objective is understood but the best action order is unclear, pathfinding, flood fill, BFS, DFS, beam search, shortest-path search, limited action-sequence search, or custom heuristics are all valid.\n"
     "- `verify_theory(predict, actions=None)` tests a `predict(grid, action) -> next_grid` function you write against every recorded real transition, for free (zero environment actions). `grid` and the returned prediction are plain lists of rows of int color values (same values as `current_frame.grid`/`last_transition.before_frame.grid`); `action` is the exact string seen on `transitions[i].action` (e.g. `'UP'`, `'MOUSE(row=4, col=7)'`). It returns `{'accuracy': ..., 'transitions_tested': ..., 'counterexamples': [...]}` -- refine `predict()` against the counterexamples rather than guessing blind.\n"
     "- Once `predict()` scores at least 0.6 accuracy, `plan_with_theory(predict, goal, actions=None, max_depth=6)` searches for an action sequence entirely in simulation -- also zero environment actions. `goal(grid) -> bool` describes what you are aiming at. It refuses to plan below 0.6 accuracy (planning on an unverified theory is guessing with extra steps) and returns `{'plan': [...] | None, ...}`; when a plan is found it is a list of specs `action(...)` accepts verbatim, so the usual next line is `action(res['plan'])`. `MOUSE` is excluded from the default candidate set (64x64 targets would blow up branching) -- pass explicit `{'action': 'MOUSE', 'row': r, 'col': c}` specs in `actions` to plan toward a click.\n"
+    "- CAUTION on multi-step plans: `verify_theory` only checks single, already-observed transitions -- `plan_with_theory` then CHAINS `predict()` across states it only ever imagined, never actually visited. If the mechanic saturates, collides, or otherwise changes after a few moves, that composition can be wrong even at high verified_accuracy (seen live: a 7-step plan verified at 1.0 accuracy still failed partway through because the pushed object stopped moving). When `res['note']` is non-null (plans with more than one step), consider running the plan in smaller chunks and checking `board_changed`/`valid_actions` between them instead of firing every step in one `action(res['plan'])` call.\n"
     "- This is a genuine alternative to writing your own BFS by hand: once you trust a `predict()`, `plan_with_theory` searches over its predicted states for you and hands back a ready-to-execute plan.\n"
     "- `memo` is a dict (starts empty) that survives across every `python` call for the rest of this game -- unlike everything else here, it is NOT reset each call. Use it to remember things you would otherwise have to re-derive: `memo['tried_targets'] = memo.get('tried_targets', []) + [(row, col)]`. Only JSON-safe values survive (dicts, lists, strings, numbers, booleans, null); anything else is silently stringified when read back next turn, so keep it small and simple.\n"
     "- Optimize for the shortest reliable sequence that advances the current goal as described by your world model. If confidence is low, program a discriminating probe and revise the world model from the result.\n"
@@ -133,7 +134,12 @@ ATLAS_PLAN_CHECKPOINT_TEMPLATE = (
     "goal(grid) -> bool for the state you want, then call "
     "plan_with_theory(predict, goal); if res['plan'] is not None, run "
     "action(res['plan']). The search costs zero real actions and a searched "
-    "plan scores far better than the same moves found by trial and error."
+    "plan scores far better than the same moves found by trial and error. "
+    "If res['note'] is set (plans with more than one step), verify_theory "
+    "only checked single already-observed transitions -- a long plan can "
+    "still fail mid-way on a mechanic that saturates or changes after a few "
+    "moves. Consider checking board_changed after the first few steps "
+    "instead of firing the whole plan blind."
 )
 
 COMPACT_TOOL_SESSION_ADDENDUM = (

@@ -152,8 +152,15 @@ Your code runs in a sandbox with these variables:
   the play area — find it); collect/remove all objects of one kind; fill or
   empty a region. Beware indirect control: actions may program a queue that
   executes later, or affect objects far from the cursor (flows, toggles).
-  On every LEVEL-UP, re-count the active entities and goals — levels often
-  multiply them (one pair -> three pairs, one opponent -> three).
+  On every LEVEL-UP, expect the level to be structurally harder, not just
+  relocated: re-count the active entities and goals — levels often multiply
+  them (one pair -> three pairs, one opponent -> three) — and expect
+  dependency chains to get longer, so a wrong assumption made early can
+  silently break something several steps later with no obvious signal at
+  the point of the mistake. The theory you just verified may not be the one
+  that applies now — re-verify it, and re-derive which region of the board
+  is invariant/static, before trusting a plan carried over from the
+  previous level.
   AGENTS: anything that moves WITHOUT your action is an agent (chaser, timer,
   flow) — identify its goal early; usually it hunts you or a resource, and
   stalling near it kills. Objects influence each other on CONTACT/overlap —

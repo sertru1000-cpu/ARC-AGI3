@@ -470,6 +470,29 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                 "counterexamples": mismatches,
             }
 
+        def _atlas_plan_extrapolation_note(plan):
+            '''verify_theory only checks single, already-observed transitions.
+
+            A found plan's first step predicts from the REAL current board;
+            every step after that predicts from a state predict() imagined,
+            never actually visited. If the mechanic saturates, collides, or
+            otherwise changes over multiple moves, that composition can be
+            wrong even when verify_theory reported high accuracy (seen live:
+            a 7-step plan verified at 1.0 accuracy still failed mid-plan
+            because the pushed object stopped moving partway through).
+            '''
+            if len(plan) <= 1:
+                return None
+            return (
+                f"plan chains {len(plan)} predicted steps, but verify_theory only checked "
+                "single already-observed transitions -- step 1 predicts from the real board, "
+                "steps 2+ predict from states predict() imagined and that were never actually "
+                "visited. If the mechanic saturates, collides, or changes after a few moves, "
+                "predict() may not compose correctly that far ahead. Consider running the plan "
+                "in smaller chunks and checking board_changed/valid_actions between them "
+                f"instead of firing all {len(plan)} steps in one action(res['plan']) call."
+            )
+
         def plan_with_theory(predict, goal, actions=None, max_depth=6, max_nodes=1500,
                               min_accuracy=0.6, time_budget=8.0):
             '''Search for an action sequence using the model's OWN verified theory.
@@ -481,7 +504,12 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             extra steps. Returns {'plan': [...] | None, ...}; the plan is a
             list of specs `action()` accepts verbatim (whatever you passed in
             `actions`, or the current `valid_actions` by default), so the
-            usual next line is `action(res['plan'])`.
+            usual next line is `action(res['plan'])`. When the plan has more
+            than one step, res['note'] warns that verify_theory only checked
+            single already-observed transitions -- steps beyond the first
+            predict from simulated states nothing ever actually visited, so a
+            multi-step plan can still fail mid-way if the mechanic saturates
+            or changes over several moves even at high verified_accuracy.
 
             MOUSE is excluded from the default candidate set (64x64 targets
             would blow up branching); pass explicit `{'action': 'MOUSE',
@@ -522,7 +550,7 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             try:
                 if goal([list(row) for row in start]):
                     return {"plan": [], "verified_accuracy": acc, "nodes_expanded": 0,
-                            "reason": "already at the goal"}
+                            "reason": "already at the goal", "note": None}
             except Exception as exc:
                 return {"plan": None, "reason": f"goal() raised on the current grid: {exc!r}"}
 
@@ -572,7 +600,7 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                                 return {
                                     "plan": plan, "depth": len(plan), "verified_accuracy": acc,
                                     "nodes_expanded": nodes, "predict_errors": pred_errors,
-                                    "reason": None,
+                                    "reason": None, "note": _atlas_plan_extrapolation_note(plan),
                                 }
                         except Exception as exc:
                             return {"plan": None, "nodes_expanded": nodes,

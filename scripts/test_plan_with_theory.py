@@ -84,6 +84,8 @@ def main() -> None:
     check(res["plan"] == ["RIGHT", "RIGHT", "RIGHT"], f"exact theory finds the shortest plan: {res['plan']}")
     check(res["verified_accuracy"] == 1.0, "the theory verified at 1.0 before planning")
     check(res["depth"] == 3, "breadth-first gives the minimal depth, not just any route")
+    check(res["note"] is not None and "3 predicted steps" in res["note"],
+          "a >1-step plan warns that verify_theory only checked single transitions")
 
     res = sb._plan_with_theory(move, at((1, 4)), actions=["UP", "DOWN", "LEFT", "RIGHT"])
     check(res["plan"] == ["UP", "UP", "UP"], f"plans in another direction too: {res['plan']}")
@@ -94,6 +96,12 @@ def main() -> None:
     # --- already at the goal -> empty plan, not None ----------------------
     res = sb._plan_with_theory(move, at((4, 4)), actions=["UP", "DOWN"])
     check(res["plan"] == [], "already at the goal returns an empty plan")
+    check(res["note"] is None, "an empty plan carries no extrapolation note")
+
+    # --- a 1-step plan carries no extrapolation note either ----------------
+    res = sb._plan_with_theory(move, at((4, 5)), actions=["UP", "DOWN", "LEFT", "RIGHT"])
+    check(res["plan"] == ["RIGHT"] and res["note"] is None,
+          f"a 1-step plan has nothing chained to warn about: {res!r}")
 
     # --- a WRONG theory is refused, not silently planned over -------------
     def wrong(grid, action, data=None):
