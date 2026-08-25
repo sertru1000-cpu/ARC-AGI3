@@ -1,0 +1,493 @@
+You are gemini-3.7-flash. On 21.08.2026 you played ARC-AGI-3 games through an
+older Python-tool harness we built (raw numpy grid + segmentation info, `action(...)`
+to act, arbitrary Python code per turn -- no dedicated theory/planning helper functions
+existed yet). Two of your runs are confirmed full wins: lp85 (8/8 levels, 546 actions,
+85 turns) and ft09 (6/6 levels, 618 actions, 76 turns). Below are real excerpts of your
+OWN code and reasoning from those two wins.
+
+=== Your own code, lp85, turns 80-83 (final level: probing 8 buttons, extracting a
+tile-position dict by hand via a `get_all_tiles(grid)` scan, then BFS over that
+abstracted state space to find the winning move sequence) ===
+WORLD_MODEL:
+controls: R1_RED, R1_GRN, R2_RED, R2_GRN, R3_RED, R3_GRN, BOT_RED, BOT_GRN.
+prior: LIKE-TO-LIKE / REPRODUCE-REFERENCE
+goal: move the 3 yellow tiles into the 3 target brackets at (51,24), (51,30), (51,36).
+plan: extract the exact permutation of each of the 4 actions, then BFS to find the sequence of moves that puts yellow at all 3 targets, then execute.
+recent_findings: 68 total slots mapped out cleanly. Yellow tiles currently at (9,18), (12,12), (21,12). Targets at (51,24), (51,30), (51,36).
+open_questions: none, permutation BFS will solve it.
+cross_level_notes: final puzzle!
+
+```python
+# Let's extract the exact permutation map for each forward action.
+# We will do each action, see the mapping: slot_from -> slot_to, then do the inverse action.
+
+btn_map = {
+    'R1': ('R1_RED', 'R1_GRN'),
+    'R2': ('R2_RED', 'R2_GRN'),
+    'R3': ('R3_RED', 'R3_GRN'),
+    'BOT': ('BOT_RED', 'BOT_GRN'),
+}
+
+perms = {}
+
+for name, (act_fwd, act_rev) in btn_map.items():
+    # Record state before
+    state_before = {s: current_frame.grid[s[0], s[1]] for s in slots}
+    
+    # Do forward action
+    action([btn_coords[act_fwd]])
+    state_after = {s: current_frame.grid[s[0], s[1]] for s in slots}
+    
+    # Do reverse action to restore
+    action([btn_coords[act_rev]])
+    
+    # Determine the permutation:
+    # A permutation is a dict: mapping pos -> pos
+    # To be precise, where did the tile at pos go?
+    # Let's check diffs:
+    changed = [s for s in slots if state_before[s] != state_after[s]]
+    print(f"Action {name} changed {len(changed)} slots.")
+
+# Let's verify by checking the track lines visually or by analyzing connected paths.
+# Notice: each action is a simple cyclic shift along a 1D track!
+# Let's identify the tracks directly from the image geometry:
+
+# 1. BOT: 4 vertical columns:
+# Col 0: c=24, r in [33, 36, 39, 42, 45, 48, 51]
+# Col 1: c=30, r in [12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51]
+# Col 2: c=36, r in [9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51]
+# Col 3: c=42, r in [12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51]
+# Wait, Col 0 merges with upper tracks at (33, 24).
+
+# Let's trace all tracks carefully!
+```
+
+WORLD_MODEL:
+controls: R1_RED (49,26), R1_GRN (53,26), R2_RED (49,31), R2_GRN (53,31), R3_RED (49,36), R3_GRN (53,36), BOT_RED (31,59), BOT_GRN (35,59).
+prior: LIKE-TO-LIKE / REPRODUCE-REFERENCE
+goal: move the 3 yellow tiles into the 3 brackets at (51,24), (51,30), (51,36).
+plan: extract exact permutation maps for all 8 actions, BFS over yellow tile states, execute the path to win.
+recent_findings: The 3 yellow tiles are at (9,18), (12,12), (21,12). Targets at (51,24), (51,30), (51,36).
+open_questions: exact full permutation maps.
+cross_level_notes: final level!
+
+```python
+from collections import deque
+
+def get_all_tiles(grid):
+    tiles = {}
+    for r in range(0, 60):
+        for c in range(0, 60):
+            col = int(grid[r, c])
+            if col not in [0, 4, 8, 14] and int(grid[r+1, c]) == col and int(grid[r, c+1]) == col and int(grid[r+1, c+1]) == col:
+                if (r == 0 or int(grid[r-1, c]) != col) and (c == 0 or int(grid[r, c-1]) != col):
+                    tiles[(r, c)] = col
+    return tiles
+
+# Looking at the image:
+# There are 4 vertical columns at bottom:
+# c = 24, c = 30, c = 36, c = 42
+# And 3 diagonal feeder branches coming from top-left into the columns!
+# Notice the 3 button pairs on the right align with the 3 junction rows:
+# R1 at y=26 (junction around row 24-27)
+# R2 at y=31 (junction around row 30-33)
+# R3 at y=36 (junction around row 36)
+# BOT at bottom shifts the 4 vertical columns (or the loop at the bottom).
+
+# Let's inspect the diffs of each action by running a series of probes:
+btn_coords = {
+    'R1_RED': {'action': 'CLICK', 'x': 49, 'y': 26},
+    'R1_GRN': {'action': 'CLICK', 'x': 53, 'y': 26},
+    'R2_RED': {'action': 'CLICK', 'x': 49, 'y': 31},
+    'R2_GRN': {'action': 'CLICK', 'x': 53, 'y': 31},
+    'R3_RED': {'action': 'CLICK', 'x': 49, 'y': 36},
+    'R3_GRN': {'action': 'CLICK', 'x': 53, 'y': 36},
+    'BOT_RED': {'action': 'CLICK', 'x': 31, 'y': 59},
+    'BOT_GRN': {'action': 'CLICK', 'x': 35, 'y': 59},
+}
+
+# Let's check how each action moves tiles by stepping and reading:
+# To find exact mapping from slot to slot:
+# Let's trace each loop/track!
+print("Starting tile positions with color 11 (yellow):")
+for pos, col in get_all_tiles(current_frame.grid).items():
+    if col == 11:
+        print("Yellow:", pos)
+```
+
+=== Your own code, ft09, turn 55 (reducing the board to a coarse tile grid and comparing
+against a target pattern read from four "pinwheel" reference icons) ===
+WORLD_MODEL:
+controls: CLICK toggles tiles between the two indicator colors (8 and 12).
+prior: REPRODUCE-REFERENCE: Pinwheel sub-blocks map to the surrounding tiles.
+goal: Print the 4 pinwheels, identify the exact tile grid coordinates, set all tiles correctly.
+plan: Reset to clean board, compute tile grid coordinates from segmentation/objects, match pinwheel sub-blocks, click differing tiles.
+recent_findings: Pinwheel center boxes are at (r=14,c=30), (r=30,c=22), (r=30,c=38), (r=46,c=30).
+open_questions: none.
+cross_level_notes: Center icon coordinates give exact row/col anchors for surrounding tiles.
+
+```python
+# Reset to get a clean board
+action(['RESET'])
+
+ind_top = int(current_frame.grid[2, 62])
+ind_bot = int(current_frame.grid[6, 62])
+print(f"Indicator colors: top={ind_top}, bot={ind_bot}")
+
+# Find all 6x6 tiles on the board
+# Let's inspect unique connected objects of size ~36 (6x6)
+import numpy as np
+
+# Find tile positions by looking for 6x6 colored blocks (color 8 or 12)
+tiles = {}
+for r in range(2, 60):
+    for c in range(2, 60):
+        # Check if (r..r+6, c..c+6) is a uniform 6x6 block of color 8 or 12
+        sub = current_frame.grid[r:r+6, c:c+6]
+        col = sub[0, 0]
+        if col in (ind_top, ind_bot) and np.all(sub == col):
+            # check border around it is background (1)
+            # just record the tile center (c+3, r+3)
+            # Avoid overlapping detections
+            if not any(abs(r - tr) < 4 and abs(c - tc) < 4 for tr, tc in tiles.keys()):
+                tiles[(r, c)] = (c + 3, r + 3)
+
+print(f"Found {len(tiles)} outer tiles at top-left coords:", sorted(tiles.keys()))
+
+# Centers:
+# (12, 28), (28, 20), (28, 36), (44, 28)
+# For each center (cr, cc):
+# The 3x3 panel has rows cr-8, cr, cr+8 and cols cc-8, cc, cc+8.
+color_map = {0: ind_bot, 2: ind_top}
+
+centers = [(12, 28), (28, 20), (28, 36), (44, 28)]
+target_tiles = {}
+
+for cr, cc in centers:
+    sub = current_frame.grid[cr:cr+6, cc:cc+6]
+    for br in range(3):
+        for bc in range(3):
+            if br == 1 and bc == 1:
+                continue
+            val = int(sub[br*2, bc*2])
+            tgt = color_map[val]
+            tr = cr + (br - 1) * 8
+            tc = cc + (bc - 1) * 8
+            target_tiles[(tc + 3, tr + 3)] = tgt
+
+print(f"Total target tiles defined: {len(target_tiles)}")
+
+clicks = []
+for (x, y), tgt in target_tiles.items():
+    cur = current_frame.grid[y, x]
+    if cur != tgt:
+        clicks.append({'action': 'CLICK', 'x': x, 'y': y})
+
+print(f"Clicks needed ({len(clicks)}):", clicks)
+res = action(clicks)
+print("Action result:", res)
+```
+
+In BOTH wins, the pattern is the same: you abstracted the raw pixel board down to a
+small discrete state (tile/button positions, a coarse grid) BEFORE reasoning or
+searching, and you did this by hand with ad hoc code, spending real game actions to
+probe each mechanic empirically (no way to test a theory for free).
+
+We have since forked a different, stronger open-source harness for the actual
+competition (Kaggle ARC Prize 2026, ARC-AGI-3 track) that gives the model three
+Python-callable tools: `verify_theory`, `plan_with_theory`, `execute_plan`. Their
+current implementation (just extended today, 24.08) is pasted verbatim below. The key
+design point: `verify_theory(predict)` replays every ALREADY-OBSERVED real transition
+in history against a model-written `predict(grid, action) -> next_grid` function, for
+FREE (zero real actions) -- but by default it requires predict() to reproduce the
+entire next grid EXACTLY, cell for cell (pixel-perfect), not a percentage. Only once a
+predict() clears 0.6 accuracy does `plan_with_theory` allow a BFS-style search over
+predicted future grids, and `execute_plan` lets a found plan be run one real step at a
+time with automatic abort on divergence.
+
+```python
+        def verify_theory(predict, actions=None, extract=None):
+            '''Test predict(state, action) -> next_state against every
+            recorded real transition (zero real actions -- replays what
+            happened). By default state=the full grid, compared cell-by-cell
+            (pixel-perfect). Pass extract(grid) -> a small JSON-safe state
+            (e.g. object/tile positions) to verify a theory over THAT
+            abstraction instead -- predict/compare then work on extract()'s
+            output, not the raw grid. Reducing to a small discrete state
+            first and reasoning over that (rather than requiring
+            pixel-perfect whole-board reproduction) is how the strongest
+            play we've seen actually works. Optional `actions` restricts to
+            those action names. Returns accuracy + up to 3 counterexamples.'''
+            wanted = {str(a).strip().upper() for a in actions} if actions else None
+            tested = matched = errors = 0
+            mismatches = []
+            for t in runtime_globals.get("transitions") or []:
+                base_name = t.action.split("(", 1)[0].strip().upper()
+                if wanted and base_name not in wanted:
+                    continue
+                before = t.before_frame
+                after = t.after_frame
+                if before is None or after is None:
+                    continue
+                tested += 1
+                try:
+                    before_in = extract([list(row) for row in before.grid]) if extract else [list(row) for row in before.grid]
+                    pred = predict(before_in, t.action)
+                    actual = extract([list(row) for row in after.grid]) if extract else after.grid
+                except Exception as exc:
+                    errors += 1
+                    if len(mismatches) < 3:
+                        mismatches.append({"action": t.action, "error": repr(exc)[:200]})
+                    continue
+                if extract is not None:
+                    if pred == actual:
+                        matched += 1
+                    elif len(mismatches) < 3:
+                        mismatches.append({
+                            "action": t.action,
+                            "predicted_state": _json_safe(pred),
+                            "actual_state": _json_safe(actual),
+                        })
+                    continue
+                if (
+                    not isinstance(pred, list)
+                    or len(pred) != len(actual)
+                    or any(len(pr) != len(ar) for pr, ar in zip(pred, actual))
+                ):
+                    errors += 1
+                    if len(mismatches) < 3:
+                        mismatches.append({"action": t.action, "error": "predict() returned the wrong shape"})
+                    continue
+                wrong = [
+                    (r, c)
+                    for r in range(len(actual))
+                    for c in range(len(actual[r]))
+                    if pred[r][c] != actual[r][c]
+                ]
+                if not wrong:
+                    matched += 1
+                elif len(mismatches) < 3:
+                    sample = [(r, c, pred[r][c], actual[r][c]) for r, c in wrong[:4]]
+                    mismatches.append({
+                        "action": t.action,
+                        "wrong_cells": len(wrong),
+                        "sample (row,col,predicted,actual)": sample,
+                    })
+            return {
+                "transitions_tested": tested,
+                "accuracy": round(matched / tested, 3) if tested else None,
+                "predict_errors": errors,
+                "counterexamples": mismatches,
+            }
+
+        def _atlas_plan_extrapolation_note(plan):
+            '''verify_theory only checks single transitions; a chained plan
+            can still be wrong. See execute_plan() for real mitigation.'''
+            if len(plan) <= 1:
+                return None
+            return (
+                f"plan chains {len(plan)} predicted steps beyond what verify_theory actually "
+                "checked (single, already-observed transitions only). Use "
+                "execute_plan(res['plan'], predict) instead of action(res['plan']) -- it stops "
+                "itself the moment a real step diverges from predict()'s forecast."
+            )
+
+        def plan_with_theory(predict, goal, actions=None, extract=None, max_depth=6, max_nodes=1500,
+                              min_accuracy=0.6, time_budget=8.0):
+            '''Search an action sequence via predict() -- zero real actions.
+            Re-verifies the theory first; REFUSES below min_accuracy. Returns
+            {'plan': [...] | None, ...}, a list of action() specs. For a
+            >1-step plan, prefer execute_plan(res['plan'], predict, extract=extract).
+            MOUSE excluded by default; pass {'action':'MOUSE','row':r,'col':c}
+            specs in `actions` to plan toward a click. Pass extract(grid) ->
+            a small JSON-safe state (e.g. object/tile positions) to search
+            over THAT abstraction instead of the raw grid -- predict/goal
+            then take/return extract()'s output, not full grids (same
+            extract= as verify_theory).'''
+            # `actions` may hold dict specs (e.g. a MOUSE target), which
+            # verify_theory's filter cannot match directly -- reduce each to
+            # its base action name first ("MOUSE(row=4, col=7)" -> "MOUSE").
+            verify_actions = (
+                [_action_display(a).split("(", 1)[0] for a in actions] if actions else None
+            )
+            check = verify_theory(predict, verify_actions, extract=extract)
+            acc = check.get("accuracy")
+            if acc is None or acc < min_accuracy:
+                return {
+                    "plan": None,
+                    "verified_accuracy": acc,
+                    "reason": (
+                        f"theory not good enough to plan with: accuracy {acc} < {min_accuracy} "
+                        f"on {check.get('transitions_tested')} transitions. Refine predict() "
+                        "against the counterexamples from verify_theory first."
+                    ),
+                    "counterexamples": check.get("counterexamples"),
+                }
+
+            current = runtime_globals.get("current_frame")
+            if current is None:
+                return {"plan": None, "reason": "no current frame"}
+
+            specs = list(actions) if actions else [
+                a for a in (runtime_globals.get("valid_actions") or [])
+                if str(a).strip().upper() not in ("MOUSE", "RESET")
+            ]
+            if not specs:
+                return {"plan": None, "reason": "no candidate actions to search over"}
+
+            grid_start = [list(row) for row in current.grid]
+            try:
+                start = extract([list(row) for row in grid_start]) if extract else grid_start
+            except Exception as exc:
+                return {"plan": None, "reason": f"extract() raised on the current grid: {exc!r}"}
+            try:
+                goal_start = [list(row) for row in start] if extract is None else start
+                if goal(goal_start):
+                    return {"plan": [], "verified_accuracy": acc, "nodes_expanded": 0,
+                            "reason": "already at the goal", "note": None}
+            except Exception as exc:
+                return {"plan": None, "reason": f"goal() raised on the current state: {exc!r}"}
+
+            def _key(state):
+                if extract is None:
+                    return tuple(tuple(row) for row in state)
+                return json.dumps(state, sort_keys=True, default=str)
+
+            deadline = time.monotonic() + time_budget
+            seen = {_key(start)}
+            frontier = [(start, [])]
+            nodes = pred_errors = 0
+            while frontier:
+                nxt = []
+                for state, path in frontier:
+                    if len(path) >= max_depth:
+                        continue
+                    for spec in specs:
+                        if nodes >= max_nodes or time.monotonic() > deadline:
+                            return {
+                                "plan": None, "verified_accuracy": acc,
+                                "nodes_expanded": nodes, "predict_errors": pred_errors,
+                                "reason": (
+                                    f"budget spent ({nodes} states, depth <= {len(path) + 1}) "
+                                    "without reaching the goal. Try a looser goal(), a larger "
+                                    "max_depth, or a smaller action set."
+                                ),
+                            }
+                        nodes += 1
+                        state_in = [list(row) for row in state] if extract is None else state
+                        try:
+                            pred = predict(state_in, _action_display(spec))
+                        except Exception:
+                            pred_errors += 1
+                            continue
+                        if extract is None and (
+                            not isinstance(pred, list)
+                            or len(pred) != len(grid_start)
+                            or any(len(row) != len(grid_start[0]) for row in pred)
+                        ):
+                            pred_errors += 1
+                            continue
+                        key = _key(pred)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        plan = path + [spec]
+                        pred_for_goal = [list(row) for row in pred] if extract is None else pred
+                        try:
+                            if goal(pred_for_goal):
+                                return {
+                                    "plan": plan, "depth": len(plan), "verified_accuracy": acc,
+                                    "nodes_expanded": nodes, "predict_errors": pred_errors,
+                                    "reason": None, "note": _atlas_plan_extrapolation_note(plan),
+                                }
+                        except Exception as exc:
+                            return {"plan": None, "nodes_expanded": nodes,
+                                    "reason": f"goal() raised: {exc!r}"}
+                        nxt.append((pred, plan))
+                frontier = nxt
+            return {
+                "plan": None, "verified_accuracy": acc, "nodes_expanded": nodes,
+                "predict_errors": pred_errors,
+                "reason": (
+                    f"exhausted {nodes} reachable states within depth {max_depth} without "
+                    "reaching the goal -- the goal may be unreachable with these actions, or "
+                    "the theory may miss the mechanic that matters."
+                ),
+            }
+
+        def execute_plan(plan, predict, stop_on_mismatch=True, extract=None):
+            '''Run a plan_with_theory() plan one real step at a time; stop when
+            a real outcome diverges from predict()'s forecast for it
+            (stop_reason='predicted_state_mismatch'), a step fails, or a
+            terminal result fires -- instead of firing every step blind.
+            Pass the SAME extract= used to build the plan so mismatch
+            detection compares in that abstraction, not raw grids.'''
+            def _r(n, early, reason, res):
+                return {"steps_executed": n, "stopped_early": early, "stop_reason": reason, "last_action_result": res}
+            n = 0
+            res = None
+            for spec in plan:
+                fr = runtime_globals.get("current_frame")
+                pre_grid = [list(r) for r in fr.grid] if fr is not None else None
+                try:
+                    pre = extract(pre_grid) if (extract and pre_grid is not None) else pre_grid
+                    pred = predict(pre, _action_display(spec)) if pre is not None else None
+                except Exception:
+                    pred = None
+                res = action([spec])
+                n += 1
+                if res.get("level_completed") or res.get("done") or res.get("game_over") or res.get("run_complete"):
+                    return _r(n, False, None, res)
+                if not res.get("executed", True):
+                    return _r(n, True, "action_not_executed", res)
+                if stop_on_mismatch and pred is not None:
+                    nf = runtime_globals.get("current_frame")
+                    post_grid = [list(r) for r in nf.grid] if nf is not None else None
+                    try:
+                        post = extract(post_grid) if (extract and post_grid is not None) else post_grid
+                    except Exception:
+                        post = None
+                    if extract:
+                        bad = post is None or pred != post
+                    else:
+                        bad = post is None or not isinstance(pred, list) or len(pred) != len(post) \
+                            or any(len(a) != len(b) for a, b in zip(pred, post)) or pred != post
+                    if bad:
+                        return _r(n, True, "predicted_state_mismatch", res)
+            return _r(n, False, None, res)
+
+```
+
+We found (via real Kaggle submission transcripts, 24.08) that this pixel-perfect
+default caused a severe failure mode on at least 3 of 25 games: a board with
+significant decorative/rendering motion unrelated to the actual mechanic (moving
+diamonds + line rendering) made whole-grid pixel-perfect prediction essentially
+impossible, and a harness-injected reminder telling the model "you must verify_theory
+before acting further" was read as a hard gate -- one game (r11l) spent its ENTIRE
+4.4-hour budget with only 1 real action taken, endlessly trying and failing to hit 0.6
+pixel-perfect accuracy, never realizing it could just act without a perfect theory.
+
+Today (24.08) we added an optional `extract(grid) -> state` parameter to all three
+functions -- exactly matching what you did by hand in lp85/ft09: when passed,
+`predict`/`goal`/mismatch-comparison all operate on `extract()`'s output (any small
+JSON-safe state you define) instead of the raw grid. It's already implemented, tested,
+and pasted above (see the `if extract is not None` branches).
+
+Please critique this design from your OWN experience actually solving lp85/ft09 by
+hand, without pulling punches:
+
+1. Looking at how YOU actually built and used an abstraction (get_all_tiles, the
+   pinwheel tile-grid) in those two wins -- what does our `extract=` design get wrong,
+   or miss, compared to how you naturally worked? Be concrete: cite specific lines of
+   our code or specific moments in your own transcript excerpts above.
+2. In your own words, what's the single biggest weakness in `verify_theory` /
+   `plan_with_theory` / `execute_plan` as they stand now (with or without `extract`)
+   that would have made lp85/ft09 harder, or that would still risk a paralysis
+   incident like r11l's?
+3. Concrete, prioritized recommendations -- ranked by how much they would have helped
+   YOU, specifically, on lp85/ft09 or on a game like r11l. Prefer small, targeted
+   changes to the existing three functions over a full rewrite.
+
+Structure your answer as: (1) design gaps found in extract=, (2) single biggest
+remaining weakness, (3) ranked recommendations. Be direct and specific; skip generic
+praise.

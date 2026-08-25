@@ -108,6 +108,32 @@ def main() -> None:
         _fail("invariant region reported", text)
     _ok("reports the static/invariant region as the bbox of everything that ever changed")
 
+    # Degenerate case (Г), found live on re86 24.08: different actions each
+    # move a spatially-tight but DIFFERENT region -- UP touches the top-left
+    # corner, DOWN touches the bottom-right corner -- so the union bbox
+    # sprawls across nearly the whole board even though each individual
+    # action's own effect stays tight. The hint must go silent here instead
+    # of reporting a bbox that covers (almost) everything.
+    big = [[0] * 8 for _ in range(8)]
+    big_entries = [HistoryEntry(action="", frame=_frame(big, step=0))]
+    big_step = 1
+
+    def _push_big(action: str, mutate=lambda g: None) -> None:
+        nonlocal big_step
+        mutate(big)
+        big_entries.append(HistoryEntry(action=action, frame=_frame(big, step=big_step)))
+        big_step += 1
+
+    for _ in range(4):
+        _push_big("UP", lambda g: g.__setitem__(0, [9] + g[0][1:]))  # corner (0,0)
+    for _ in range(4):
+        _push_big("DOWN", lambda g: g.__setitem__(7, g[7][:7] + [9]))  # corner (7,7)
+
+    big_text = "\n".join(_atlas_action_effect_summary(big_entries))
+    if "never changed in any observed transition" in big_text:
+        _fail("degenerate bbox suppressed", big_text)
+    _ok("suppresses the invariant-region hint once the active bbox covers most of the board")
+
     print("\nAll atlas action-effect summary checks passed.")
 
 

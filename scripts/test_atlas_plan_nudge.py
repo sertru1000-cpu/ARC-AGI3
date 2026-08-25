@@ -65,15 +65,20 @@ def main() -> None:
         _fail("quiet at start", "checkpoint fired before enough calls had happened")
     _ok("silent on a fresh session with few python calls")
 
-    # 2. Enough python-tool calls without ever verifying -> theory checkpoint.
+    # 2. Enough python-tool calls without ever verifying -- theory checkpoint
+    #    is DISABLED as of 24.08 (found live on r11l/v12: it can read as a
+    #    hard gate against acting at all when verified_accuracy>=0.6 is hard
+    #    to reach, causing total paralysis -- 1 real action in 4.4h). Must
+    #    stay silent here, not nag.
     for _ in range(4):
         agent._run_python_tool(state_path, {"code": "result = 1\n"})
     prompt = agent._build_user_prompt(5, valid_actions=["UP", "RIGHT"])
-    if "verify_theory(predict)" not in prompt or "[atlas checkpoint]" not in prompt:
-        _fail("theory nag", f"expected the theory checkpoint, prompt tail: {prompt[-400:]!r}")
-    _ok("nags to verify a theory once enough python calls passed without one")
+    if "[atlas checkpoint]" in prompt:
+        _fail("theory checkpoint disabled", f"expected silence (disabled), got: {prompt[-400:]!r}")
+    _ok("stays silent even after enough calls without verifying -- theory checkpoint is disabled")
 
-    # 3. A real verify_theory( call with wrong predict() -> accuracy 0.0, still nags to verify.
+    # 3. A real verify_theory( call with wrong predict() -> accuracy 0.0 is
+    #    still captured (the tool itself still works), but still no nag.
     agent._run_python_tool(
         state_path,
         {"code": "def predict(grid, action):\n    return grid\nresult = verify_theory(predict)\n"},
@@ -81,9 +86,9 @@ def main() -> None:
     if agent._atlas_last_verified_accuracy != 0.0:
         _fail("accuracy captured (wrong theory)", str(agent._atlas_last_verified_accuracy))
     prompt = agent._build_user_prompt(6, valid_actions=["UP", "RIGHT"])
-    if "verify_theory(predict)" not in prompt:
-        _fail("still nagging below 0.6", prompt[-400:])
-    _ok(f"captured accuracy={agent._atlas_last_verified_accuracy} and keeps nagging to verify below 0.6")
+    if "[atlas checkpoint]" in prompt:
+        _fail("still disabled below 0.6", prompt[-400:])
+    _ok(f"captured accuracy={agent._atlas_last_verified_accuracy} but still does not nag (disabled)")
 
     # 4. A correct predict() verifies at 1.0. It has never planned before
     #    (sentinel last-plan-index is far in the past), so the plan
@@ -127,6 +132,88 @@ def main() -> None:
     if "[atlas checkpoint]" in prompt:
         _fail("cooldown reset", f"expected silence right after planning, got: {prompt[-400:]!r}")
     _ok("goes quiet again immediately after a real plan_with_theory( call")
+
+    # 6. Note-enforcement: a >1-step plan fired via a SINGLE action() call in
+    #    the same script must queue a one-shot checkpoint for the NEXT turn.
+    #    Needs a fake step_env -- action() is unavailable without one.
+    def _fake_step_env(payload):
+        return {
+            "executed": True,
+            "level": 1,
+            "score": 0,
+            "reward": 0.0,
+            "board_changed": True,
+            "done": False,
+            "level_completed": False,
+            "game_over": False,
+            "run_complete": False,
+            "valid_actions": ["UP", "RIGHT", "DOWN", "LEFT"],
+        }
+
+    agent2 = ToolAgent(model="test-model")
+    agent2._step_env_callback = _fake_step_env
+    agent2._current_valid_actions = ["UP", "RIGHT", "DOWN", "LEFT"]
+    # current_frame in state_path is _shift_right(grid) (1 shift). RIGHT has
+    # period 3 on this 3-column row, so the raw `grid` constant (0 shifts) is
+    # reachable in exactly 2 more RIGHT actions from there -- a genuine
+    # 2-step plan, not a degenerate 0- or 1-step one.
+    target = grid
+    agent2._run_python_tool(
+        state_path,
+        {
+            "code": (
+                "def predict(grid, action):\n"
+                "    return [row[-1:] + row[:-1] for row in grid]\n"
+                f"def goal(grid):\n"
+                f"    return grid == {target!r}\n"
+                "res = plan_with_theory(predict, goal, actions=['RIGHT'], max_depth=3)\n"
+                "if res.get('plan'):\n"
+                "    action(res['plan'])\n"
+                "result = res\n"
+            )
+        },
+    )
+    if agent2._atlas_note_incident is None:
+        _fail("note incident captured", "expected a queued note-enforcement incident after a 3-step plan fired at once")
+    if "2 steps" not in agent2._atlas_note_incident:
+        _fail("note incident step count", agent2._atlas_note_incident)
+    _ok(f"captured the incident when a multi-step plan fired via one action() call: {agent2._atlas_note_incident[:70]}...")
+
+    prompt = agent2._build_user_prompt(1, valid_actions=["UP", "RIGHT"])
+    if "composed-rollout risk" not in prompt or "[atlas checkpoint]" not in prompt:
+        _fail("note enforcement checkpoint injected", f"expected it in the next prompt, tail: {prompt[-500:]!r}")
+    if agent2._atlas_note_incident is not None:
+        _fail("incident cleared after injection", "expected it to reset to None once shown")
+    _ok("injects the note-enforcement checkpoint into the very next turn, then clears the incident")
+
+    prompt = agent2._build_user_prompt(2, valid_actions=["UP", "RIGHT"])
+    if "composed-rollout risk" in prompt:
+        _fail("one-shot, not recurring", f"expected silence on the turn after, got: {prompt[-400:]!r}")
+    _ok("stays quiet on the following turn -- one-shot, not a recurring nag")
+
+    # 7. A 1-step plan (no res['note']) fired via action() must NOT trigger it.
+    agent3 = ToolAgent(model="test-model")
+    agent3._step_env_callback = _fake_step_env
+    agent3._current_valid_actions = ["UP", "RIGHT", "DOWN", "LEFT"]
+    one_step_target = _shift_right(grid)
+    agent3._run_python_tool(
+        state_path,
+        {
+            "code": (
+                "def predict(grid, action):\n"
+                "    return [row[-1:] + row[:-1] for row in grid]\n"
+                f"def goal(grid):\n"
+                f"    return grid == {one_step_target!r}\n"
+                "res = plan_with_theory(predict, goal, actions=['RIGHT'], max_depth=3)\n"
+                "if res.get('plan'):\n"
+                "    action(res['plan'])\n"
+                "result = res\n"
+            )
+        },
+    )
+    if agent3._atlas_note_incident is not None:
+        _fail("1-step plan stays quiet", f"a 1-step plan has no note; should not trigger: {agent3._atlas_note_incident}")
+    _ok("a 1-step plan fired via action() does not trigger the note-enforcement checkpoint")
 
     print("\nAll atlas plan-nudge checks passed.")
 

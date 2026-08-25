@@ -15,6 +15,7 @@ import requests
 
 from inference.agent.action_names import to_engine_action, to_model_action
 from inference.agent.prompts import (
+    ATLAS_NOTE_ENFORCEMENT_CHECKPOINT,
     ATLAS_PLAN_CHECKPOINT_TEMPLATE,
     ATLAS_THEORY_CHECKPOINT,
     COMPACT_TOOL_SESSION_ADDENDUM,
@@ -32,7 +33,25 @@ _ATLAS_PLAN_NAG_EVERY = 3
 # Below this many python-tool calls, transitions probably haven't accumulated
 # enough for verify_theory to be worth nagging about yet.
 _ATLAS_THEORY_NAG_AFTER_CALLS = 4
+# 24.08: temporarily OFF. Found live on r11l (v12) that this checkpoint can
+# cause TOTAL action paralysis, not just under-use: verify_theory's accuracy
+# is an exact whole-board match per transition, so a game with a hard-to-
+# model mechanic can make "verified_accuracy >= 0.6" nearly unreachable. The
+# model then read "Do not skip this turn -- probing without a theory wastes
+# actions" as a hard gate against acting further at all, and spent its
+# entire remaining budget (4.4h) reverse-engineering predict() instead of
+# playing -- 1 real action for the whole game. This is the flip side of the
+# same nudge that fixed C0/C1's "tool ignored" problem (0->42 calls on v5):
+# obeyed so literally it can block play instead of just being skipped.
+# ATLAS_PLAN_CHECKPOINT_TEMPLATE (below) is untouched -- it only fires AFTER
+# a theory is already verified, so it was never implicated in this failure.
+_ATLAS_THEORY_CHECKPOINT_ENABLED = False
 _ATLAS_ACCURACY_RE = re.compile(r"['\"]accuracy['\"]\s*:\s*([0-9]*\.?[0-9]+)")
+# atlas: a non-null 'note' in a printed/returned plan_with_theory() result --
+# res['note'] is only set when the found plan has more than one step, so this
+# is a best-effort stand-in for "the model got back a multi-step plan" when
+# the structured result dict isn't available and we fall back to stdout.
+_ATLAS_NOTE_PRESENT_RE = re.compile(r"['\"]note['\"]\s*:\s*(?!None\b)\S")
 
 # atlas A4: action-effect summary, computed from history_entries (already
 # available to the host each turn) rather than asked of the model. Backlog
@@ -46,6 +65,10 @@ _ATLAS_ACCURACY_RE = re.compile(r"['\"]accuracy['\"]\s*:\s*([0-9]*\.?[0-9]+)")
 _ATLAS_ACTION_EFFECT_HISTORY_WINDOW = 60
 _ATLAS_ACTION_EFFECT_MIN_TRANSITIONS = 4
 _ATLAS_ACTION_EFFECT_HUD_SHARE = 0.7
+# Suppress the invariant-region hint once the "active" bbox covers this much
+# of the board -- past that, the hint no longer narrows anything (found live
+# on re86, 24.08: a bbox spanning the whole 64x64 board).
+_ATLAS_INVARIANT_MAX_BBOX_SHARE = 0.8
 _ATLAS_MOUSE_ACTION_RE = re.compile(r"^MOUSE\(row=(-?\d+), col=(-?\d+)\)$")
 
 
@@ -138,11 +161,20 @@ def _atlas_action_effect_summary(history_entries: list[HistoryEntry]) -> list[st
     # everything that DID ever change (the "active region") rather than
     # listing every static cell -- knowing where the mechanic can't possibly
     # be narrows the search space the same way knowing where it lives does.
+    #
+    # Degenerate case found live (re86, 24.08): different actions can each
+    # move a spatially-tight but DIFFERENT region (UP moves the top, DOWN
+    # moves the bottom, etc.) -- the union bbox then sprawls across nearly
+    # the whole board even though most INDIVIDUAL cells are static, and the
+    # hint stops narrowing anything ("static outside rows 0..63" on a 64-row
+    # board is not a hint). Suppress it once the bbox itself covers most of
+    # the board, regardless of how high the static-cell percentage reads.
     if changed_counts and board_cells:
         active_rows = [r for r, _ in changed_counts]
         active_cols = [c for _, c in changed_counts]
         static_cells = board_cells - len(changed_counts)
-        if static_cells > 0:
+        bbox_cells = (max(active_rows) - min(active_rows) + 1) * (max(active_cols) - min(active_cols) + 1)
+        if static_cells > 0 and bbox_cells / board_cells <= _ATLAS_INVARIANT_MAX_BBOX_SHARE:
             lines.append(
                 f"- {static_cells}/{board_cells} cell(s) ({static_cells / board_cells:.0%}) never "
                 f"changed in any observed transition -- everything outside rows "
@@ -1239,6 +1271,13 @@ class ToolAgent:
         self._atlas_python_call_index = 0
         self._atlas_last_plan_call_index = -99
         self._atlas_last_verified_accuracy: float | None = None
+        # atlas: set when a turn calls plan_with_theory( and gets back a plan
+        # of >1 step (res['note'] non-null) AND fires it via a SINGLE action()
+        # call in that same script -- exactly the pattern that failed live
+        # (ls20: a 7-step plan verified at 1.0 accuracy, executed whole,
+        # didn't complete the level). Injected into the NEXT turn's prompt
+        # once, then cleared -- see _run_python_tool/_build_user_prompt.
+        self._atlas_note_incident: str | None = None
         # atlas: persistent scratch memory across turns, this episode only --
         # mirrors our own harness's Sandbox.memo. See python_tool_sandbox.py
         # for the round-trip (their sandbox is a fresh subprocess per turn,
@@ -1288,6 +1327,7 @@ class ToolAgent:
             self._atlas_python_call_index = 0
             self._atlas_last_plan_call_index = -99
             self._atlas_last_verified_accuracy = None
+            self._atlas_note_incident = None
             self._atlas_memo = {}
             self._noop_guard = NoopGuard() if self._hard_noop_guard_enabled else None
             self.animation_counters = {}
@@ -1619,8 +1659,11 @@ class ToolAgent:
         # this same fix). Only one checkpoint fires per turn: verifying comes
         # before planning, so a still-unverified theory takes priority.
         if (
-            self._atlas_last_verified_accuracy is None
-            or self._atlas_last_verified_accuracy < 0.6
+            _ATLAS_THEORY_CHECKPOINT_ENABLED
+            and (
+                self._atlas_last_verified_accuracy is None
+                or self._atlas_last_verified_accuracy < 0.6
+            )
         ) and self._atlas_python_call_index >= _ATLAS_THEORY_NAG_AFTER_CALLS:
             lines.append(ATLAS_THEORY_CHECKPOINT)
             print(f"atlas: theory checkpoint injected (action_num={action_num})", flush=True)
@@ -1638,6 +1681,15 @@ class ToolAgent:
                 f"acc={self._atlas_last_verified_accuracy:.2f})",
                 flush=True,
             )
+        # atlas: one-shot reflection after a specific past incident, not an
+        # ongoing-readiness nudge like the two above -- fires exactly once
+        # right after the model fired a multi-step plan in a single
+        # action() call, then clears itself. Independent of the if/elif
+        # chain above so it can co-occur with either checkpoint.
+        if self._atlas_note_incident:
+            lines.append(ATLAS_NOTE_ENFORCEMENT_CHECKPOINT.format(detail=self._atlas_note_incident))
+            print(f"atlas: note enforcement checkpoint injected (action_num={action_num})", flush=True)
+            self._atlas_note_incident = None
         action_effect_lines = _atlas_action_effect_summary(history_entries)
         if action_effect_lines:
             print(
@@ -2147,6 +2199,34 @@ class ToolAgent:
         if "plan_with_theory(" in code:
             self._atlas_last_plan_call_index = self._atlas_python_call_index
             print(f"atlas: model called plan_with_theory( (call #{self._atlas_python_call_index})", flush=True)
+            # atlas: did this SAME script also fire a >1-step plan in one
+            # action() call? A multi-step plan is only as reliable as
+            # verify_theory's single-step checks (see res['note']) -- firing
+            # it whole, with no board_changed check in between, is exactly
+            # the pattern that failed live (ls20). action_results already
+            # reflects every action() call made in this script; each item's
+            # requested_count is the batch size of ONE such call.
+            note_result = sandbox_result.get("result")
+            note_present = isinstance(note_result, dict) and bool(note_result.get("note"))
+            if not note_present:
+                note_present = bool(_ATLAS_NOTE_PRESENT_RE.search(rendered_stdout))
+            batch_size = max(
+                (int(item.get("requested_count") or 0) for item in action_results),
+                default=0,
+            )
+            if note_present and batch_size > 1:
+                self._atlas_note_incident = (
+                    f"plan_with_theory( returned a plan with more than one step (res['note'] was set) "
+                    f"and it was executed via a single action() call requesting {batch_size} steps at once, "
+                    "with no board_changed check in between."
+                )
+                print(
+                    f"atlas: multi-step plan fired in one action() call (call #{self._atlas_python_call_index}, "
+                    f"{batch_size} steps) -- note enforcement checkpoint queued for next turn",
+                    flush=True,
+                )
+        if "execute_plan(" in code:
+            print(f"atlas: model called execute_plan( (call #{self._atlas_python_call_index})", flush=True)
         if "verify_theory(" in code:
             sandbox_payload_result = sandbox_result.get("result")
             accuracy = None

@@ -409,20 +409,42 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                 return name
             raise ValueError(f"bad action spec: {spec!r}")
 
-        def verify_theory(predict, actions=None):
-            '''Test a transition theory against every recorded real transition.
+        def _atlas_state_subset_ok(pred, actual):
+            '''True if `pred` (a dict) is a CONSISTENT SUBSET of `actual`: every
+            key `pred` bothered to predict matches, keys it left out are not
+            judged at all. An empty pred is never OK (a lazy predict() that
+            predicts nothing must not score as a match) -- returns None for
+            that case so the caller can report it distinctly from a real
+            mismatch.'''
+            if not pred:
+                return None
+            return all(k in actual and actual[k] == v for k, v in pred.items())
 
-            predict(grid, action) -> predicted next grid (list of rows of int).
-            `action` is the same display string seen on `transitions[i].action`
-            (e.g. "UP", "MOUSE(row=4, col=7)"). Optional `actions` restricts
-            testing to transitions whose action name (before any "(") is in
-            that list. Returns accuracy + up to 3 counterexamples. Costs zero
-            environment actions -- it only replays what already happened.
-            '''
+        def verify_theory(predict, actions=None, extract=None, transitions=None):
+            '''Test predict(state, action) -> next_state against every
+            recorded real transition (zero real actions -- replays what
+            happened). By default state=the full grid, compared cell-by-cell
+            (pixel-perfect). Pass extract(grid) -> a small JSON-safe state
+            (e.g. object/tile positions) to verify a theory over THAT
+            abstraction instead -- predict/compare then work on extract()'s
+            output, not the raw grid. Reducing to a small discrete state
+            first and reasoning over that (rather than requiring
+            pixel-perfect whole-board reproduction) is how the strongest
+            play we've seen actually works. If extract() returns a dict,
+            predict() only needs to get the KEYS IT ACTUALLY PREDICTS right
+            -- a partial dict (e.g. just the player's position) is checked as
+            a subset of the real extracted state, not compared for full
+            equality; an empty dict never counts as a match. Optional
+            `actions` restricts to those action names. Pass transitions=[...]
+            (a filtered/hand-picked sublist of the `transitions` global -- e.g.
+            clean forward/reverse probes you just ran) to test against exactly
+            those instead of the full, possibly noisy history. Returns
+            accuracy + up to 3 counterexamples.'''
             wanted = {str(a).strip().upper() for a in actions} if actions else None
             tested = matched = errors = 0
             mismatches = []
-            for t in runtime_globals.get("transitions") or []:
+            pool = transitions if transitions is not None else (runtime_globals.get("transitions") or [])
+            for t in pool:
                 base_name = t.action.split("(", 1)[0].strip().upper()
                 if wanted and base_name not in wanted:
                     continue
@@ -432,13 +454,37 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                     continue
                 tested += 1
                 try:
-                    pred = predict([list(row) for row in before.grid], t.action)
+                    before_in = extract([list(row) for row in before.grid]) if extract else [list(row) for row in before.grid]
+                    pred = predict(before_in, t.action)
+                    actual = extract([list(row) for row in after.grid]) if extract else after.grid
                 except Exception as exc:
                     errors += 1
                     if len(mismatches) < 3:
                         mismatches.append({"action": t.action, "error": repr(exc)[:200]})
                     continue
-                actual = after.grid
+                if extract is not None:
+                    if isinstance(pred, dict) and isinstance(actual, dict):
+                        ok = _atlas_state_subset_ok(pred, actual)
+                        if ok is None:
+                            errors += 1
+                            if len(mismatches) < 3:
+                                mismatches.append({"action": t.action, "error": "predict() returned an empty dict -- nothing was predicted"})
+                            continue
+                        if ok:
+                            matched += 1
+                        elif len(mismatches) < 3:
+                            bad_keys = {k: [v, actual.get(k)] for k, v in pred.items() if k not in actual or actual[k] != v}
+                            mismatches.append({"action": t.action, "mismatched_keys (predicted,actual)": _json_safe(bad_keys)})
+                        continue
+                    if pred == actual:
+                        matched += 1
+                    elif len(mismatches) < 3:
+                        mismatches.append({
+                            "action": t.action,
+                            "predicted_state": _json_safe(pred),
+                            "actual_state": _json_safe(actual),
+                        })
+                    continue
                 if (
                     not isinstance(pred, list)
                     or len(pred) != len(actual)
@@ -471,66 +517,54 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             }
 
         def _atlas_plan_extrapolation_note(plan):
-            '''verify_theory only checks single, already-observed transitions.
-
-            A found plan's first step predicts from the REAL current board;
-            every step after that predicts from a state predict() imagined,
-            never actually visited. If the mechanic saturates, collides, or
-            otherwise changes over multiple moves, that composition can be
-            wrong even when verify_theory reported high accuracy (seen live:
-            a 7-step plan verified at 1.0 accuracy still failed mid-plan
-            because the pushed object stopped moving partway through).
-            '''
+            '''verify_theory only checks single transitions; a chained plan
+            can still be wrong. See execute_plan() for real mitigation.'''
             if len(plan) <= 1:
                 return None
             return (
-                f"plan chains {len(plan)} predicted steps, but verify_theory only checked "
-                "single already-observed transitions -- step 1 predicts from the real board, "
-                "steps 2+ predict from states predict() imagined and that were never actually "
-                "visited. If the mechanic saturates, collides, or changes after a few moves, "
-                "predict() may not compose correctly that far ahead. Consider running the plan "
-                "in smaller chunks and checking board_changed/valid_actions between them "
-                f"instead of firing all {len(plan)} steps in one action(res['plan']) call."
+                f"plan chains {len(plan)} predicted steps beyond what verify_theory actually "
+                "checked (single, already-observed transitions only). Use "
+                "execute_plan(res['plan'], predict) instead of action(res['plan']) -- it stops "
+                "itself the moment a real step diverges from predict()'s forecast."
             )
 
-        def plan_with_theory(predict, goal, actions=None, max_depth=6, max_nodes=1500,
-                              min_accuracy=0.6, time_budget=8.0):
-            '''Search for an action sequence using the model's OWN verified theory.
-
-            Pure simulation against predict() -- spends ZERO environment
-            actions, which matters because actions are scored quadratically.
-            The theory is re-verified here first and planning is REFUSED below
-            min_accuracy: planning over an unverified theory is guessing with
-            extra steps. Returns {'plan': [...] | None, ...}; the plan is a
-            list of specs `action()` accepts verbatim (whatever you passed in
-            `actions`, or the current `valid_actions` by default), so the
-            usual next line is `action(res['plan'])`. When the plan has more
-            than one step, res['note'] warns that verify_theory only checked
-            single already-observed transitions -- steps beyond the first
-            predict from simulated states nothing ever actually visited, so a
-            multi-step plan can still fail mid-way if the mechanic saturates
-            or changes over several moves even at high verified_accuracy.
-
-            MOUSE is excluded from the default candidate set (64x64 targets
-            would blow up branching); pass explicit `{'action': 'MOUSE',
-            'row': r, 'col': c}` specs in `actions` to plan toward a click.
-            '''
+        def plan_with_theory(predict, goal, actions=None, extract=None, max_depth=6, max_nodes=1500,
+                              min_accuracy=0.6, time_budget=8.0, force=False, transitions=None):
+            '''Search an action sequence via predict() -- zero real actions.
+            Re-verifies the theory first; REFUSES below min_accuracy UNLESS
+            force=True (use it when you've judged a low score is unavoidable
+            noise -- e.g. decoration extract() can't help but pick up -- not
+            a wrong theory of the mechanic; do not use it to skip refining a
+            theory you haven't actually checked). Returns {'plan': [...] |
+            None, ...}, a list of action() specs. For a >1-step plan, prefer
+            execute_plan(res['plan'], predict, extract=extract). MOUSE
+            excluded by default; pass {'action':'MOUSE','row':r,'col':c}
+            specs in `actions` to plan toward a click. Pass extract(grid) ->
+            a small JSON-safe state (e.g. object/tile positions) to search
+            over THAT abstraction instead of the raw grid -- predict/goal
+            then take/return extract()'s output, not full grids (same
+            extract= as verify_theory; dicts are matched as a subset, see
+            verify_theory). `transitions=[...]` is forwarded to verify_theory
+            unchanged (test against a hand-picked sublist instead of full
+            history).'''
             # `actions` may hold dict specs (e.g. a MOUSE target), which
             # verify_theory's filter cannot match directly -- reduce each to
             # its base action name first ("MOUSE(row=4, col=7)" -> "MOUSE").
             verify_actions = (
                 [_action_display(a).split("(", 1)[0] for a in actions] if actions else None
             )
-            check = verify_theory(predict, verify_actions)
+            check = verify_theory(predict, verify_actions, extract=extract, transitions=transitions)
             acc = check.get("accuracy")
-            if acc is None or acc < min_accuracy:
+            if not force and (acc is None or acc < min_accuracy):
                 return {
                     "plan": None,
                     "verified_accuracy": acc,
                     "reason": (
                         f"theory not good enough to plan with: accuracy {acc} < {min_accuracy} "
                         f"on {check.get('transitions_tested')} transitions. Refine predict() "
-                        "against the counterexamples from verify_theory first."
+                        "against the counterexamples from verify_theory first, or pass "
+                        "force=True if you've judged the shortfall is irrelevant noise "
+                        "rather than a wrong theory."
                     ),
                     "counterexamples": check.get("counterexamples"),
                 }
@@ -546,16 +580,23 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             if not specs:
                 return {"plan": None, "reason": "no candidate actions to search over"}
 
-            start = [list(row) for row in current.grid]
+            grid_start = [list(row) for row in current.grid]
             try:
-                if goal([list(row) for row in start]):
+                start = extract([list(row) for row in grid_start]) if extract else grid_start
+            except Exception as exc:
+                return {"plan": None, "reason": f"extract() raised on the current grid: {exc!r}"}
+            try:
+                goal_start = [list(row) for row in start] if extract is None else start
+                if goal(goal_start):
                     return {"plan": [], "verified_accuracy": acc, "nodes_expanded": 0,
                             "reason": "already at the goal", "note": None}
             except Exception as exc:
-                return {"plan": None, "reason": f"goal() raised on the current grid: {exc!r}"}
+                return {"plan": None, "reason": f"goal() raised on the current state: {exc!r}"}
 
-            def _key(grid):
-                return tuple(tuple(row) for row in grid)
+            def _key(state):
+                if extract is None:
+                    return tuple(tuple(row) for row in state)
+                return json.dumps(state, sort_keys=True, default=str)
 
             deadline = time.monotonic() + time_budget
             seen = {_key(start)}
@@ -563,7 +604,7 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             nodes = pred_errors = 0
             while frontier:
                 nxt = []
-                for grid, path in frontier:
+                for state, path in frontier:
                     if len(path) >= max_depth:
                         continue
                     for spec in specs:
@@ -578,15 +619,16 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                                 ),
                             }
                         nodes += 1
+                        state_in = [list(row) for row in state] if extract is None else state
                         try:
-                            pred = predict([list(row) for row in grid], _action_display(spec))
+                            pred = predict(state_in, _action_display(spec))
                         except Exception:
                             pred_errors += 1
                             continue
-                        if (
+                        if extract is None and (
                             not isinstance(pred, list)
-                            or len(pred) != len(start)
-                            or any(len(row) != len(start[0]) for row in pred)
+                            or len(pred) != len(grid_start)
+                            or any(len(row) != len(grid_start[0]) for row in pred)
                         ):
                             pred_errors += 1
                             continue
@@ -595,8 +637,9 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                             continue
                         seen.add(key)
                         plan = path + [spec]
+                        pred_for_goal = [list(row) for row in pred] if extract is None else pred
                         try:
-                            if goal([list(row) for row in pred]):
+                            if goal(pred_for_goal):
                                 return {
                                     "plan": plan, "depth": len(plan), "verified_accuracy": acc,
                                     "nodes_expanded": nodes, "predict_errors": pred_errors,
@@ -617,9 +660,66 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                 ),
             }
 
+        def execute_plan(plan, predict, stop_on_mismatch=True, extract=None, goal=None):
+            '''Run a plan_with_theory() plan one real step at a time; stop when
+            a real outcome diverges from predict()'s forecast for it
+            (stop_reason='predicted_state_mismatch'), a step fails, or a
+            terminal result fires -- instead of firing every step blind.
+            Pass the SAME extract= used to build the plan so mismatch
+            detection compares in that abstraction, not raw grids; dicts are
+            matched as a subset (only the keys predict() bothered to predict
+            are checked), same as verify_theory. Pass the SAME goal(state)
+            used to build the plan and it is checked BEFORE any mismatch
+            abort -- if you already reached it (stop_reason='goal_reached'),
+            a merely cosmetic divergence elsewhere does not cost you the win.'''
+            def _r(n, early, reason, res):
+                return {"steps_executed": n, "stopped_early": early, "stop_reason": reason, "last_action_result": res}
+            n = 0
+            res = None
+            for spec in plan:
+                fr = runtime_globals.get("current_frame")
+                pre_grid = [list(r) for r in fr.grid] if fr is not None else None
+                try:
+                    pre = extract(pre_grid) if (extract and pre_grid is not None) else pre_grid
+                    pred = predict(pre, _action_display(spec)) if pre is not None else None
+                except Exception:
+                    pred = None
+                res = action([spec])
+                n += 1
+                if res.get("level_completed") or res.get("done") or res.get("game_over") or res.get("run_complete"):
+                    return _r(n, False, None, res)
+                if not res.get("executed", True):
+                    return _r(n, True, "action_not_executed", res)
+                if stop_on_mismatch and pred is not None:
+                    nf = runtime_globals.get("current_frame")
+                    post_grid = [list(r) for r in nf.grid] if nf is not None else None
+                    try:
+                        post = extract(post_grid) if (extract and post_grid is not None) else post_grid
+                    except Exception:
+                        post = None
+                    if goal is not None and post is not None:
+                        try:
+                            if goal(post):
+                                return _r(n, False, "goal_reached", res)
+                        except Exception:
+                            pass
+                    if extract:
+                        if isinstance(pred, dict) and isinstance(post, dict):
+                            ok = _atlas_state_subset_ok(pred, post)
+                            bad = not ok
+                        else:
+                            bad = post is None or pred != post
+                    else:
+                        bad = post is None or not isinstance(pred, list) or len(pred) != len(post) \
+                            or any(len(a) != len(b) for a, b in zip(pred, post)) or pred != post
+                    if bad:
+                        return _r(n, True, "predicted_state_mismatch", res)
+            return _r(n, False, None, res)
+
         runtime_globals["action"] = action
         runtime_globals["verify_theory"] = verify_theory
         runtime_globals["plan_with_theory"] = plan_with_theory
+        runtime_globals["execute_plan"] = execute_plan
         if initial.get("animation_enabled"):
             runtime_globals["animation"] = animation
         _refresh_state(initial.get("state") or {})
@@ -716,9 +816,20 @@ def run_sandboxed_python(
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="rgb_python_tool_") as sandbox_dir:
         host_action_results: list[dict[str, Any]] = []
+        # atlas 24.08: pass the bootstrap as a FILE, not inline via `-c`. The
+        # bootstrap keeps growing as tools are added (verify_theory/plan_with_theory/
+        # execute_plan's extract= support alone added ~2.4k escaped chars) and on
+        # Windows the assembled CreateProcess command line has a hard ~32767-char
+        # ceiling -- `-c _SANDBOX_BOOTSTRAP` was already within ~100 chars of it
+        # before this change and broke local (Windows-only; Kaggle's Linux ARG_MAX
+        # is far higher) testing the moment it grew further. A file path on argv is
+        # only ever a few dozen chars, independent of bootstrap size.
+        bootstrap_path = os.path.join(sandbox_dir, "_bootstrap.py")
+        with open(bootstrap_path, "w", encoding="utf-8") as _f:
+            _f.write(_SANDBOX_BOOTSTRAP)
         try:
             process = subprocess.Popen(
-                [sys.executable, "-I", "-S", "-c", _SANDBOX_BOOTSTRAP],
+                [sys.executable, "-I", "-S", bootstrap_path],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

@@ -87,6 +87,17 @@ ATLAS_SUBMISSION_BUDGET_S = 28800.0   # 8 h of the 9 h hard cap -- 1h margin
                                        # Raised from 7.5h/1.19-score run
                                        # 23.08 -- user's call, more play time
                                        # over more safety margin.
+# 24.08: explicit, named ceiling for atlas_fit_game_cap() -- replaces reading
+# bm.solver.max_runtime_s_per_game (7920s, the bundle's own undocumented
+# default), which silently absorbed the whole budget increase above for any
+# n_games <= 42 (v3/v5/v6/v8/v10/v12's real behavior). Raised 7920 -> 8500
+# (user's call, more conservative than the 10000 that was also costed) after
+# a v7 regression (0.06) from removing this ceiling entirely -- this version
+# keeps a firm ceiling, just a higher one. At n_games in 15..42 this raises
+# the per-game cap from 7920s to 8500s and total wall-clock from ~4.4-6.6h to
+# ~4.7-7.1h -- still well under the 8h budget / 9h hard cap. For n_games>42
+# this constant has no effect at all (affordable already binds below it).
+ATLAS_SUBMISSION_GAME_CAP_CEILING_S = 8500.0
 ATLAS_MIN_GAME_CAP_S = 1800.0
 
 print("atlas: solver config as it came from the bundle:")
@@ -112,11 +123,18 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 900.0    # 900s measured ~30 min total (22-23.08
-                                   # calibrations) at concurrency=14, 2 waves.
-                                   # Back down from 1800s (~1h) -- 24.08 user's
-                                   # call, back to a quick 30-min sanity check
-                                   # for version 8's ceiling-formula revert.
+ATLAS_CALIBRATION_CAP_S = 1800.0  # 25.08: 30 min/game x 2 waves ~= 1h --
+                                   # this build's purpose is NOT a depth/crash
+                                   # check (v14 already confirmed clean at
+                                   # 600s) but measuring whether the model
+                                   # reaches for the new optional extract=
+                                   # abstraction ON ITS OWN, with zero nudge.
+                                   # 600s wasn't enough turns per game to see
+                                   # verify_theory tried more than once or
+                                   # twice; 1800s gives most games several
+                                   # attempts before deciding whether a
+                                   # host-triggered nudge (backlog item 6) is
+                                   # actually needed.
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S
     print(f"atlas: Phase A calibration cap -- max_runtime_s_per_game = {ATLAS_CALIBRATION_CAP_S:.0f}s")
@@ -126,7 +144,14 @@ def atlas_fit_game_cap(n_games: int) -> None:
     """Shrink the per-game cap so every wave fits the notebook budget.
 
     Called from the submission branch, where the game list only becomes known
-    after Kaggle's gateway answers. Never raises the cap -- only lowers it.
+    after Kaggle's gateway answers.
+
+    24.08: the ceiling is now the explicit ATLAS_SUBMISSION_GAME_CAP_CEILING_S
+    constant, not whatever bm.solver.max_runtime_s_per_game happened to carry
+    in from the bundle (7920s, undocumented) -- that implicit ceiling silently
+    absorbed any budget increase for n_games<=42. This is still a firm
+    ceiling (never removed outright, unlike the v7 regression) -- just a
+    named, deliberately-chosen one instead of an inherited accident.
     """
     import json
     import math
@@ -135,11 +160,11 @@ def atlas_fit_game_cap(n_games: int) -> None:
     concurrency = max(1, int(bm.solver.concurrency))
     waves = max(1, math.ceil(max(1, int(n_games)) / concurrency))
     affordable = ATLAS_SUBMISSION_BUDGET_S / waves
-    current = float(bm.solver.max_runtime_s_per_game or ATLAS_FALLBACK_GAME_CAP_S)
-    fitted = max(ATLAS_MIN_GAME_CAP_S, min(current, affordable))
+    previous = float(bm.solver.max_runtime_s_per_game or ATLAS_FALLBACK_GAME_CAP_S)
+    fitted = max(ATLAS_MIN_GAME_CAP_S, min(ATLAS_SUBMISSION_GAME_CAP_CEILING_S, affordable))
     print(
         f"atlas: {n_games} games / concurrency {concurrency} = {waves} wave(s); "
-        f"per-game cap {current:.0f}s -> {fitted:.0f}s"
+        f"per-game cap {previous:.0f}s -> {fitted:.0f}s (ceiling={ATLAS_SUBMISSION_GAME_CAP_CEILING_S:.0f}s)"
     )
     bm.solver.max_runtime_s_per_game = fitted
 
@@ -159,7 +184,7 @@ def atlas_fit_game_cap(n_games: int) -> None:
                     "concurrency": concurrency,
                     "waves": waves,
                     "submission_budget_s": ATLAS_SUBMISSION_BUDGET_S,
-                    "per_game_cap_before_s": current,
+                    "per_game_cap_before_s": previous,
                     "per_game_cap_after_s": fitted,
                 },
                 indent=2,
