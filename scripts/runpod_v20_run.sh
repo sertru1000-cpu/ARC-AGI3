@@ -55,7 +55,7 @@ echo "=== [3/7] Python 3.12 venv via uv (base-image-agnostic) ==="
 if ! command -v uv >/dev/null 2>&1; then
   pip install -q uv || pip install -q --break-system-packages uv
 fi
-uv venv --python 3.12 --clear "${VENV_DIR}"
+uv venv --python 3.12.12 --clear "${VENV_DIR}"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 "${VENV_PYTHON}" --version
 
