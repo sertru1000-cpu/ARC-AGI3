@@ -146,14 +146,30 @@ ATLAS_THEORY_CHECKPOINT = (
 # so the harness tracks real python-tool calls since the last real action()
 # call and, once it crosses a threshold, overrides BOTH theory-style
 # checkpoints with an unambiguous "just act" instruction for that turn.
+#
+# 26.08: strengthened again after a live Kaggle debug run (cn04, ka59) showed
+# the mechanism firing correctly (8 -> 9 -> 10 -> 11 calls, unresetting) while
+# the model's own reasoning explicitly ACKNOWLEDGED the checkpoint each time
+# ("the atlas checkpoint is telling me to take action... let me do one quick
+# check and then act") and still delayed 2-4 more calls before complying.
+# Both zero-score games in that run ended their entire 3600s budget mid-cycle
+# on exactly this pattern. The old wording never said the delaying move
+# itself was the problem -- "execute SOMETHING now" is compatible with "one
+# quick check, then act". Names that exact rationalization and forbids it
+# for the very next call, rather than leaving "now" open to interpretation.
 ATLAS_FORCE_ACT_OVERRIDE = (
     "[atlas checkpoint] You have made {calls} `python` calls in a row without "
-    "a single real action() call. Whatever your current best guess is, "
-    "execute SOMETHING now -- a probe, a partial plan, even a guess. A wrong "
-    "real action teaches you more than another turn of analysis, and costs "
-    "far less than the turns you have already spent not acting. Refining a "
-    "theory (verify_theory/plan_with_theory) can continue on LATER turns "
-    "alongside real actions -- it does not have to finish first."
+    "a single real action() call. This is not a suggestion for a future turn "
+    "-- your VERY NEXT `python` call, the one you are about to write right "
+    "now, MUST include a real action(...) call. Do not respond with 'let me "
+    "check one more thing first' or 'one quick probe and then I'll act' -- "
+    "that exact reasoning is what produced this checkpoint, and repeating it "
+    "will only trigger it again with a higher count. Whatever your current "
+    "best guess is, execute it now: a probe, a partial plan, even a guess. A "
+    "wrong real action teaches you more than another turn of analysis, and "
+    "costs far less than the turns you have already spent not acting. "
+    "Refining a theory (verify_theory/plan_with_theory) can continue on "
+    "LATER turns alongside real actions -- it does not have to finish first."
 )
 
 # atlas 25.08: found on dc22 (a Gemini teacher-data transcript from our old
@@ -190,6 +206,34 @@ ATLAS_NOTE_ENFORCEMENT_CHECKPOINT = (
     "-- it runs the plan one real step at a time and stops itself the moment a "
     "real outcome diverges from predict()'s forecast, instead of spending every "
     "remaining step on a plan that has already stopped working."
+)
+
+# atlas 26.08: found on a live Kaggle debug run across 3 games (81 actions
+# total) -- `memo` was never written to even once, despite the existing
+# prose bullet in PYTHON_ADDENDUM describing it AND a dedicated example for
+# alignment/positioning puzzles. Same lesson as everything else in this file:
+# a passive prompt mention gets used in ~0.2% of turns (the C0 finding);
+# here it was 0%. The model instead tracks facts purely in its own
+# natural-language reasoning and silently re-derives/corrects them each turn
+# (caught live: "OK, so white = 129 pixels (my '135' memory was wrong)") --
+# exactly the drift `memo` exists to prevent. This checkpoint applies the
+# same harness-triggered-nag fix that worked for verify_theory/plan_with_theory
+# adoption. Lowest priority in the chain (fires only once nothing more urgent
+# is active) since forcing memo use on a game that genuinely doesn't need it
+# would just waste a turn inventing something to store.
+ATLAS_MEMO_CHECKPOINT = (
+    "[atlas checkpoint] You have made {calls} `python` calls this game and "
+    "written nothing to `memo` yet. `memo` is the one thing that survives "
+    "between calls -- everything else here is rebuilt from scratch every "
+    "turn. If there is any fact you keep re-deriving from the raw board each "
+    "turn (a confirmed position, which object is which via its `hash`, "
+    "which region is invariant, a rule you already verified), write it into "
+    "`memo` THIS turn (e.g. `memo['anchor'] = {{'row': r, 'col': c, 'step': "
+    "current_frame.step}}`) and read it back next turn instead of "
+    "recomputing it from the image. Re-deriving the same fact from scratch "
+    "every turn is a known failure mode: small per-turn read errors compound "
+    "over many turns into a value that never actually converges, even when "
+    "the underlying mechanic is already well understood."
 )
 
 ATLAS_PLAN_CHECKPOINT_TEMPLATE = (

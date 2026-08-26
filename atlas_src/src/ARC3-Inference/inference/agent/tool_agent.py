@@ -17,6 +17,7 @@ from inference.agent.action_names import to_engine_action, to_model_action
 from inference.agent.prompts import (
     ATLAS_FORCE_ACT_OVERRIDE,
     ATLAS_GOAL_RECONSIDER_CHECKPOINT,
+    ATLAS_MEMO_CHECKPOINT,
     ATLAS_NOTE_ENFORCEMENT_CHECKPOINT,
     ATLAS_PLAN_CHECKPOINT_TEMPLATE,
     ATLAS_THEORY_CHECKPOINT,
@@ -77,6 +78,13 @@ _ATLAS_FORCE_ACT_AFTER_CALLS = 8
 # yet another predict() rewrite. Deliberately 2x _ATLAS_THEORY_NAG_AFTER_CALLS
 # -- give one theory a real chance before suggesting the bigger reframe.
 _ATLAS_GOAL_RECONSIDER_AFTER_CALLS = 8
+# atlas 26.08: found live -- memo was never written to in 81 real actions
+# across 3 games (0%, not even the ~0.2% C0 baseline for a passively-worded
+# tool). Lowest-priority checkpoint in the chain, so it only fires once
+# nothing more urgent (force-act/goal-reconsider/theory/plan) is active.
+# Threshold above _ATLAS_THEORY_NAG_AFTER_CALLS so a game gets a real chance
+# to need memo before being nagged about it.
+_ATLAS_MEMO_NUDGE_AFTER_CALLS = 10
 _ATLAS_ACCURACY_RE = re.compile(r"['\"]accuracy['\"]\s*:\s*([0-9]*\.?[0-9]+)")
 # atlas: a non-null 'note' in a printed/returned plan_with_theory() result --
 # res['note'] is only set when the found plan has more than one step, so this
@@ -1321,6 +1329,9 @@ class ToolAgent:
         # for the round-trip (their sandbox is a fresh subprocess per turn,
         # so this can't live there; it lives here and gets threaded through).
         self._atlas_memo: dict[str, Any] = {}
+        # atlas: has the model EVER written to memo this game -- the memo
+        # checkpoint's trigger. See _ATLAS_MEMO_NUDGE_AFTER_CALLS.
+        self._atlas_memo_ever_written = False
         # Explicit ctor arg (e.g. from a pickled HarnessSolver deployed to
         # Kaggle) takes precedence over the local process environment, so the
         # flag state chosen at deploy time survives the trip into the kernel.
@@ -1369,6 +1380,7 @@ class ToolAgent:
             self._atlas_verify_theory_call_count = 0
             self._atlas_note_incident = None
             self._atlas_memo = {}
+            self._atlas_memo_ever_written = False
             self._noop_guard = NoopGuard() if self._hard_noop_guard_enabled else None
             self.animation_counters = {}
             self._reset_animation_hint_state()
@@ -1736,6 +1748,16 @@ class ToolAgent:
             print(
                 f"atlas: plan checkpoint injected (action_num={action_num}, "
                 f"acc={self._atlas_last_verified_accuracy:.2f})",
+                flush=True,
+            )
+        elif (
+            not self._atlas_memo_ever_written
+            and self._atlas_python_call_index >= _ATLAS_MEMO_NUDGE_AFTER_CALLS
+        ):
+            lines.append(ATLAS_MEMO_CHECKPOINT.format(calls=self._atlas_python_call_index))
+            print(
+                f"atlas: memo checkpoint injected (action_num={action_num}, "
+                f"python_calls={self._atlas_python_call_index})",
                 flush=True,
             )
         # atlas: one-shot reflection after a specific past incident, not an
@@ -2239,6 +2261,7 @@ class ToolAgent:
         returned_memo = sandbox_result.get("memo")
         if isinstance(returned_memo, dict):
             if returned_memo != self._atlas_memo:
+                self._atlas_memo_ever_written = True
                 print(
                     f"atlas: model wrote to memo (call #{self._atlas_python_call_index + 1}, "
                     f"keys={sorted(returned_memo.keys())})",

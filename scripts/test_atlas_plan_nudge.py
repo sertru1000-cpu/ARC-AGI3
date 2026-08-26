@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "atlas_src" / "src" / "ARC3-Inference"))
 from inference.agent.tool_agent import (  # noqa: E402
     ToolAgent,
     _ATLAS_GOAL_RECONSIDER_AFTER_CALLS,
+    _ATLAS_MEMO_NUDGE_AFTER_CALLS,
 )
 
 
@@ -94,6 +95,16 @@ def main() -> None:
     if "[atlas checkpoint]" in prompt:
         _fail("quiet at start", "checkpoint fired before enough calls had happened")
     _ok("silent on a fresh session with few python calls")
+
+    # 1b. Write to memo once, early, so the rest of THIS agent's session
+    #    never triggers the new (26.08) memo checkpoint -- keeps every
+    #    downstream assertion below about the ORIGINAL checkpoints isolated
+    #    from it, the same way 5b/5c interleave real actions to isolate
+    #    goal-reconsider from force-act. The memo checkpoint itself gets its
+    #    own dedicated coverage in step 8 below.
+    agent._run_python_tool(state_path, {"code": "action(['RIGHT'])\nmemo['seen'] = True\nresult = 1\n"})
+    if not agent._atlas_memo_ever_written:
+        _fail("memo write detected", "expected _atlas_memo_ever_written=True after writing to memo")
 
     # 2. Enough python-tool calls without ever verifying -- theory checkpoint
     #    was disabled 24.08-25.08 (found live on r11l/v12: it can read as a
@@ -337,6 +348,57 @@ def main() -> None:
     if agent3._atlas_note_incident is not None:
         _fail("1-step plan stays quiet", f"a 1-step plan has no note; should not trigger: {agent3._atlas_note_incident}")
     _ok("a 1-step plan fired via action() does not trigger the note-enforcement checkpoint")
+
+    # 8. Memo checkpoint (26.08): fires once enough python calls pass with
+    #    memo never written AND nothing higher-priority is active. Every
+    #    call here calls action() (avoids force-act) and re-plans every time
+    #    (keeps accuracy >= 0.6 so theory stays quiet, and the plan-checkpoint
+    #    cooldown at 0 so it doesn't out-rank memo either) -- isolating the
+    #    memo checkpoint specifically from the other four in the chain.
+    memo_agent = ToolAgent(model="test-model")
+    memo_agent._step_env_callback = _fake_step_env
+    memo_agent._current_valid_actions = ["UP", "RIGHT", "DOWN", "LEFT"]
+    memo_agent._run_python_tool(
+        state_path,
+        {
+            "code": (
+                "def predict(grid, action):\n"
+                "    return [row[-1:] + row[:-1] for row in grid]\n"
+                "result = verify_theory(predict)\n"
+                "action(['RIGHT'])\n"
+            )
+        },
+    )
+    replan_code = (
+        "def predict(grid, action):\n"
+        "    return [row[-1:] + row[:-1] for row in grid]\n"
+        "def goal(grid):\n"
+        "    return False\n"
+        "res = plan_with_theory(predict, goal)\n"
+        "action(['RIGHT'])\n"
+        "result = res\n"
+    )
+    for _ in range(_ATLAS_MEMO_NUDGE_AFTER_CALLS - 2):
+        memo_agent._run_python_tool(state_path, {"code": replan_code})
+    if memo_agent._atlas_python_call_index != _ATLAS_MEMO_NUDGE_AFTER_CALLS - 1:
+        _fail("memo test setup call count", str(memo_agent._atlas_python_call_index))
+    prompt = memo_agent._build_user_prompt(1, valid_actions=["UP", "RIGHT"])
+    if "written nothing to `memo`" in prompt:
+        _fail("memo checkpoint respects the threshold", f"must not fire one call short of the threshold, got: {prompt[-500:]!r}")
+    _ok("one call short of the memo threshold, stays quiet")
+
+    memo_agent._run_python_tool(state_path, {"code": replan_code})
+    prompt = memo_agent._build_user_prompt(2, valid_actions=["UP", "RIGHT"])
+    if "written nothing to `memo`" not in prompt:
+        _fail("memo checkpoint fires", f"expected it at the threshold with memo never written, got: {prompt[-500:]!r}")
+    _ok(f"memo checkpoint fires after {_ATLAS_MEMO_NUDGE_AFTER_CALLS} python calls with memo never written")
+
+    # 8b. Writing to memo clears it immediately.
+    memo_agent._run_python_tool(state_path, {"code": "action(['RIGHT'])\nmemo['anchor'] = {'row': 1, 'col': 2}\nresult = 1\n"})
+    prompt = memo_agent._build_user_prompt(3, valid_actions=["UP", "RIGHT"])
+    if "written nothing to `memo`" in prompt:
+        _fail("memo checkpoint clears after a write", f"expected silence right after writing to memo, got: {prompt[-500:]!r}")
+    _ok("goes quiet immediately after the model writes to memo")
 
     print("\nAll atlas plan-nudge checks passed.")
 
