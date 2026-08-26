@@ -71,6 +71,12 @@ VENV_PYTHON="${VENV_DIR}/bin/python"
 
 echo "=== [4/7] Install deps (torch/vllm pinned, flashinfer best-effort, harness editable) ==="
 export PIP_CACHE_DIR=/root/.cache/pip   # never on a network volume -- can wedge in D-state
+# uv caches resolved metadata for local/editable path deps across script
+# re-runs on the SAME pod -- confirmed live: after sed-relaxing
+# ARC3-Inference's requires-python above, uv still resolved the OLD
+# ==3.12.12 pin from a previous attempt's cache and failed the same way.
+# Clear it every run so a locally-patched pyproject.toml is always honored.
+rm -rf /root/.cache/uv
 uv pip install --python "${VENV_PYTHON}" "torch==2.10.0" "vllm==0.19.0"
 uv pip install --python "${VENV_PYTHON}" flashinfer || echo "flashinfer install failed -- continuing without it (Marlin FP8 path still works on Ampere)"
 uv pip install --python "${VENV_PYTHON}" -e "${ATLAS_SRC}/tufa-arc-agi-framework" -e "${ATLAS_SRC}/ARC3-Inference"
