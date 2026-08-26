@@ -155,24 +155,18 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 1800.0  # 25.08 "v19": a ~30-min sanity check
-                                   # (bumped from 20min -- gives the stall
-                                   # deposit, which needs 50% of the cap
-                                   # elapsed with zero progress, more room
-                                   # to actually fire and be observable) --
-                                   # this build bundles v17's
-                                   # re-strengthened THEORY_CHECKPOINT, the
-                                   # FIXED time-bank stall trigger (v18 showed
-                                   # the original trigger never fires; fixed
-                                   # same day, see solver.py), and the new
-                                   # retry-storm backstop, none of which have
-                                   # run together in one kernel before. Not a
-                                   # depth or adoption-rate measurement this
-                                   # time (those were already answered by
-                                   # v15-v18) -- just confirming nothing
-                                   # crashes with all three combined before
-                                   # this becomes the next real-submission
-                                   # candidate.
+ATLAS_CALIBRATION_CAP_S = 300.0    # 26.08 "v20": quota is tight (2h15m left,
+                                   # this run must fit in <=20min). 25 games /
+                                   # concurrency 10 = 3 waves; 3*300s=900s
+                                   # (15min) + ~5min setup ~= 20min budget,
+                                   # minimal margin. Pure crash/sanity check
+                                   # for the two genuinely new-to-live pieces
+                                   # (ATLAS_MEMO_CHECKPOINT, the reworded
+                                   # ATLAS_FORCE_ACT_OVERRIDE) plus concurrency
+                                   # 10 and goal-reconsider, none of which have
+                                   # run together in one kernel before -- not a
+                                   # depth measurement, that's what the 26.08
+                                   # debug-kernel transcript analysis was for.
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S
     print(f"atlas: Phase A calibration cap -- max_runtime_s_per_game = {ATLAS_CALIBRATION_CAP_S:.0f}s")
