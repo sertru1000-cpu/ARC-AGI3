@@ -15,6 +15,8 @@ import requests
 
 from inference.agent.action_names import to_engine_action, to_model_action
 from inference.agent.prompts import (
+    ATLAS_FORCE_ACT_OVERRIDE,
+    ATLAS_GOAL_RECONSIDER_CHECKPOINT,
     ATLAS_NOTE_ENFORCEMENT_CHECKPOINT,
     ATLAS_PLAN_CHECKPOINT_TEMPLATE,
     ATLAS_THEORY_CHECKPOINT,
@@ -33,19 +35,48 @@ _ATLAS_PLAN_NAG_EVERY = 3
 # Below this many python-tool calls, transitions probably haven't accumulated
 # enough for verify_theory to be worth nagging about yet.
 _ATLAS_THEORY_NAG_AFTER_CALLS = 4
-# 24.08: temporarily OFF. Found live on r11l (v12) that this checkpoint can
-# cause TOTAL action paralysis, not just under-use: verify_theory's accuracy
-# is an exact whole-board match per transition, so a game with a hard-to-
-# model mechanic can make "verified_accuracy >= 0.6" nearly unreachable. The
-# model then read "Do not skip this turn -- probing without a theory wastes
-# actions" as a hard gate against acting further at all, and spent its
-# entire remaining budget (4.4h) reverse-engineering predict() instead of
-# playing -- 1 real action for the whole game. This is the flip side of the
-# same nudge that fixed C0/C1's "tool ignored" problem (0->42 calls on v5):
-# obeyed so literally it can block play instead of just being skipped.
-# ATLAS_PLAN_CHECKPOINT_TEMPLATE (below) is untouched -- it only fires AFTER
-# a theory is already verified, so it was never implicated in this failure.
-_ATLAS_THEORY_CHECKPOINT_ENABLED = False
+# 24.08: was disabled after r11l (v12) showed it can cause TOTAL action
+# paralysis (1 real action in 4.4h) -- verify_theory's accuracy is an exact
+# whole-board match per transition, so a hard-to-model mechanic can make
+# "verified_accuracy >= 0.6" nearly unreachable, and the model read "Do not
+# skip this turn -- probing without a theory wastes actions" as a hard gate
+# against acting further at all. Disabling it outright turned out to have
+# its own cost, found on v15: with NEITHER checkpoint able to fire
+# (PLAN_CHECKPOINT only fires after a verified theory exists),
+# verify_theory/plan_with_theory/execute_plan dropped to 0 calls across 612
+# real python-tool calls, 25 games -- regressed all the way back to C0's
+# original "tool ignored" problem this nudge was built to fix (v5: 0->42
+# calls). 25.08 v16: re-enabled with SOFTENED wording ("this is a
+# suggestion, not a requirement... acting without a verified theory is
+# completely fine") + the force-act backstop below. Backstop worked (fired
+# 23 times across 13/25 games, no paralysis recurrence), but the soft
+# wording gave the model explicit permission to ignore it -- still 0/662
+# real calls despite the checkpoint firing 360 times; a live transcript
+# check (r11l) showed the model's own reasoning never even mentions it.
+# 25.08 v17: wording re-strengthened (imperative "THIS turn, write
+# predict()...", no more "just a suggestion" framing) now that the
+# force-act backstop is PROVEN to catch paralysis independent of wording --
+# safety no longer depends on how forcefully this text reads.
+_ATLAS_THEORY_CHECKPOINT_ENABLED = True
+# atlas 25.08: hard backstop for the r11l failure mode, independent of
+# checkpoint wording. Counts real `python` tool calls since the last call
+# that actually invoked action() (see _atlas_calls_since_real_action,
+# reset/incremented in _run_python_tool). Once this crosses the threshold,
+# _build_user_prompt overrides BOTH theory-style checkpoints with
+# ATLAS_FORCE_ACT_OVERRIDE for that turn -- unconditional, cannot be
+# out-argued by any interpretation of the softer nudge text above.
+_ATLAS_FORCE_ACT_AFTER_CALLS = 8
+# atlas 25.08: found on dc22 (Gemini teacher data, old harness) -- 221
+# verify_theory calls, but the model was cycling through 4 unrelated
+# high-level theories of what KIND of mechanic this is (a rotating dial -> a
+# camera capture -> a lathe/silhouette -> an assembly arm), each abandoned
+# rather than falsified by evidence. THEORY_CHECKPOINT only ever pushes
+# "refine predict()" -- it has no way to suggest the DYNAMICS aren't the
+# problem, the GOAL model might be. After this many verify_theory( calls
+# still below 0.6 accuracy, nudge toward reconsidering the goal instead of
+# yet another predict() rewrite. Deliberately 2x _ATLAS_THEORY_NAG_AFTER_CALLS
+# -- give one theory a real chance before suggesting the bigger reframe.
+_ATLAS_GOAL_RECONSIDER_AFTER_CALLS = 8
 _ATLAS_ACCURACY_RE = re.compile(r"['\"]accuracy['\"]\s*:\s*([0-9]*\.?[0-9]+)")
 # atlas: a non-null 'note' in a printed/returned plan_with_theory() result --
 # res['note'] is only set when the found plan has more than one step, so this
@@ -1271,6 +1302,13 @@ class ToolAgent:
         self._atlas_python_call_index = 0
         self._atlas_last_plan_call_index = -99
         self._atlas_last_verified_accuracy: float | None = None
+        # atlas: real python-tool calls since the last one that actually
+        # called action() -- the force-act circuit breaker's trigger. See
+        # _ATLAS_FORCE_ACT_AFTER_CALLS and _run_python_tool.
+        self._atlas_calls_since_real_action = 0
+        # atlas: total verify_theory( calls this game -- the goal-reconsider
+        # checkpoint's trigger. See _ATLAS_GOAL_RECONSIDER_AFTER_CALLS.
+        self._atlas_verify_theory_call_count = 0
         # atlas: set when a turn calls plan_with_theory( and gets back a plan
         # of >1 step (res['note'] non-null) AND fires it via a SINGLE action()
         # call in that same script -- exactly the pattern that failed live
@@ -1327,6 +1365,8 @@ class ToolAgent:
             self._atlas_python_call_index = 0
             self._atlas_last_plan_call_index = -99
             self._atlas_last_verified_accuracy = None
+            self._atlas_calls_since_real_action = 0
+            self._atlas_verify_theory_call_count = 0
             self._atlas_note_incident = None
             self._atlas_memo = {}
             self._noop_guard = NoopGuard() if self._hard_noop_guard_enabled else None
@@ -1658,7 +1698,24 @@ class ToolAgent:
         # ~0.2% of turns (measured on our own harness's C0 mechanism before
         # this same fix). Only one checkpoint fires per turn: verifying comes
         # before planning, so a still-unverified theory takes priority.
-        if (
+        if self._atlas_calls_since_real_action >= _ATLAS_FORCE_ACT_AFTER_CALLS:
+            lines.append(ATLAS_FORCE_ACT_OVERRIDE.format(calls=self._atlas_calls_since_real_action))
+            print(
+                f"atlas: force-act override injected (action_num={action_num}, "
+                f"calls_since_real_action={self._atlas_calls_since_real_action})",
+                flush=True,
+            )
+        elif (
+            self._atlas_last_verified_accuracy is None
+            or self._atlas_last_verified_accuracy < 0.6
+        ) and self._atlas_verify_theory_call_count >= _ATLAS_GOAL_RECONSIDER_AFTER_CALLS:
+            lines.append(ATLAS_GOAL_RECONSIDER_CHECKPOINT.format(calls=self._atlas_verify_theory_call_count))
+            print(
+                f"atlas: goal-reconsider checkpoint injected (action_num={action_num}, "
+                f"verify_theory_calls={self._atlas_verify_theory_call_count})",
+                flush=True,
+            )
+        elif (
             _ATLAS_THEORY_CHECKPOINT_ENABLED
             and (
                 self._atlas_last_verified_accuracy is None
@@ -2196,6 +2253,10 @@ class ToolAgent:
         # model printed the dict, or a plan_with_theory result that also
         # carries 'verified_accuracy'... 'accuracy' covers both keys' tails).
         self._atlas_python_call_index += 1
+        if action_results:
+            self._atlas_calls_since_real_action = 0
+        else:
+            self._atlas_calls_since_real_action += 1
         if "plan_with_theory(" in code:
             self._atlas_last_plan_call_index = self._atlas_python_call_index
             print(f"atlas: model called plan_with_theory( (call #{self._atlas_python_call_index})", flush=True)
@@ -2228,6 +2289,7 @@ class ToolAgent:
         if "execute_plan(" in code:
             print(f"atlas: model called execute_plan( (call #{self._atlas_python_call_index})", flush=True)
         if "verify_theory(" in code:
+            self._atlas_verify_theory_call_count += 1
             sandbox_payload_result = sandbox_result.get("result")
             accuracy = None
             if isinstance(sandbox_payload_result, dict) and isinstance(

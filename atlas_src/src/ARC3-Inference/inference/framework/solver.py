@@ -66,6 +66,51 @@ DEFAULT_CANCEL_DRAIN_TIMEOUT_SECONDS = 120.0
 
 # atlas: free replay-after-win ("speedrun"). See _speedrun_after_win below.
 _ATLAS_SPEEDRUN_ENABLED = os.environ.get("ATLAS_SPEEDRUN_AFTER_WIN", "1") != "0"
+
+# atlas 25.08: shared time bank across concurrently running games. Every game
+# gets the SAME max_runtime_s_per_game today, uniformly, regardless of how it's
+# actually doing -- a game stuck at level 0 burns its whole allocation for zero
+# score, while a game that's already proven it can clear levels (RHAE's own
+# per-run weighting rewards LATER levels more) could use more time productively.
+# Rather than live cross-game preemption (a bigger, riskier change to the
+# ThreadPoolExecutor+Semaphore scheduler), this is a simple deposit/draw pool:
+# a session that's genuinely stalled (see _ATLAS_STALL_WINDOW/_FRACTION below)
+# ends itself early and returns its unused time to the bank; a session that
+# just reached a NEW level it hadn't seen before may draw from the bank to
+# extend its OWN deadline, bounded by _ATLAS_TIME_BANK_MAX_EXTRA_MULTIPLIER so
+# one lucky game can't starve everything else (including games still queued
+# behind the concurrency semaphore).
+_ATLAS_TIME_BANK_ENABLED = os.environ.get("ATLAS_TIME_BANK_ENABLED", "1") != "0"
+# Only allow the early-stop-and-deposit path once this fraction of the base
+# per-game cap has elapsed with ZERO level progress -- guards against cutting
+# off a game that's just a slow, legitimate starter. Raised 0.4->0.5 in v19
+# alongside dropping the old literal-no-op requirement (see
+# _atlas_stall_decision's docstring) -- the trigger is more permissive now
+# (fires on busy-but-unproductive play too, not just frozen play), so a
+# slightly larger margin against cutting off a near-success stays cheap
+# insurance.
+_ATLAS_STALL_EARLY_STOP_FRACTION = 0.5
+# A session may draw at most this fraction of its base cap in ONE grant, and
+# never accumulate more than _MAX_EXTRA_MULTIPLIER x its base cap in total
+# extensions -- keeps any single game from monopolizing the shared bank.
+_ATLAS_TIME_BANK_DRAW_FRACTION = 0.5
+_ATLAS_TIME_BANK_MAX_EXTRA_MULTIPLIER = 1.0
+
+# atlas 25.08: retry-storm backstop, found live on v17 -- 3 of 25 games
+# (cn04, lp85, re86) spent 15-30 CONSECUTIVE MINUTES retrying the exact same
+# analysis_step after repeated analyzer request timeouts (the shared local
+# LLM backend under concurrency=14 load), never producing a single python
+# tool call for that whole stretch. Neither the force-act circuit breaker
+# nor the stall detector above can see this -- both only observe what
+# happens INSIDE a python tool call, and this failure happens at the
+# analyzer/request level, before any tool call exists. `play()`'s retry loop
+# (ANALYZER_RETRY_BACKOFF_SECONDS = 1.0s backoff, no cap) will otherwise
+# retry forever until the per-game deadline itself is reached, burning the
+# whole allocation on zero real progress. Reuses the same shared time bank:
+# once a session hits this many CONSECUTIVE retryable analyzer failures, it
+# ends itself early and returns its unused remainder, exactly like a stalled
+# session -- just with a different (infra, not gameplay) trigger.
+_ATLAS_RETRY_STORM_THRESHOLD = 5
 _ATLAS_MOUSE_DISPLAY_RE = re.compile(r"^MOUSE\(row=(\d+), col=(\d+)\)$")
 _LOCAL_SERVER_PROCESS_ENV_KEYS = (
     "LOCAL_ANALYZER_API_KEY",
@@ -175,6 +220,69 @@ def _is_run_complete(game: taaf.game.Game) -> bool:
     return game.current_state.raw.state == arcengine.GameState.WIN
 
 
+def _atlas_stall_decision(
+    *,
+    elapsed: float,
+    cap: float,
+    start_level: int,
+    current_level: int,
+    already_deposited: bool,
+) -> tuple[bool, float]:
+    """Should this session stop itself now and return unused time to the
+    bank? Returns (should_stop_now, seconds_to_deposit). Never fires for a
+    session that has progressed past its starting level, or has already
+    deposited once (one deposit per session, not a recurring drain).
+
+    25.08 v19: dropped the earlier "6 consecutive actions with a literally
+    unchanged grid" requirement (see _atlas_recent_stalled, removed) after
+    v18's real logs showed it never fires in practice -- 0 deposits, 0 draws
+    across a full 4h/25-game run, even though 11 of 25 games spent nearly
+    their whole allocation stuck at level 0. Real unproductive play still
+    changes the board constantly (wrong clicks, movement that doesn't help,
+    etc.) -- it just never advances the LEVEL, which is the only thing RHAE
+    actually scores. Zero level progress past a large fraction of the cap is
+    itself sufficient evidence; the literal-no-op signal was catching a
+    different (and apparently much rarer) failure mode."""
+    if current_level > start_level or already_deposited:
+        return False, 0.0
+    if cap <= 0 or elapsed < cap * _ATLAS_STALL_EARLY_STOP_FRACTION:
+        return False, 0.0
+    return True, max(0.0, cap - elapsed)
+
+
+def _atlas_extension_request(
+    *,
+    cap: float,
+    current_extra: float,
+    current_level: int,
+    last_credited_level: int,
+) -> float:
+    """How much extra time (if any) this session should TRY to draw from the
+    bank, having just reached a level it hadn't been credited for yet. The
+    actual grant is capped again by whatever the bank actually holds (see
+    HarnessSolver.atlas_draw_time) -- this only bounds the ASK, so one game
+    can never accumulate more than _MAX_EXTRA_MULTIPLIER x its own base cap
+    even if the bank is flush."""
+    if cap <= 0 or current_level <= last_credited_level:
+        return 0.0
+    max_extra = cap * _ATLAS_TIME_BANK_MAX_EXTRA_MULTIPLIER
+    room = max(0.0, max_extra - current_extra)
+    if room <= 0:
+        return 0.0
+    return min(room, cap * _ATLAS_TIME_BANK_DRAW_FRACTION)
+
+
+def _atlas_retry_storm_decision(
+    *, consecutive_failures: int, threshold: int, already_deposited: bool
+) -> bool:
+    """Should this session end itself now due to a run of consecutive
+    analyzer-level request failures (backend timeouts under load, not a
+    gameplay stall)? Pure/testable: no session or game state, just counters."""
+    if already_deposited:
+        return False
+    return consecutive_failures >= threshold
+
+
 def _write_transcript_html(transcript_path: Path, html_path: Path, title: str) -> None:
     if not transcript_path.exists():
         return
@@ -227,6 +335,13 @@ class _HarnessGameSession:
         default_factory=lambda: deque(maxlen=ANIMATION_HISTORY_DEPTH)
     )
     _viewer_events_flushed: int = field(default=0, init=False, repr=False)
+    # atlas 25.08: time-bank state, see _ATLAS_TIME_BANK_ENABLED above.
+    _atlas_extra_time_s: float = field(default=0.0, init=False, repr=False)
+    _atlas_stall_deposited: bool = field(default=False, init=False, repr=False)
+    _atlas_start_level: int | None = field(default=None, init=False, repr=False)
+    _atlas_last_credited_level: int = field(default=-1, init=False, repr=False)
+    _atlas_consecutive_retry_failures: int = field(default=0, init=False, repr=False)
+    _atlas_retry_storm_deposited: bool = field(default=False, init=False, repr=False)
 
     def current_frame(self) -> Frame:
         return Frame(
@@ -253,20 +368,117 @@ class _HarnessGameSession:
         run = self.game.game_run
         return len(run.history) if run is not None else 0
 
+    def _atlas_effective_runtime_cap(self) -> float | None:
+        """Base max_runtime_s_per_game plus whatever this session has drawn
+        from the shared time bank (see _ATLAS_TIME_BANK_ENABLED)."""
+        base = self.solver.max_runtime_s_per_game
+        if base is None:
+            return None
+        return base + self._atlas_extra_time_s
+
     def runtime_limit_reached(self) -> bool:
-        if self.solver.max_runtime_s_per_game is None:
+        cap = self._atlas_effective_runtime_cap()
+        if cap is None:
             return False
-        return (
-            time.monotonic() - self.started_at
-        ) >= self.solver.max_runtime_s_per_game
+        return (time.monotonic() - self.started_at) >= cap
 
     def timing_payload(self) -> dict[str, float | None]:
         elapsed = max(0.0, time.monotonic() - self.started_at)
-        if self.solver.max_runtime_s_per_game is None:
+        cap = self._atlas_effective_runtime_cap()
+        if cap is None:
             remaining = None
         else:
-            remaining = max(0.0, self.solver.max_runtime_s_per_game - elapsed)
+            remaining = max(0.0, cap - elapsed)
         return {"run_elapsed_seconds": elapsed, "time_remaining_seconds": remaining}
+
+    def _atlas_check_time_bank(self) -> bool:
+        """Poll the time bank each should_stop() check: draw extra time if a
+        new level was just reached, or end this session early (returning
+        unused time to the bank) if it's genuinely stalled. Returns True if
+        this session should stop NOW as a result. No-op, returns False
+        immediately, if _ATLAS_TIME_BANK_ENABLED is off or there's no cap."""
+        if not _ATLAS_TIME_BANK_ENABLED:
+            return False
+        cap = self.solver.max_runtime_s_per_game
+        if cap is None or cap <= 0:
+            return False
+        current_level = self.current_frame().level
+        if self._atlas_start_level is None:
+            self._atlas_start_level = current_level
+            # The STARTING level is not "new progress" -- without this, the
+            # default -1 sentinel makes every session try to draw on its very
+            # first poll (harmlessly returns 0 while the bank is still empty,
+            # but is not what "just reached a level it hadn't seen" means).
+            self._atlas_last_credited_level = current_level
+
+        requested = _atlas_extension_request(
+            cap=cap,
+            current_extra=self._atlas_extra_time_s,
+            current_level=current_level,
+            last_credited_level=self._atlas_last_credited_level,
+        )
+        if current_level > self._atlas_last_credited_level:
+            # Mark this level "tried" regardless of whether a grant follows --
+            # a new level with no bank room left must not re-ask every poll.
+            self._atlas_last_credited_level = current_level
+        if requested > 0:
+            granted = self.solver.atlas_draw_time(requested)
+            if granted > 0:
+                self._atlas_extra_time_s += granted
+                print(
+                    f"atlas: game {self.game_index} drew {granted:.0f}s from the time bank "
+                    f"after reaching level {current_level} (total extra {self._atlas_extra_time_s:.0f}s)",
+                    flush=True,
+                )
+
+        should_stop, deposit = _atlas_stall_decision(
+            elapsed=time.monotonic() - self.started_at,
+            cap=cap,
+            start_level=self._atlas_start_level,
+            current_level=current_level,
+            already_deposited=self._atlas_stall_deposited,
+        )
+        if should_stop:
+            self.solver.atlas_deposit_time(deposit)
+            self._atlas_stall_deposited = True
+            print(
+                f"atlas: game {self.game_index} stalled with 0 level progress -- "
+                f"ending early, returning {deposit:.0f}s to the time bank",
+                flush=True,
+            )
+        return should_stop
+
+    def _atlas_check_retry_storm(self) -> bool:
+        """Backstop for repeated ANALYZER-level request failures (e.g. the
+        shared LLM backend timing out under concurrent load) -- a failure
+        mode _atlas_check_time_bank cannot see, since it happens before any
+        python tool call is ever produced. Called from play()'s retry
+        branch, not should_stop(), since play() needs to `break` its own
+        loop directly rather than wait for the next should_stop() poll."""
+        if not _ATLAS_TIME_BANK_ENABLED:
+            return False
+        if not _atlas_retry_storm_decision(
+            consecutive_failures=self._atlas_consecutive_retry_failures,
+            threshold=_ATLAS_RETRY_STORM_THRESHOLD,
+            already_deposited=self._atlas_retry_storm_deposited,
+        ):
+            return False
+        cap = self._atlas_effective_runtime_cap()
+        deposit = max(0.0, cap - (time.monotonic() - self.started_at)) if cap is not None else 0.0
+        self.solver.atlas_deposit_time(deposit)
+        self._atlas_retry_storm_deposited = True
+        run = self.game.game_run
+        if run is not None and run.solver_note is None:
+            run.solver_note = (
+                f"atlas: ended early after {self._atlas_consecutive_retry_failures} "
+                "consecutive analyzer request failures"
+            )
+        print(
+            f"atlas: game {self.game_index} hit {self._atlas_consecutive_retry_failures} "
+            f"consecutive analyzer failures -- ending early, returning {deposit:.0f}s to the time bank",
+            flush=True,
+        )
+        return True
 
     def request_timeout_seconds(self) -> float | None:
         candidates: list[float] = []
@@ -296,6 +508,8 @@ class _HarnessGameSession:
         if _is_run_complete(self.game):
             return True
         if self.runtime_limit_reached():
+            return True
+        if self._atlas_check_time_bank():
             return True
         if (
             self.solver.max_actions_per_game is not None
@@ -355,12 +569,16 @@ class _HarnessGameSession:
                     raise RuntimeError("Analyzer did not return a result.")
                 if result.retryable_failure:
                     retry_analysis_step = analysis_step
+                    self._atlas_consecutive_retry_failures += 1
+                    if self._atlas_check_retry_storm():
+                        break
                     if self.should_stop():
                         break
                     time.sleep(ANALYZER_RETRY_BACKOFF_SECONDS)
                     continue
 
                 retry_analysis_step = None
+                self._atlas_consecutive_retry_failures = 0
                 if getattr(result, "yielded_control", False):
                     retry_analysis_step = analysis_step
                     continue
@@ -1079,6 +1297,30 @@ class HarnessSolver(Solver):
     # Python's default executor, capped at min(32, cpu+4) — which would
     # silently cap real concurrency below self.concurrency.
     _worker_pool: ThreadPoolExecutor | None = field(default=None, init=False, repr=False, compare=False)
+    # atlas 25.08: shared time bank, see _ATLAS_TIME_BANK_ENABLED above.
+    _atlas_time_bank_s: float = field(default=0.0, init=False, repr=False, compare=False)
+    _atlas_time_bank_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
+
+    def atlas_deposit_time(self, seconds: float) -> None:
+        """Return unused per-game time to the shared bank (thread-safe --
+        called concurrently from any of the running game sessions)."""
+        if seconds <= 0:
+            return
+        with self._atlas_time_bank_lock:
+            self._atlas_time_bank_s += seconds
+
+    def atlas_draw_time(self, requested: float) -> float:
+        """Draw up to `requested` seconds from the shared bank; returns the
+        amount actually granted (0 if the bank is empty), never more than
+        what's available. Thread-safe."""
+        if requested <= 0:
+            return 0.0
+        with self._atlas_time_bank_lock:
+            granted = min(requested, self._atlas_time_bank_s)
+            self._atlas_time_bank_s -= granted
+            return granted
 
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
@@ -1092,6 +1334,7 @@ class HarnessSolver(Solver):
         state.pop("_local_servers", None)
         state.pop("_local_server_original_env", None)
         state.pop("_worker_pool", None)
+        state.pop("_atlas_time_bank_lock", None)
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -1105,6 +1348,7 @@ class HarnessSolver(Solver):
         self._local_servers = []
         self._local_server_original_env = {}
         self._worker_pool = None
+        self._atlas_time_bank_lock = threading.Lock()
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "HarnessSolver":
         cls = type(self)
@@ -1121,6 +1365,8 @@ class HarnessSolver(Solver):
                 object.__setattr__(new, key, {})
             elif key == "_worker_pool":
                 object.__setattr__(new, key, None)
+            elif key == "_atlas_time_bank_lock":
+                object.__setattr__(new, key, threading.Lock())
             else:
                 object.__setattr__(new, key, copy.deepcopy(value, memo))
         return new

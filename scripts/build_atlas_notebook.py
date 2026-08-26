@@ -74,7 +74,39 @@ ATLAS_CELL = '''# ==============================================================
 
 ATLAS_ANALYZER_TIMEOUT_S = 480.0       # v1 tried 180 (measured: far too short)
 ATLAS_ANALYZER_MAX_OUTPUT_TOKENS = 8000  # v1 had this unbounded (0) -- the real bug
-ATLAS_CONCURRENCY = 14                 # bundle/notebook used 28 on a single GPU
+ATLAS_CONCURRENCY = 10                 # bundle/notebook used 28 on a single GPU.
+                                        # 25.08: lowered from 14 after the
+                                        # retry-storm bug (cn04/lp85/re86 in
+                                        # v17 lost 15-30min each retrying one
+                                        # analysis_step on request timeouts,
+                                        # plausibly the shared local LLM
+                                        # backend overloaded under 14x
+                                        # concurrent load). Checked the real
+                                        # atlas_fit_game_cap() formula first:
+                                        # at 25 games, concurrency 9-13 all
+                                        # still land on 3 (or fewer) waves,
+                                        # so the real per-game cap stays
+                                        # pinned at the 8500s ceiling either
+                                        # way -- this costs ZERO per-game
+                                        # budget, only raises the worst-case
+                                        # total wall time (4.72h->7.08h,
+                                        # still comfortably inside the 8h
+                                        # budget/9h hard cap). Below 9,
+                                        # waves=4 and the real cap drops to
+                                        # 7200s -- a genuine cost, so 10 was
+                                        # chosen for margin above that cliff
+                                        # while cutting concurrent load by
+                                        # ~29%. Complements, doesn't replace,
+                                        # the retry-storm backstop in
+                                        # solver.py -- less contention makes
+                                        # a storm less likely, the backstop
+                                        # bounds the damage if one still
+                                        # happens. NOT applied to kernel
+                                        # version 19 (already pushed/running
+                                        # when this was decided) -- takes
+                                        # effect on the next build after it.
+                                        # See scripts/test_atlas_fit_game_cap.py
+                                        # for the concurrency/waves/cap math.
 ATLAS_FALLBACK_GAME_CAP_S = 7920.0     # applied only if the bundle carries none
 
 # Wall-clock guard for the submission rerun. Unlike the offline run, a rerun
@@ -123,18 +155,24 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 1800.0  # 25.08: 30 min/game x 2 waves ~= 1h --
-                                   # this build's purpose is NOT a depth/crash
-                                   # check (v14 already confirmed clean at
-                                   # 600s) but measuring whether the model
-                                   # reaches for the new optional extract=
-                                   # abstraction ON ITS OWN, with zero nudge.
-                                   # 600s wasn't enough turns per game to see
-                                   # verify_theory tried more than once or
-                                   # twice; 1800s gives most games several
-                                   # attempts before deciding whether a
-                                   # host-triggered nudge (backlog item 6) is
-                                   # actually needed.
+ATLAS_CALIBRATION_CAP_S = 1800.0  # 25.08 "v19": a ~30-min sanity check
+                                   # (bumped from 20min -- gives the stall
+                                   # deposit, which needs 50% of the cap
+                                   # elapsed with zero progress, more room
+                                   # to actually fire and be observable) --
+                                   # this build bundles v17's
+                                   # re-strengthened THEORY_CHECKPOINT, the
+                                   # FIXED time-bank stall trigger (v18 showed
+                                   # the original trigger never fires; fixed
+                                   # same day, see solver.py), and the new
+                                   # retry-storm backstop, none of which have
+                                   # run together in one kernel before. Not a
+                                   # depth or adoption-rate measurement this
+                                   # time (those were already answered by
+                                   # v15-v18) -- just confirming nothing
+                                   # crashes with all three combined before
+                                   # this becomes the next real-submission
+                                   # candidate.
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S
     print(f"atlas: Phase A calibration cap -- max_runtime_s_per_game = {ATLAS_CALIBRATION_CAP_S:.0f}s")

@@ -13,6 +13,17 @@ Drives the ACTUAL embedded cell text from scripts/build_atlas_notebook.py
 exec(), with a fake `bm`/`WORKING_DIR`/`true_submission`, so this is the
 literal code that ships in the notebook -- not a hand-copied reimplementation
 that could silently drift from the real formula.
+
+25.08: ATLAS_CELL's own `bm.solver.concurrency = ATLAS_CONCURRENCY` line
+OVERWRITES whatever concurrency a `_Benchmark(concurrency, ...)` fixture was
+built with -- the concurrency value that actually matters is the real
+ATLAS_CONCURRENCY constant baked into the cell, not whatever this test
+passes in. This was already true before 25.08's 14->10 change (lowered to
+cut concurrent-request contention after the retry-storm bug -- see
+solver.py), it just went unnoticed because the test's hardcoded "14"
+happened to match. Pull ATLAS_CONCURRENCY from the exec'd namespace (same
+pattern already used for the budget/floor/ceiling constants) so this test
+tracks the real value instead of drifting silently again.
 """
 
 from __future__ import annotations
@@ -83,10 +94,14 @@ def _run_cell(bm, working_dir: Path):
     return namespace
 
 
-def _fit(n_games: int, concurrency: int, bundle_default_cap: float = 7920.0):
-    """Call the real, freshly-exec'd atlas_fit_game_cap(n_games) and report the outcome."""
+def _fit(n_games: int, bundle_default_cap: float = 7920.0):
+    """Call the real, freshly-exec'd atlas_fit_game_cap(n_games) and report the outcome.
+
+    The `concurrency` passed to the throwaway _Benchmark fixture here is
+    irrelevant -- ATLAS_CELL always overwrites bm.solver.concurrency with the
+    real ATLAS_CONCURRENCY constant regardless of what this starts with."""
     with tempfile.TemporaryDirectory() as tmp:
-        bm = _Benchmark(concurrency, bundle_default_cap)
+        bm = _Benchmark(1, bundle_default_cap)
         namespace = _run_cell(bm, Path(tmp))
         with contextlib.redirect_stdout(io.StringIO()):
             namespace["atlas_fit_game_cap"](n_games)
@@ -96,100 +111,104 @@ def _fit(n_games: int, concurrency: int, bundle_default_cap: float = 7920.0):
 
 
 def main() -> None:
-    # ATLAS_SUBMISSION_BUDGET_S/ATLAS_MIN_GAME_CAP_S/ATLAS_SUBMISSION_GAME_CAP_CEILING_S
-    # are defined INSIDE ATLAS_CELL, not as module attributes -- pull them from
-    # a throwaway exec so the test's expected numbers track the real constants
-    # instead of hand-copied magic numbers that could drift. 24.08: the ceiling
-    # is now this explicit constant (8500s), not an implicit read of whatever
-    # bm.solver.max_runtime_s_per_game happened to carry in from the bundle
-    # (7920s) -- the starting value passed to _Benchmark below no longer
-    # affects the fitted result at all, only the logged "previous" value.
-    probe_ns = _run_cell(_Benchmark(14, 7920.0), Path(tempfile.mkdtemp()))
+    # ATLAS_SUBMISSION_BUDGET_S/ATLAS_MIN_GAME_CAP_S/ATLAS_SUBMISSION_GAME_CAP_CEILING_S/
+    # ATLAS_CONCURRENCY are defined INSIDE ATLAS_CELL, not as module attributes
+    # -- pull them from a throwaway exec so the test's expected numbers track
+    # the real constants instead of hand-copied magic numbers that could drift.
+    probe_ns = _run_cell(_Benchmark(1, 7920.0), Path(tempfile.mkdtemp()))
     budget_s = probe_ns["ATLAS_SUBMISSION_BUDGET_S"]
     min_cap_s = probe_ns["ATLAS_MIN_GAME_CAP_S"]
     ceiling_s = probe_ns["ATLAS_SUBMISSION_GAME_CAP_CEILING_S"]
+    concurrency = probe_ns["ATLAS_CONCURRENCY"]
 
-    # 1. 25 games / concurrency 14 -> 2 waves; the KNOWN, still-present limitation:
-    #    affordable (budget/2) comfortably exceeds the ceiling, so the
+    # The largest whole number of waves where budget/waves still clears the
+    # ceiling -- i.e. how many waves the ceiling-pin tolerates before the
+    # budget itself starts binding instead. Concurrency-independent (only
+    # budget_s/ceiling_s matter); n_boundary below is what turns it into an
+    # actual n_games figure for the CURRENT concurrency.
+    max_waves_for_pin = math.floor(budget_s / ceiling_s)
+    n_boundary = max_waves_for_pin * concurrency  # largest n_games where the pin still holds
+
+    # 1. 25 games -> the KNOWN, still-present limitation: affordable
+    #    (budget/waves) comfortably exceeds the ceiling, so the
     #    ceiling-clamped formula pins the cap at the ceiling, not the budget.
-    waves = math.ceil(25 / 14)
+    waves = math.ceil(25 / concurrency)
     affordable = budget_s / waves
     expected = max(min_cap_s, min(ceiling_s, affordable))
-    fitted, diag = _fit(25, 14)
+    fitted, diag = _fit(25)
     if fitted != expected:
-        _fail("25 games / concurrency 14", f"expected {expected}, got {fitted}")
+        _fail("25 games", f"expected {expected}, got {fitted}")
     if expected != ceiling_s:
-        _fail("25 games / concurrency 14 (sanity)", "test's own assumption about the known ceiling-pin drifted")
-    _ok(f"25 games / concurrency 14 -> {waves} wave(s), cap stays pinned at the ceiling {fitted:.0f}s "
+        _fail("25 games (sanity)", "test's own assumption about the known ceiling-pin drifted")
+    _ok(f"25 games / concurrency {concurrency} -> {waves} wave(s), cap stays pinned at the ceiling {fitted:.0f}s "
         f"(affordable would allow {affordable:.0f}s -- the known, still-present limitation)")
 
     # 1b. the ceiling-pin is NOT specific to 25 -- it holds for the WHOLE range
-    #     up to 42 games at concurrency 14 (waves stays <=3, so affordable
-    #     stays >=ceiling_s). 42 is the last n_games where the pin still holds.
-    n_boundary = 42
-    waves = math.ceil(n_boundary / 14)
-    fitted, _ = _fit(n_boundary, 14)
-    if waves != 3 or fitted != ceiling_s:
-        _fail("42 games boundary", f"expected 3 waves / pinned at {ceiling_s}, got {waves} waves / {fitted}")
-    _ok(f"{n_boundary} games / concurrency 14 -> still {waves} waves, cap still pinned at {fitted:.0f}s "
-        "(the pin holds for the WHOLE 1..42 range, not just 25)")
+    #     up to n_boundary games (waves stays low enough that affordable
+    #     stays >=ceiling_s). n_boundary is the last n_games where it holds.
+    waves = math.ceil(n_boundary / concurrency)
+    fitted, _ = _fit(n_boundary)
+    if waves > max_waves_for_pin or fitted != ceiling_s:
+        _fail("pin boundary", f"expected <= {max_waves_for_pin} waves / pinned at {ceiling_s}, got {waves} waves / {fitted}")
+    _ok(f"{n_boundary} games / concurrency {concurrency} -> still {waves} wave(s), cap still pinned at {fitted:.0f}s "
+        f"(the pin holds for the WHOLE 1..{n_boundary} range, not just 25)")
 
-    # 1c. one game more (43) is the first n_games where the budget finally binds below the ceiling.
-    n_past_boundary = 43
-    waves = math.ceil(n_past_boundary / 14)
-    fitted, _ = _fit(n_past_boundary, 14)
-    if waves != 4 or fitted >= ceiling_s:
-        _fail("43 games past boundary", f"expected 4 waves / below {ceiling_s}, got {waves} waves / {fitted}")
-    _ok(f"{n_past_boundary} games / concurrency 14 -> {waves} waves, budget finally binds: {fitted:.0f}s "
+    # 1c. one game more is the first n_games where the budget finally binds below the ceiling.
+    n_past_boundary = n_boundary + 1
+    waves = math.ceil(n_past_boundary / concurrency)
+    fitted, _ = _fit(n_past_boundary)
+    if waves <= max_waves_for_pin or fitted >= ceiling_s:
+        _fail("past the boundary", f"expected > {max_waves_for_pin} waves / below {ceiling_s}, got {waves} waves / {fitted}")
+    _ok(f"{n_past_boundary} games / concurrency {concurrency} -> {waves} waves, budget finally binds: {fitted:.0f}s "
         "(one game past the boundary is enough to flip it)")
 
     # 2. enough games to finally exceed the ceiling: budget/waves < ceiling_s.
-    n_big = 60
-    waves = math.ceil(n_big / 14)
+    n_big = max(60, n_boundary * 2)
+    waves = math.ceil(n_big / concurrency)
     affordable = budget_s / waves
     expected = max(min_cap_s, min(ceiling_s, affordable))
-    fitted, _ = _fit(n_big, 14)
+    fitted, _ = _fit(n_big)
     if fitted != expected or fitted >= ceiling_s:
-        _fail("60 games / concurrency 14", f"expected {expected} (< ceiling), got {fitted}")
-    _ok(f"{n_big} games / concurrency 14 -> {waves} wave(s), budget finally binds below the ceiling: {fitted:.0f}s")
+        _fail(f"{n_big} games", f"expected {expected} (< ceiling), got {fitted}")
+    _ok(f"{n_big} games / concurrency {concurrency} -> {waves} wave(s), budget finally binds below the ceiling: {fitted:.0f}s")
 
     # 3. pathological case: the floor must hold even when affordable collapses.
     n_huge = 2000
-    fitted, _ = _fit(n_huge, 14)
+    fitted, _ = _fit(n_huge)
     if fitted != min_cap_s:
         _fail("floor holds", f"expected the {min_cap_s:.0f}s floor, got {fitted}")
-    _ok(f"{n_huge} games / concurrency 14 -> the {min_cap_s:.0f}s floor holds, never goes lower")
+    _ok(f"{n_huge} games / concurrency {concurrency} -> the {min_cap_s:.0f}s floor holds, never goes lower")
 
     # 4. the fitted cap can never exceed the total submission budget, whatever n_games is.
-    for n in (1, 5, 25, 60, 500):
-        fitted, _ = _fit(n, 14)
+    for n in (1, 5, 25, n_big, 500):
+        fitted, _ = _fit(n)
         if fitted > budget_s:
             _fail("never exceeds budget", f"n_games={n} produced {fitted}s > budget {budget_s}s")
     _ok("fitted cap never exceeds the total submission budget, across a range of n_games")
 
     # 5. it actually mutates bm.solver.max_runtime_s_per_game (not just computes
-    #    and discards) -- use n_games=60, where the fitted value is known to
-    #    differ from the starting 7920s bundle default (n_games=25 would not
-    #    catch a no-op mutation here, since it now pins at 8500s instead).
-    bm = _Benchmark(14, 7920.0)
+    #    and discards) -- use n_big, where the fitted value is known to
+    #    differ from the starting 7920s bundle default (n=25 would not catch
+    #    a no-op mutation here, since it now pins at the ceiling instead).
+    bm = _Benchmark(1, 7920.0)
     namespace = _run_cell(bm, Path(tempfile.mkdtemp()))
     before = bm.solver.max_runtime_s_per_game
     with contextlib.redirect_stdout(io.StringIO()):
-        namespace["atlas_fit_game_cap"](60)
+        namespace["atlas_fit_game_cap"](n_big)
     after = bm.solver.max_runtime_s_per_game
-    expected_after = min(ceiling_s, budget_s / math.ceil(60 / 14))
+    expected_after = min(ceiling_s, budget_s / math.ceil(n_big / concurrency))
     if after == before or after != expected_after:
         _fail("mutates solver state", f"before={before}, after={after}, expected {expected_after}")
     _ok(f"atlas_fit_game_cap actually sets bm.solver.max_runtime_s_per_game ({before} -> {after})")
 
     # 6. the diagnostics json records the real n_games/waves/cap -- the one
     #    thing we'd want to recover from an actual submission if it survives.
-    fitted, diagnostics = _fit(43, 14)
+    fitted, diagnostics = _fit(n_past_boundary)
     if diagnostics is None:
         _fail("diagnostics written", "atlas_submission_diagnostics.json was not written")
-    if diagnostics["n_games"] != 43 or diagnostics["concurrency"] != 14:
+    if diagnostics["n_games"] != n_past_boundary or diagnostics["concurrency"] != concurrency:
         _fail("diagnostics content", f"got {diagnostics!r}")
-    if diagnostics["waves"] != math.ceil(43 / 14):
+    if diagnostics["waves"] != math.ceil(n_past_boundary / concurrency):
         _fail("diagnostics waves", f"got {diagnostics!r}")
     if diagnostics["per_game_cap_after_s"] != fitted:
         _fail("diagnostics cap matches mutation", f"got {diagnostics!r}")

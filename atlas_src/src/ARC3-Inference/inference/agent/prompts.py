@@ -97,6 +97,7 @@ PYTHON_ADDENDUM = (
     "- `execute_plan(plan, predict, stop_on_mismatch=True, extract=None, goal=None)` runs a `plan_with_theory()` plan one REAL step at a time, comparing each real outcome to what `predict()` forecast for that exact step, and stops itself the moment they diverge -- instead of firing every step in one `action()` call and only finding out at the very end whether it worked. Pass the same `extract` used to build the plan so the comparison happens in that abstraction, not raw grids (dicts matched as a subset, same rule as verify_theory). Pass the same `goal` used to build the plan and it is checked BEFORE any mismatch abort -- if the plan already reached it, a merely cosmetic divergence elsewhere does not cost you the win (`stop_reason='goal_reached'`). Also stops on a terminal result (`level_completed`/`done`/`game_over`/`run_complete`) or if a step failed to execute. Returns `{'steps_executed': ..., 'stopped_early': ..., 'stop_reason': 'predicted_state_mismatch' | 'action_not_executed' | 'goal_reached' | None, 'last_action_result': {...}}`. Costs the same real actions as executing the plan yourself, just stops earlier if the theory turns out to be wrong partway through -- this is the safe default for any plan with more than one step.\n"
     "- This is a genuine alternative to writing your own BFS by hand: once you trust a `predict()`, `plan_with_theory` searches over its predicted states for you and hands back a ready-to-execute plan.\n"
     "- `memo` is a dict (starts empty) that survives across every `python` call for the rest of this game -- unlike everything else here, it is NOT reset each call. Use it to remember things you would otherwise have to re-derive: `memo['tried_targets'] = memo.get('tried_targets', []) + [(row, col)]`. Only JSON-safe values survive (dicts, lists, strings, numbers, booleans, null); anything else is silently stringified when read back next turn, so keep it small and simple.\n"
+    "- For alignment/positioning puzzles (move an object to a target, dock two shapes, navigate to a spot), persist the CONFIRMED position in `memo` once you have it (e.g. `memo['anchor'] = {'row': r, 'col': c, 'step': current_frame.step}`), rather than re-deriving absolute coordinates from the image from scratch every turn. Re-deriving from scratch each turn is a known failure mode -- small per-turn read errors compound over many turns into a position that never actually converges on the target, even when the mechanic itself is well understood. Use `segmentation['nodes'][i]['hash']` to re-identify the SAME tracked object across frames regardless of where it moved (equal hash = same object), then update the anchor from the confirmed diff (`last_transition.before_frame` vs `after_frame`) instead of reading the whole board fresh.\n"
     "- Optimize for the shortest reliable sequence that advances the current goal as described by your world model. If confidence is low, program a discriminating probe and revise the world model from the result.\n"
     "- Once the important state variables and action effects are sufficiently understood, stop probing and search in the inferred state space.\n"
     "- Inspect current and history frames from Python instead of describing frames freehand.\n"
@@ -121,7 +122,7 @@ PYTHON_ADDENDUM = (
 # reappears until the model acts is the fix that actually worked there.
 ATLAS_THEORY_CHECKPOINT = (
     "[atlas checkpoint] You have several recorded transitions but no predict() "
-    "verified at accuracy >= 0.6 yet. THIS turn: write predict(grid, action) "
+    "verified at accuracy >= 0.6 yet. THIS turn, write predict(grid, action) "
     "encoding your best theory of the dynamics and call verify_theory(predict); "
     "if you already tried, refine predict() against the counterexamples it "
     "returned and call verify_theory again. A partial theory "
@@ -129,9 +130,53 @@ ATLAS_THEORY_CHECKPOINT = (
     "pixel-perfect prediction seems out of reach (decorative motion, HUD, "
     "rendering noise unrelated to the mechanic), write extract(grid) -> a "
     "small state instead and call verify_theory(predict, extract=extract) -- "
-    "predict/compare then work on that compact state, not raw pixels. Do not "
-    "skip this turn -- probing without a theory wastes actions that are "
-    "scored quadratically."
+    "predict/compare then work on that compact state, not raw pixels. A "
+    "verified theory turns trial-and-error into a free, zero-action search "
+    "(plan_with_theory) instead of guessing with real moves -- worth doing "
+    "before spending many more actions blind. If a couple of attempts still "
+    "don't clear 0.6, call plan_with_theory(..., force=True) once you have "
+    "SOME predict() rather than giving up on the idea -- but keep playing in "
+    "the meantime, this does not mean pause the game."
+)
+
+# atlas: hard backstop, independent of how ATLAS_THEORY_CHECKPOINT above is
+# worded -- found live on r11l (v12) that a model can read ANY "try to build
+# a theory" nudge as a gate against acting further at all (1 real action in
+# 4.4h). Wording alone is not reliable enough to prevent that a second time,
+# so the harness tracks real python-tool calls since the last real action()
+# call and, once it crosses a threshold, overrides BOTH theory-style
+# checkpoints with an unambiguous "just act" instruction for that turn.
+ATLAS_FORCE_ACT_OVERRIDE = (
+    "[atlas checkpoint] You have made {calls} `python` calls in a row without "
+    "a single real action() call. Whatever your current best guess is, "
+    "execute SOMETHING now -- a probe, a partial plan, even a guess. A wrong "
+    "real action teaches you more than another turn of analysis, and costs "
+    "far less than the turns you have already spent not acting. Refining a "
+    "theory (verify_theory/plan_with_theory) can continue on LATER turns "
+    "alongside real actions -- it does not have to finish first."
+)
+
+# atlas 25.08: found on dc22 (a Gemini teacher-data transcript from our old
+# harness, not this one) -- 221 verify_theory( calls, but the model was
+# cycling through 4 unrelated high-level theories of what KIND of mechanic
+# this is (a rotating dial -> a camera capture -> a lathe/silhouette -> an
+# assembly arm), each one abandoned rather than falsified by evidence.
+# ATLAS_THEORY_CHECKPOINT only ever pushes "refine predict()" -- it has no
+# way to say the dynamics might not be the actual problem. This checkpoint
+# fires instead once verify_theory has been tried many times with no
+# success, explicitly naming the GOAL model (not the mechanic) as the other
+# thing that could be wrong.
+ATLAS_GOAL_RECONSIDER_CHECKPOINT = (
+    "[atlas checkpoint] You have called verify_theory {calls} times this game "
+    "without ever reaching 0.6 accuracy. If you have been refining the SAME "
+    "predict() against its counterexamples, that is still worth continuing. "
+    "But if you have rewritten predict() for several DIFFERENT high-level "
+    "theories of what kind of mechanic this is (not just tightening one "
+    "theory), that is a signal the dynamics may not be the real problem -- "
+    "reconsider your GOAL model instead: what are you actually trying to "
+    "build, match, or reach, based on the evidence gathered so far? A wrong "
+    "goal model makes every predict() attempt fail for reasons that have "
+    "nothing to do with the mechanic itself."
 )
 
 ATLAS_NOTE_ENFORCEMENT_CHECKPOINT = (
