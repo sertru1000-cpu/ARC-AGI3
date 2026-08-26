@@ -51,11 +51,21 @@ ATLAS_SRC="${REPO_DIR}/atlas_src/src"
 test -f "${ATLAS_SRC}/tufa-arc-agi-framework/pyproject.toml" || { echo "FATAL: clone incomplete" >&2; exit 1; }
 test -f "${ATLAS_SRC}/ARC3-Inference/pyproject.toml" || { echo "FATAL: clone incomplete" >&2; exit 1; }
 
+# ARC3-Inference pins requires-python=="3.12.12" exactly, but uv's own
+# standalone-interpreter catalog doesn't carry that exact patch (confirmed
+# live: "No interpreter found for Python 3.12.12"). The pin isn't actually
+# load-bearing for correctness (whichever 3.12.x uv provides works fine, per
+# the earlier Colab run on 3.12.14) -- relax it in this cloned copy only,
+# never touching the committed file.
+sed -i 's/requires-python = "==3.12.12"/requires-python = ">=3.12,<3.13"/' \
+  "${ATLAS_SRC}/ARC3-Inference/pyproject.toml"
+grep -n "requires-python" "${ATLAS_SRC}/ARC3-Inference/pyproject.toml"
+
 echo "=== [3/7] Python 3.12 venv via uv (base-image-agnostic) ==="
 if ! command -v uv >/dev/null 2>&1; then
   pip install -q uv || pip install -q --break-system-packages uv
 fi
-uv venv --python 3.12.12 --clear "${VENV_DIR}"
+uv venv --python 3.12 --clear "${VENV_DIR}"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 "${VENV_PYTHON}" --version
 
