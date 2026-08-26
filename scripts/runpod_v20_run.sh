@@ -10,8 +10,11 @@
 # Assumes:
 #   - ~/.kaggle/access_token has been scp'd in already (this machine's own
 #     Kaggle CLI auth token -- ACCESS_TOKEN method, confirmed working).
-#   - A100 80GB (or better) -- 27B-FP8 + KV at max-num-seqs 24 fits with
-#     margin (per arc-agi-3-runpod-lessons: "80GB variant required").
+#   - RTX PRO 6000 (Blackwell, 96GB) -- the SAME GPU the real Kaggle
+#     submission runs on (--kaggle-accelerator NvidiaRtxPro6000), with
+#     native FP8 tensor cores (unlike A100/Ampere's Marlin W8A16 fallback)
+#     so this test's timing/contention behavior actually transfers to the
+#     real submission environment, not just "enough memory to run at all".
 set -euo pipefail
 
 REPO_URL="https://github.com/sertru1000-cpu/ARC-AGI3.git"
@@ -30,11 +33,16 @@ EXPERIMENT_DIR="/workspace/atlas_runpod_runs/${RUN_NAME}"
 
 echo "=== [1/7] GPU check ==="
 nvidia-smi --query-gpu=name,memory.total --format=csv
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
 if [ "${GPU_MEM_MB}" -lt 70000 ]; then
-  echo "FATAL: expected an 80GB-class GPU, got ${GPU_MEM_MB} MiB. Aborting before spending more time." >&2
+  echo "FATAL: expected an 80GB+-class GPU, got ${GPU_MEM_MB} MiB. Aborting before spending more time." >&2
   exit 1
 fi
+case "${GPU_NAME}" in
+  *"RTX PRO 6000"*|*"RTX 6000"*|*A100*) : ;;
+  *) echo "WARNING: expected RTX PRO 6000 (or A100 as fallback), got '${GPU_NAME}'. Has enough memory, continuing anyway." >&2 ;;
+esac
 
 echo "=== [2/7] Clone repo (commit e1b124a-or-later must be on main) ==="
 rm -rf "${REPO_DIR}"
