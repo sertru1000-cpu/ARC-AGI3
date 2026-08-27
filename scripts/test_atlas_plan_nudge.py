@@ -36,6 +36,7 @@ from inference.agent.tool_agent import (  # noqa: E402
     ToolAgent,
     _ATLAS_GOAL_RECONSIDER_AFTER_CALLS,
     _ATLAS_MEMO_NUDGE_AFTER_CALLS,
+    _ATLAS_PLAN_FORCE_AFTER_CALLS,
 )
 
 
@@ -211,6 +212,67 @@ def main() -> None:
     if "[atlas checkpoint]" in prompt:
         _fail("cooldown reset", f"expected silence right after planning, got: {prompt[-400:]!r}")
     _ok("goes quiet again immediately after a real plan_with_theory( call")
+
+    # 5a. Plan-force override (27.08, Gemini-proposed hard backstop for the
+    #     soft plan nudge above): if the model still has NOT called
+    #     plan_with_theory/execute_plan again after _ATLAS_PLAN_FORCE_AFTER_
+    #     CALLS (2x the soft nag's own threshold) calls, the soft nudge is
+    #     replaced with a hard imperative. Directly neutralizes the
+    #     force-act counter after each filler call -- a separate, HIGHER-
+    #     priority checkpoint that would otherwise mask this one, same
+    #     isolation trick test_atlas_theory_force.py uses for its own
+    #     rollback-interaction scenario.
+    for _ in range(_ATLAS_PLAN_FORCE_AFTER_CALLS - 1):
+        agent._run_python_tool(state_path, {"code": "result = 1\n"})
+        agent._atlas_calls_since_real_action = 0
+    prompt = agent._build_user_prompt(0, valid_actions=["UP", "RIGHT"])
+    if "MUST call plan_with_theory" in prompt:
+        _fail("plan-force override silent below its own threshold", prompt[-500:])
+    if "plan_with_theory(predict, goal)" not in prompt or "accuracy 1.00" not in prompt:
+        _fail("soft plan nag still fires below the force threshold", prompt[-400:])
+    _ok(f"soft plan nag still active {_ATLAS_PLAN_FORCE_AFTER_CALLS - 1} calls after the last plan, "
+        "force override stays silent")
+
+    agent._run_python_tool(state_path, {"code": "result = 1\n"})
+    agent._atlas_calls_since_real_action = 0
+    prompt = agent._build_user_prompt(0, valid_actions=["UP", "RIGHT"])
+    if "MUST call plan_with_theory" not in prompt:
+        _fail(
+            "plan-force override fires at threshold",
+            f"expected it after {_ATLAS_PLAN_FORCE_AFTER_CALLS} calls with no plan call, got: {prompt[-500:]!r}",
+        )
+    if "plan_with_theory(predict, goal); if res" in prompt:
+        _fail("plan-force override replaces the soft nag", "both must not appear in the same prompt")
+    if "SAME snippet" not in prompt:
+        _fail("plan-force override permits executing the plan in the same turn", prompt[-800:])
+    if "plan=None -- learning the goal is unreachable" not in prompt:
+        _fail("plan-force override frames plan=None as useful information, not a failure", prompt[-800:])
+    _ok(
+        f"plan-force override fires after {_ATLAS_PLAN_FORCE_AFTER_CALLS} calls since the last real "
+        "plan_with_theory( call, replacing the soft nag"
+    )
+
+    # A real plan_with_theory( call -- even one that finds no plan -- clears
+    # the gate again, same "gate on the ATTEMPT" safety property as the
+    # theory-force override: this can never become an unreachable/unsafe
+    # gate, since calling the function always succeeds regardless of result.
+    agent._run_python_tool(
+        state_path,
+        {
+            "code": (
+                "def predict(grid, action):\n"
+                "    return [row[-1:] + row[:-1] for row in grid]\n"
+                "def goal(grid):\n"
+                "    return False\n"
+                "result = plan_with_theory(predict, goal)\n"
+            )
+        },
+    )
+    prompt = agent._build_user_prompt(0, valid_actions=["UP", "RIGHT"])
+    if "[atlas checkpoint]" in prompt:
+        _fail("plan-force override cooldown resets on a real plan_with_theory( call", prompt[-400:])
+    _ok("a real plan_with_theory( call (even one that finds no plan) clears the force override again -- "
+        "gated on the attempt, not on finding a usable plan")
 
     # 5b. Goal-reconsider checkpoint: many verify_theory( calls that never
     #     reach 0.6 accuracy should eventually stop nudging "refine

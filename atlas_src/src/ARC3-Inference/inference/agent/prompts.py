@@ -236,7 +236,11 @@ ATLAS_THEORY_FORCE_OVERRIDE = (
     "me verify this a bit more in my head first' or 'I will write the "
     "theory once I understand this anomaly' -- that exact delay is what "
     "produced this checkpoint, and holding a correct rule in prose without "
-    "ever encoding it does not count as progress toward the 0.6 bar."
+    "ever encoding it does not count as progress toward the 0.6 bar. If you "
+    "already called verify_theory() but it tested 0 transitions (e.g. right "
+    "after a rollback wiped your history), that call does not clear this -- "
+    "take one real action() first so a transition exists, then call "
+    "verify_theory() again against it."
 )
 
 # atlas 25.08: found on dc22 (a Gemini teacher-data transcript from our old
@@ -362,6 +366,31 @@ ATLAS_PLAN_CHECKPOINT_TEMPLATE = (
     "moves. Use execute_plan(res['plan'], predict) instead of action(res['plan']) "
     "directly -- it stops itself as soon as a real step diverges from "
     "predict()'s forecast, instead of firing the whole plan blind."
+)
+
+# atlas 27.08: hard backstop for the soft PLAN_CHECKPOINT above, per the same
+# Gemini-diagnosed pattern as ATLAS_THEORY_FORCE_OVERRIDE -- a recurring soft
+# nudge risks the same silent-ignore failure verify_theory's had before that
+# fix. Gated on the ATTEMPT (a real plan_with_theory( call), never on
+# whether a plan was actually found -- res['plan'] being None is itself
+# useful information (the goal is unreachable from here as modeled), not a
+# failure to avoid, so this can never become an unreachable/unsafe gate.
+# Threshold is 2x _ATLAS_PLAN_NAG_EVERY, same "let the soft version get a
+# real chance first" logic as the theory-force threshold vs. its own nag.
+ATLAS_PLAN_FORCE_OVERRIDE = (
+    "[atlas checkpoint] Your predict() has been verified at accuracy {acc:.2f} "
+    "for {calls} `python` calls without a single plan_with_theory() or "
+    "execute_plan() call. This is not a suggestion anymore -- your VERY NEXT "
+    "`python` call MUST call plan_with_theory(predict, goal) with a "
+    "goal(grid) -> bool you define for the state you want. This does not "
+    "cost you the turn: if a plan comes back, execute it in the SAME "
+    "snippet (execute_plan(...) if it has more than one step). The search "
+    "costs ZERO real actions even when plan_with_theory() returns "
+    "plan=None -- learning the goal is unreachable from here (with the "
+    "theory and actions you gave it) is itself useful information, not a "
+    "wasted call. Do not respond with 'let me take a couple more manual "
+    "steps first' -- you already have a verified theory; searching with it "
+    "is strictly better than guessing one action at a time."
 )
 
 COMPACT_TOOL_SESSION_ADDENDUM = (

@@ -24,6 +24,7 @@ from inference.agent.prompts import (
     ATLAS_MEMO_CHECKPOINT,
     ATLAS_NOTE_ENFORCEMENT_CHECKPOINT,
     ATLAS_PLAN_CHECKPOINT_TEMPLATE,
+    ATLAS_PLAN_FORCE_OVERRIDE,
     ATLAS_THEORY_CHECKPOINT,
     ATLAS_THEORY_FORCE_OVERRIDE,
     COMPACT_TOOL_SESSION_ADDENDUM,
@@ -59,6 +60,11 @@ _ATLAS_EXPLORE_MAX_ATTEMPTS_PER_KIND = 3
 # atlas: how many python-tool calls may pass without a plan_with_theory( call
 # before the checkpoint nags again. Mirrors our own harness's PLAN_NAG_EVERY.
 _ATLAS_PLAN_NAG_EVERY = 3
+# atlas 27.08: hard backstop for the soft plan nudge above (see
+# ATLAS_PLAN_FORCE_OVERRIDE in prompts.py). 2x the soft nag's own threshold,
+# same "let the soft wording get a real chance first" logic already used
+# for the theory-force threshold vs. ATLAS_THEORY_NAG_AFTER_CALLS.
+_ATLAS_PLAN_FORCE_AFTER_CALLS = _ATLAS_PLAN_NAG_EVERY * 2
 # Below this many python-tool calls, transitions probably haven't accumulated
 # enough for verify_theory to be worth nagging about yet.
 _ATLAS_THEORY_NAG_AFTER_CALLS = 4
@@ -154,6 +160,13 @@ _ATLAS_ROLLBACK_AUTO_FORCE_AFTER = 3
 # sanitize fires, same as a level-up always does regardless of this count.
 _ATLAS_CONTEXT_SANITIZE_EVERY_CALLS = 20
 _ATLAS_ACCURACY_RE = re.compile(r"['\"]accuracy['\"]\s*:\s*([0-9]*\.?[0-9]+)")
+# atlas 27.08: found on wa30 (Gemini-flagged gate-bypass) -- a verify_theory(
+# call made right after rollback() (which wipes the transitions history) is
+# technically compliant with the theory-force override but tests 0
+# transitions, so it carries zero diagnostic value. This regex lets the
+# force-override gate tell a real call from a vacuous one, the same way
+# _ATLAS_ACCURACY_RE lets it read the accuracy out of the printed dict.
+_ATLAS_TRANSITIONS_TESTED_RE = re.compile(r"['\"]transitions_tested['\"]\s*:\s*([0-9]+)")
 # atlas: a non-null 'note' in a printed/returned plan_with_theory() result --
 # res['note'] is only set when the found plan has more than one step, so this
 # is a best-effort stand-in for "the model got back a multi-step plan" when
@@ -1385,6 +1398,24 @@ class ToolAgent:
         # atlas: total verify_theory( calls this game -- the goal-reconsider
         # checkpoint's trigger. See _ATLAS_GOAL_RECONSIDER_AFTER_CALLS.
         self._atlas_verify_theory_call_count = 0
+        # atlas 27.08: True once a verify_theory( call has tested >= 1 real
+        # transition -- the theory-force override's actual gate (see
+        # _ATLAS_TRANSITIONS_TESTED_RE). Deliberately NOT the same thing as
+        # verify_theory_call_count > 0: a call made right after rollback()
+        # (which wipes transitions) is a real call but tests 0 transitions,
+        # so it must NOT satisfy this -- found live on wa30 (Gemini-flagged
+        # gate-bypass). Once True, stays True for the rest of the game (the
+        # force override's job -- prove the model CAN write a real theory
+        # call -- is done; it does not need to re-prove this after every
+        # later rollback).
+        self._atlas_verify_theory_real_ever = False
+        # atlas 27.08: the python-call index the theory-force override counts
+        # FROM, not game start -- reset to the current call index on every
+        # rollback (see _restore_to_checkpoint) so the model gets a full
+        # fresh _ATLAS_THEORY_FORCE_AFTER_CALLS-call runway to naturally earn
+        # a real transition post-rollback, instead of being immediately
+        # re-forced into another guaranteed-vacuous call.
+        self._atlas_theory_force_eligible_from_call = 0
         # atlas: set when a turn calls plan_with_theory( and gets back a plan
         # of >1 step (res['note'] non-null) AND fires it via a SINGLE action()
         # call in that same script -- exactly the pattern that failed live
@@ -1515,6 +1546,8 @@ class ToolAgent:
             self._atlas_last_verified_accuracy = None
             self._atlas_calls_since_real_action = 0
             self._atlas_verify_theory_call_count = 0
+            self._atlas_verify_theory_real_ever = False
+            self._atlas_theory_force_eligible_from_call = 0
             self._atlas_note_incident = None
             self._atlas_memo = {}
             self._atlas_memo_ever_written = False
@@ -1978,20 +2011,24 @@ class ToolAgent:
             )
         elif (
             _ATLAS_THEORY_CHECKPOINT_ENABLED
-            and self._atlas_verify_theory_call_count == 0
-            and self._atlas_python_call_index >= _ATLAS_THEORY_FORCE_AFTER_CALLS
+            and not self._atlas_verify_theory_real_ever
+            and (self._atlas_python_call_index - self._atlas_theory_force_eligible_from_call)
+            >= _ATLAS_THEORY_FORCE_AFTER_CALLS
         ):
             # atlas 27.08: checked BEFORE the soft theory nag below, not
             # after -- its threshold (8) is always >= the soft nag's (4), so
             # placed after it the soft nag would always already be true by
             # the time this one's condition is, making this branch
             # unreachable. Mutually exclusive with goal-reconsider/extract
-            # above (both require verify_theory_call_count >= 6/8, this
-            # requires == 0), so there's no ordering conflict with those.
-            lines.append(ATLAS_THEORY_FORCE_OVERRIDE.format(calls=self._atlas_python_call_index))
+            # above (both require verify_theory_call_count >= 6/8; this
+            # gates on verify_theory_real_ever instead of call_count, so a
+            # vacuous post-rollback call -- found live on wa30 -- does not
+            # satisfy it), so there's no ordering conflict with those.
+            calls_since_eligible = self._atlas_python_call_index - self._atlas_theory_force_eligible_from_call
+            lines.append(ATLAS_THEORY_FORCE_OVERRIDE.format(calls=calls_since_eligible))
             print(
                 f"atlas: theory-force override injected (action_num={action_num}, "
-                f"python_calls={self._atlas_python_call_index})",
+                f"calls_since_eligible={calls_since_eligible})",
                 flush=True,
             )
         elif (
@@ -2003,6 +2040,29 @@ class ToolAgent:
         ) and self._atlas_python_call_index >= _ATLAS_THEORY_NAG_AFTER_CALLS:
             lines.append(ATLAS_THEORY_CHECKPOINT)
             print(f"atlas: theory checkpoint injected (action_num={action_num})", flush=True)
+        elif (
+            self._atlas_last_verified_accuracy is not None
+            and self._atlas_last_verified_accuracy >= 0.6
+            and self._atlas_python_call_index - self._atlas_last_plan_call_index
+            >= _ATLAS_PLAN_FORCE_AFTER_CALLS
+        ):
+            # atlas 27.08: checked BEFORE the soft plan nag below -- its
+            # threshold is 2x the soft nag's, same "let the soft version get
+            # a real chance first" ordering as theory-force vs. the soft
+            # theory nag. Gated on the ATTEMPT only (a real plan_with_theory(
+            # call resets _atlas_last_plan_call_index regardless of whether a
+            # plan was found), so this can never become an unreachable gate.
+            calls_since_plan = self._atlas_python_call_index - self._atlas_last_plan_call_index
+            lines.append(
+                ATLAS_PLAN_FORCE_OVERRIDE.format(
+                    acc=self._atlas_last_verified_accuracy, calls=calls_since_plan
+                )
+            )
+            print(
+                f"atlas: plan-force override injected (action_num={action_num}, "
+                f"acc={self._atlas_last_verified_accuracy:.2f}, calls_since_plan={calls_since_plan})",
+                flush=True,
+            )
         elif (
             self._atlas_last_verified_accuracy is not None
             and self._atlas_last_verified_accuracy >= 0.6
@@ -2295,6 +2355,14 @@ class ToolAgent:
         self._atlas_rollback_target_checkpoint = None
         self._atlas_rollback_trigger_reason = None
         self._atlas_rollback_ultimatum_streak = 0
+        # atlas 27.08: give the theory-force override a fresh runway from
+        # right now -- rollback just wiped the transitions history, so an
+        # immediately-forced verify_theory( call would be guaranteed vacuous
+        # (found live on wa30). Only relevant while
+        # _atlas_verify_theory_real_ever is still False; once the model has
+        # proven it can write a real theory call once, the override never
+        # fires again regardless of this counter.
+        self._atlas_theory_force_eligible_from_call = self._atlas_python_call_index
         return True
 
     def _atlas_note_action_kind_tried(self, action_sig: str, level: int, board_changed: bool) -> None:
@@ -2928,20 +2996,31 @@ class ToolAgent:
             self._atlas_verify_theory_call_count += 1
             sandbox_payload_result = sandbox_result.get("result")
             accuracy = None
-            if isinstance(sandbox_payload_result, dict) and isinstance(
-                sandbox_payload_result.get("accuracy"), (int, float)
-            ):
-                accuracy = float(sandbox_payload_result["accuracy"])
-            else:
+            transitions_tested = None
+            if isinstance(sandbox_payload_result, dict):
+                if isinstance(sandbox_payload_result.get("accuracy"), (int, float)):
+                    accuracy = float(sandbox_payload_result["accuracy"])
+                if isinstance(sandbox_payload_result.get("transitions_tested"), (int, float)):
+                    transitions_tested = int(sandbox_payload_result["transitions_tested"])
+            if accuracy is None:
                 match = _ATLAS_ACCURACY_RE.search(rendered_stdout)
                 if match:
                     try:
                         accuracy = float(match.group(1))
                     except ValueError:
                         accuracy = None
+            if transitions_tested is None:
+                match = _ATLAS_TRANSITIONS_TESTED_RE.search(rendered_stdout)
+                if match:
+                    try:
+                        transitions_tested = int(match.group(1))
+                    except ValueError:
+                        transitions_tested = None
+            if transitions_tested is not None and transitions_tested >= 1:
+                self._atlas_verify_theory_real_ever = True
             print(
                 f"atlas: model called verify_theory( (call #{self._atlas_python_call_index}, "
-                f"parsed accuracy={accuracy})",
+                f"parsed accuracy={accuracy}, transitions_tested={transitions_tested})",
                 flush=True,
             )
             if accuracy is not None:
