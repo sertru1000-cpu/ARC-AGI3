@@ -164,21 +164,25 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 600.0    # 27.08 (2nd calibration): user set an
-                                   # explicit 25-min TOTAL budget for this
-                                   # run (not per-game -- see the wave math
-                                   # below). 25 games / concurrency 20 = 2
-                                   # waves; 2*600s=1200s (20min) + ~5min
-                                   # setup ~= 25min budget. Sanity check for
-                                   # the new theory-force-override checkpoint
-                                   # (ATLAS_THEORY_FORCE_OVERRIDE, added
-                                   # after this same day's Kaggle v21
-                                   # calibration + a Gemini diagnosis found
-                                   # the soft theory nag converting to a real
-                                   # verify_theory() call only ~17% of the
-                                   # time it fired) on the REAL Kaggle RTX
-                                   # Pro 6000 backend -- not a depth
-                                   # measurement.
+ATLAS_CALIBRATION_CAP_S = 750.0    # 27.08 (3rd calibration, kernel v23):
+                                   # user set a 30-min TOTAL budget (not
+                                   # per-game -- see the wave math below).
+                                   # 25 games / concurrency 20 = 2 waves;
+                                   # 2*750s=1500s (25min) + ~5min setup ~=
+                                   # 30min budget, same math as v21. This
+                                   # push carries the planforce+rollbackfix
+                                   # build (7265cbd: ATLAS_PLAN_FORCE_
+                                   # OVERRIDE + the wa30 rollback gate-
+                                   # bypass fix; deliberately WITHOUT the
+                                   # try_actions/plan_real snapshot probes,
+                                   # which stay RunPod-experiment-only for
+                                   # now) -- the version the user will
+                                   # submit for real. On RunPod A100 it
+                                   # measured mean 0.96 / 7-of-25 games
+                                   # with a level at the 57-min mark,
+                                   # against 0.11 / 1-of-25 for the
+                                   # previous (theoryforce) build at a
+                                   # matched window.
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S
     print(f"atlas: Phase A calibration cap -- max_runtime_s_per_game = {ATLAS_CALIBRATION_CAP_S:.0f}s")
