@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -167,6 +168,24 @@ _ATLAS_ACCURACY_RE = re.compile(r"['\"]accuracy['\"]\s*:\s*([0-9]*\.?[0-9]+)")
 # force-override gate tell a real call from a vacuous one, the same way
 # _ATLAS_ACCURACY_RE lets it read the accuracy out of the printed dict.
 _ATLAS_TRANSITIONS_TESTED_RE = re.compile(r"['\"]transitions_tested['\"]\s*:\s*([0-9]+)")
+# atlas 27.08 (direction change, user: "мы занимаемся костылями, не идём к
+# agi"): real-engine speculative execution. The OFFLINE engine snapshot/
+# restore built for rollback() doubles as a PERFECT simulator -- game_run
+# (whose actions_per_level/levels_completed feed _compute_final_score) is
+# part of the snapshot, so actions taken inside a probe and then rewound
+# never reach the score, while the engine scorecard is a monotonic max()
+# that keeps any level a probe happens to complete. This removes the need
+# for a model-authored predict() for PLANNING entirely -- the exact
+# authorship friction the whole theory-checkpoint chain has been fighting:
+# the model (or the harness BFS below) can just try sequences for real and
+# rewind. Budgets: everything here runs host-side while the sandbox blocks
+# inside the model's 30s python-call limit, so the search must leave the
+# model's own code room to finish.
+_ATLAS_PROBE_MAX_SEQUENCES = 16
+_ATLAS_PROBE_MAX_TOTAL_STEPS = 240
+_ATLAS_SEARCH_MAX_NODES = 250
+_ATLAS_SEARCH_MAX_DEPTH = 8
+_ATLAS_SEARCH_WALL_SECONDS = 10.0
 # atlas: a non-null 'note' in a printed/returned plan_with_theory() result --
 # res['note'] is only set when the found plan has more than one step, so this
 # is a best-effort stand-in for "the model got back a multi-step plan" when
@@ -2365,6 +2384,181 @@ class ToolAgent:
         self._atlas_theory_force_eligible_from_call = self._atlas_python_call_index
         return True
 
+    @staticmethod
+    def _atlas_grid_diff_count(before: Any, after: Any) -> int:
+        """Cells differing between two grids; shape mismatch counts every
+        cell of the larger grid (a resize IS a change, not an error)."""
+        before_rows = list(before or ())
+        after_rows = list(after or ())
+        count = 0
+        for r in range(max(len(before_rows), len(after_rows))):
+            row_b = list(before_rows[r]) if r < len(before_rows) else []
+            row_a = list(after_rows[r]) if r < len(after_rows) else []
+            for c in range(max(len(row_b), len(row_a))):
+                cell_b = row_b[c] if c < len(row_b) else None
+                cell_a = row_a[c] if c < len(row_a) else None
+                if cell_b != cell_a:
+                    count += 1
+        return count
+
+    def _atlas_probe_sequences(
+        self, request: dict[str, Any], state_path: Path, snapshot: dict[str, Any]
+    ) -> dict[str, Any]:
+        """try_actions(): execute candidate sequences on the REAL engine,
+        report what each one did, and let the caller's finally-restore
+        rewind everything. Nothing here reaches the recorded run: game_run
+        (score bookkeeping) is inside the snapshot, and the engine
+        scorecard's monotonic max() means a probe that happens to complete
+        a level is kept, never lost.
+        """
+        sequences = request.get("sequences") or []
+        if not isinstance(sequences, list) or not sequences:
+            return {"error": "try_actions requires at least one non-empty sequence."}
+        dropped = max(0, len(sequences) - _ATLAS_PROBE_MAX_SEQUENCES)
+        sequences = sequences[:_ATLAS_PROBE_MAX_SEQUENCES]
+        baseline_frame, _ = load_runtime_state(state_path)
+        baseline_grid = baseline_frame.grid if baseline_frame is not None else ()
+        baseline_level = baseline_frame.level if baseline_frame is not None else 1
+        results: list[dict[str, Any]] = []
+        total_steps = 0
+        for index, seq in enumerate(sequences):
+            if total_steps >= _ATLAS_PROBE_MAX_TOTAL_STEPS:
+                results.append({"sequence_index": index, "skipped": "probe step budget exhausted"})
+                continue
+            if index > 0:
+                self._restore_env_callback(snapshot)
+            payload = self._step_env_callback({"actions": list(seq)})
+            executed = int(payload.get("executed_count") or 0)
+            total_steps += max(1, executed)
+            frame_after, _ = load_runtime_state(state_path)
+            results.append(
+                {
+                    "sequence_index": index,
+                    "requested": payload.get("requested_actions") or [str(s) for s in seq],
+                    "executed_count": executed,
+                    "error": payload.get("error"),
+                    "board_changed": bool(payload.get("board_changed")),
+                    "cells_changed_vs_start": self._atlas_grid_diff_count(
+                        baseline_grid, frame_after.grid if frame_after is not None else ()
+                    ),
+                    "level_before": baseline_level,
+                    "level_after": frame_after.level if frame_after is not None else baseline_level,
+                    "level_completed": bool(payload.get("level_completed")),
+                    "game_over": bool(payload.get("game_over")),
+                    "run_complete": bool(payload.get("run_complete")),
+                    "stop_reason": payload.get("stop_reason"),
+                }
+            )
+        note = (
+            "speculative: the engine was rewound after each sequence -- none of the above is "
+            "recorded in the real run. Replay the winner with action(...) to make it count."
+        )
+        if dropped:
+            note += f" ({dropped} sequence(s) over the {_ATLAS_PROBE_MAX_SEQUENCES}-sequence cap were dropped.)"
+        print(
+            f"atlas: model called try_actions( ({len(results)} sequence(s), {total_steps} engine step(s))",
+            flush=True,
+        )
+        return {"results": results, "note": note}
+
+    def _atlas_search_real_plan(
+        self, request: dict[str, Any], state_path: Path, snapshot: dict[str, Any]
+    ) -> dict[str, Any]:
+        """plan_real(): breadth-first search over the REAL engine for a
+        sequence that completes the current level (or wins the game). No
+        predict() involved anywhere -- the engine itself is the world
+        model, and the caller's finally-restore rewinds everything the
+        search touched. Dedupes on board_signature so no-op moves and
+        transpositions don't blow up the frontier; hard-capped on nodes,
+        depth, and wall-clock (this all runs inside the model's own 30s
+        python-call window).
+        """
+        try:
+            max_depth = max(1, min(_ATLAS_SEARCH_MAX_DEPTH, int(request.get("max_depth") or 6)))
+        except (TypeError, ValueError):
+            max_depth = 6
+        try:
+            max_nodes = max(1, min(_ATLAS_SEARCH_MAX_NODES, int(request.get("max_nodes") or 120)))
+        except (TypeError, ValueError):
+            max_nodes = 120
+        candidates = request.get("candidates")
+        if not candidates:
+            candidates = [
+                {"action": kind}
+                for kind in self._current_valid_actions
+                if kind not in ("MOUSE", "RESET")
+            ]
+        if not candidates:
+            return {
+                "plan": None,
+                "reason": (
+                    "no candidate actions -- this is probably a MOUSE-only game; pass explicit "
+                    "click specs via plan_real(actions=[{'action': 'MOUSE', 'row': r, 'col': c}, ...])."
+                ),
+            }
+        baseline_frame, _ = load_runtime_state(state_path)
+        visited = {board_signature(baseline_frame.grid if baseline_frame is not None else ())}
+        deadline = time.monotonic() + _ATLAS_SEARCH_WALL_SECONDS
+        queue: deque[list[dict[str, Any]]] = deque([[]])
+        nodes = 0
+        budget_hit = False
+        while queue:
+            path = queue.popleft()
+            for candidate in candidates:
+                if nodes >= max_nodes or time.monotonic() >= deadline:
+                    budget_hit = True
+                    break
+                nodes += 1
+                self._restore_env_callback(snapshot)
+                attempt = [*path, dict(candidate)]
+                payload = self._step_env_callback({"actions": attempt})
+                if payload.get("error"):
+                    continue
+                if payload.get("level_completed") or payload.get("run_complete"):
+                    self._restore_env_callback(snapshot)
+                    print(
+                        f"atlas: plan_real found a plan ({len(attempt)} step(s), {nodes} node(s) explored)",
+                        flush=True,
+                    )
+                    return {
+                        "plan": attempt,
+                        "reason": "run_complete" if payload.get("run_complete") else "level_completed",
+                        "nodes_explored": nodes,
+                        "note": (
+                            "found on the REAL engine, then rewound -- execute it with "
+                            "action(res['plan']) to make it count."
+                        ),
+                    }
+                if int(payload.get("executed_count") or 0) < len(attempt):
+                    continue
+                if payload.get("game_over"):
+                    continue
+                frame_after, _ = load_runtime_state(state_path)
+                sig = board_signature(frame_after.grid if frame_after is not None else ())
+                if sig in visited:
+                    continue
+                visited.add(sig)
+                if len(attempt) < max_depth:
+                    queue.append(attempt)
+            if budget_hit:
+                break
+        reason = "budget_exhausted" if budget_hit else "state_space_exhausted"
+        print(
+            f"atlas: plan_real found no plan ({nodes} node(s), {len(visited) - 1} unique state(s), {reason})",
+            flush=True,
+        )
+        return {
+            "plan": None,
+            "reason": reason,
+            "nodes_explored": nodes,
+            "unique_states_reached": len(visited) - 1,
+            "note": (
+                "no level-completing sequence within this depth/budget from here. A deeper or "
+                "differently-parameterized retry is fine, as is falling back to normal play; "
+                "'state_space_exhausted' means EVERY reachable state within max_depth was tried."
+            ),
+        }
+
     def _atlas_note_action_kind_tried(self, action_sig: str, level: int, board_changed: bool) -> None:
         """Tracks which control kinds (MOUSE/UP/etc -- MOUSE coordinates are
         stripped, only the kind matters) are RESOLVED this LEVEL, for the
@@ -2879,6 +3073,39 @@ class ToolAgent:
                 self._atlas_last_checkpoint_id = checkpoint_id
                 print(f"atlas: model called save_checkpoint( (id={checkpoint_id}, label={label!r})", flush=True)
                 return {"checkpoint_id": checkpoint_id}
+            if action in ("probe_sequences", "plan_real"):
+                # atlas 27.08: real-engine speculative execution -- reuses
+                # the checkpoint request channel (no wire-protocol change)
+                # and the exact snapshot/restore pair rollback runs on. The
+                # finally-restore is unconditional: whatever the probe or
+                # search did to the live engine, the game continues from
+                # exactly where it was, and game_run's score bookkeeping
+                # (inside the snapshot) never saw any of it.
+                if self._step_env_callback is None:
+                    return {"error": "try_actions/plan_real are not available: no action executor in this session."}
+                snapshot = self._checkpoint_env_callback()
+                if snapshot is None:
+                    return {
+                        "error": (
+                            "try_actions/plan_real are not available in this session "
+                            "(no engine snapshot in ONLINE mode)."
+                        )
+                    }
+                try:
+                    if action == "probe_sequences":
+                        probe_payload = self._atlas_probe_sequences(request, state_path, snapshot)
+                    else:
+                        probe_payload = self._atlas_search_real_plan(request, state_path, snapshot)
+                finally:
+                    self._restore_env_callback(snapshot)
+                    refreshed_frame, _ = load_runtime_state(state_path)
+                    if refreshed_frame is not None:
+                        noop_guard_board_sig = board_signature(refreshed_frame.grid)
+                        noop_guard_level = refreshed_frame.level
+                probe_payload["state"] = _serialized_runtime_state(
+                    next_valid_actions=list(self._current_valid_actions)
+                )
+                return probe_payload
             if action == "rollback":
                 checkpoint_id = str(request.get("checkpoint_id") or "").strip()
                 lesson_learned = str(request.get("lesson_learned") or "").strip()

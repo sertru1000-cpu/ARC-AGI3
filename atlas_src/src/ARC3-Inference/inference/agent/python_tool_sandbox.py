@@ -452,6 +452,80 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                 runtime_globals["memo"] = restored_memo
             return {"checkpoint_id": reply.get("checkpoint_id"), "reverted": True}
 
+        def _checkpoint_request(request):
+            _send({"type": "checkpoint", "request": request})
+            reply = _recv()
+            if reply.get("type") == "checkpoint_error":
+                raise RuntimeError(str(reply.get("error", "request failed")))
+            if reply.get("type") != "checkpoint_result":
+                raise RuntimeError("Invalid checkpoint response from sandbox host.")
+            if reply.get("error"):
+                raise RuntimeError(str(reply["error"]))
+            state_payload = reply.get("state") or {}
+            if state_payload:
+                _refresh_state(state_payload)
+            return reply
+
+        def try_actions(sequences):
+            '''SPECULATIVELY execute one or more action sequences on the
+            REAL game engine, then rewind -- costs ZERO recorded actions
+            and does not move the real game. Pass a list of sequences
+            (each a list of action specs exactly like action() takes), or
+            a single flat sequence. Returns one outcome summary per
+            sequence: what executed, whether the board changed and by how
+            many cells, whether a level was completed or the game ended.
+            This is ground truth, not a prediction -- the engine itself
+            ran your actions. Use it to test "what would happen if"
+            hypotheses directly instead of spending real actions, then
+            replay the winning sequence with action(...) to make it
+            count. Available in the same sessions as save_checkpoint().'''
+            if isinstance(sequences, (str, dict)):
+                sequences = [[sequences]]
+            if not isinstance(sequences, (list, tuple)) or not sequences:
+                raise ValueError("try_actions expects a sequence of actions or a list of such sequences.")
+            if not isinstance(sequences[0], (list, tuple)):
+                sequences = [list(sequences)]
+            normalized = [_normalize_actions(list(seq)) for seq in sequences]
+            reply = _checkpoint_request({"action": "probe_sequences", "sequences": normalized})
+            return {"results": reply.get("results"), "note": reply.get("note")}
+
+        def plan_real(actions=None, max_depth=6, max_nodes=120):
+            '''Search the REAL engine for an action sequence that completes
+            the current level (or wins the game) -- breadth-first over
+            actual engine states via snapshot/rewind, deduplicating
+            repeated board states. NO predict() or theory needed: the
+            engine itself is the world model, so this works even when a
+            pixel-perfect theory is out of reach. By default tries every
+            currently-valid non-MOUSE action; for click games pass
+            explicit candidates: plan_real(actions=[{'action': 'MOUSE',
+            'row': r, 'col': c}, ...], max_depth=4) with a SHORT list of
+            promising clicks (each extra candidate multiplies the search).
+            Returns {'plan': [...] or None, 'reason': ...}; on success,
+            execute with action(res['plan']) -- the found plan was
+            verified on the real engine, then rewound, so replaying it is
+            deterministic. Budgeted (~10s, a few hundred engine states);
+            "state_space_exhausted" means everything reachable within
+            max_depth was genuinely tried. Costs zero recorded actions
+            either way.'''
+            candidates = None
+            if actions is not None:
+                candidates = _normalize_actions(list(actions))
+            reply = _checkpoint_request(
+                {
+                    "action": "plan_real",
+                    "candidates": candidates,
+                    "max_depth": int(max_depth),
+                    "max_nodes": int(max_nodes),
+                }
+            )
+            return {
+                "plan": reply.get("plan"),
+                "reason": reply.get("reason"),
+                "nodes_explored": reply.get("nodes_explored"),
+                "unique_states_reached": reply.get("unique_states_reached"),
+                "note": reply.get("note"),
+            }
+
         def _action_display(spec):
             if isinstance(spec, str):
                 return spec.strip()
@@ -775,6 +849,8 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
         runtime_globals["execute_plan"] = execute_plan
         runtime_globals["save_checkpoint"] = save_checkpoint
         runtime_globals["rollback"] = rollback
+        runtime_globals["try_actions"] = try_actions
+        runtime_globals["plan_real"] = plan_real
         if initial.get("animation_enabled"):
             runtime_globals["animation"] = animation
         _refresh_state(initial.get("state") or {})
