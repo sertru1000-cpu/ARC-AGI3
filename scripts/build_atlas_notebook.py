@@ -74,7 +74,16 @@ ATLAS_CELL = '''# ==============================================================
 
 ATLAS_ANALYZER_TIMEOUT_S = 480.0       # v1 tried 180 (measured: far too short)
 ATLAS_ANALYZER_MAX_OUTPUT_TOKENS = 8000  # v1 had this unbounded (0) -- the real bug
-ATLAS_CONCURRENCY = 10                 # bundle/notebook used 28 on a single GPU.
+ATLAS_CONCURRENCY = 20                 # bundle/notebook used 28 on a single GPU.
+                                        # 27.08: kernel v21 Phase A calibration
+                                        # (25 games, real Kaggle RTX Pro 6000
+                                        # backend, not just RunPod A100) came
+                                        # back clean at concurrency=20 -- no
+                                        # retry-storm recurrence -- and the
+                                        # user made the deliberate call to KEEP
+                                        # 20 for the real (Phase B) submission
+                                        # too. See [[arc-agi-3-top10-plan]]
+                                        # memory for the full history.
                                         # 25.08: lowered from 14 after the
                                         # retry-storm bug (cn04/lp85/re86 in
                                         # v17 lost 15-30min each retrying one
@@ -155,18 +164,23 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 300.0    # 26.08 "v20": quota is tight (2h15m left,
-                                   # this run must fit in <=20min). 25 games /
-                                   # concurrency 10 = 3 waves; 3*300s=900s
-                                   # (15min) + ~5min setup ~= 20min budget,
-                                   # minimal margin. Pure crash/sanity check
-                                   # for the two genuinely new-to-live pieces
-                                   # (ATLAS_MEMO_CHECKPOINT, the reworded
-                                   # ATLAS_FORCE_ACT_OVERRIDE) plus concurrency
-                                   # 10 and goal-reconsider, none of which have
-                                   # run together in one kernel before -- not a
-                                   # depth measurement, that's what the 26.08
-                                   # debug-kernel transcript analysis was for.
+ATLAS_CALIBRATION_CAP_S = 750.0    # 27.08: weekly Kaggle quota has <2h left,
+                                   # user set an explicit 30-min TOTAL budget
+                                   # for this run (not per-game -- see the
+                                   # wave math below). 25 games / concurrency
+                                   # 20 (see ATLAS_CONCURRENCY above; kept
+                                   # for Phase B too after this came back
+                                   # clean) = 2 waves;
+                                   # 2*750s=1500s (25min) + ~5min setup ~=
+                                   # 30min budget. Pure crash/retry-storm
+                                   # sanity check for concurrency=20 on the
+                                   # REAL Kaggle RTX Pro 6000 backend (only
+                                   # ever validated on RunPod's A100 before
+                                   # this) plus the four new-to-live 27.08
+                                   # pieces (explore-first, extract-
+                                   # suggestion, save_checkpoint/rollback,
+                                   # context sanitizer) -- not a depth
+                                   # measurement.
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S
     print(f"atlas: Phase A calibration cap -- max_runtime_s_per_game = {ATLAS_CALIBRATION_CAP_S:.0f}s")
