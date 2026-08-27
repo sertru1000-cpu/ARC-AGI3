@@ -112,6 +112,21 @@ export PIP_CACHE_DIR=/root/.cache/pip   # never on a network volume -- can wedge
 # OLD ==3.12.12 pin from a previous attempt's cache and failed the same way.
 # Clear it every run so a locally-patched pyproject.toml is always honored.
 rm -rf /root/.cache/uv
+# Bug #4 (27.08): uv's cache (/root/.cache/uv, local disk) and VENV_DIR
+# (/workspace, network volume) are on DIFFERENT filesystems, so uv's default
+# hardlink install mode silently falls back to a full byte-for-byte copy for
+# every file -- confirmed live: torch alone ships thousands of tiny header
+# files under include/ATen/ops/, and flashinfer's cubins/ has many small
+# binaries too, so the fallback copy crawled at ~7KB/s on this network mount
+# (each small file costs a full round-trip). The fix is NOT to move the
+# cache onto /workspace to enable hardlinking -- that would put the cache on
+# the same network mount PIP_CACHE_DIR above is deliberately kept OFF of
+# (see the comment there: a stalled network mount wedges an open cache
+# handle in unkillable D-state I/O wait). Symlinks are the actual fix: they
+# work ACROSS filesystems (unlike hardlinks) and are a metadata-only
+# operation (unlike copy) -- cache stays safely on local disk, venv gets
+# instant symlinks into it.
+export UV_LINK_MODE=symlink
 uv pip install --python "${VENV_PYTHON}" "torch==2.10.0" "vllm==0.19.0"
 uv pip install --python "${VENV_PYTHON}" flashinfer || echo "flashinfer install failed -- continuing without it (Marlin FP8 path still works on Ampere)"
 uv pip install --python "${VENV_PYTHON}" -e "${ATLAS_SRC}/tufa-arc-agi-framework" -e "${ATLAS_SRC}/ARC3-Inference"
