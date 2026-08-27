@@ -33,7 +33,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "atlas_src" / "src" / "tufa-arc-agi-framework" / "src"))
 sys.path.insert(0, str(ROOT / "atlas_src" / "src" / "ARC3-Inference"))
 
-from inference.agent.tool_agent import ToolAgent  # noqa: E402
+from inference.agent.tool_agent import (  # noqa: E402
+    ToolAgent,
+    _ATLAS_PROBE_THEORY_GRACE_CALLS,
+    _ATLAS_THEORY_NAG_AFTER_CALLS,
+)
 from inference.agent.runtime_state import Frame, load_runtime_state, write_runtime_state  # noqa: E402
 
 
@@ -204,7 +208,7 @@ def main() -> None:
     far_state_path = tmp_dir / "far_run_state.json"
     far_env = WalkEnv(far_state_path, goal=9)
     far_agent = _make_agent(far_state_path, far_env)
-    dispatch = far_agent._run_python_tool(far_state_path, {"code": "result = plan_real(max_depth=3)\n"})
+    dispatch = far_agent._run_python_tool(far_state_path, {"code": "result = plan_real(max_depth=3, rollouts=False)\n"})
     payload = json.loads(dispatch.content)
     result = payload.get("result") or {}
     if result.get("plan") is not None:
@@ -213,9 +217,32 @@ def main() -> None:
         _fail("exhaustion reported honestly", str(result))
     if int(result.get("unique_states_reached") or 0) != 3:
         _fail("dedup makes the search linear here (3 unique states at depth 3)", str(result))
+    if int(result.get("rollouts") or 0) != 0:
+        _fail("rollouts=False really disables the rollout phase", str(result))
     if far_env.pos != 0 or far_env.game_over:
         _fail("real game untouched after an exhausted search", f"pos={far_env.pos}")
-    _ok("an unreachable goal reports state_space_exhausted (3 unique states tried at depth 3) and rewinds cleanly")
+    _ok("an unreachable goal reports state_space_exhausted (3 unique states tried at depth 3, rollouts off) and rewinds cleanly")
+
+    # 4b. v2 Monte-Carlo rollouts: the same deep goal IS found once
+    #     rollouts are allowed -- here the only valid action is UP, so a
+    #     depth-24 random rollout deterministically walks into the goal at
+    #     depth 9, far beyond the systematic max_depth of 3.
+    deep_state_path = tmp_dir / "deep_run_state.json"
+    deep_env = WalkEnv(deep_state_path, goal=9)
+    deep_env.VALID = ("UP",)
+    deep_agent = _make_agent(deep_state_path, deep_env)
+    deep_agent._current_valid_actions = ["UP"]
+    dispatch = deep_agent._run_python_tool(deep_state_path, {"code": "result = plan_real(max_depth=3)\n"})
+    payload = json.loads(dispatch.content)
+    result = payload.get("result") or {}
+    plan = result.get("plan") or []
+    if result.get("found_by") != "rollout":
+        _fail("deep goal found by the rollout phase", str(result))
+    if len(plan) != 9 or {str(s.get("action")).upper() for s in plan} != {"UP"}:
+        _fail("rollout plan is exactly the 9 UPs that complete the level", str(result))
+    if deep_env.pos != 0 or deep_env.level != 1:
+        _fail("real game untouched after a rollout-found plan", f"pos={deep_env.pos} level={deep_env.level}")
+    _ok("Monte-Carlo rollout finds the depth-9 solution the depth-3 frontier cannot, and rewinds cleanly")
 
     # 5. ONLINE mode (no snapshot/restore wired): graceful unavailability,
     #    same contract as save_checkpoint/rollback.
@@ -229,6 +256,56 @@ def main() -> None:
     if "not available" not in str(payload.get("error", "")):
         _fail("ONLINE mode graceful unavailability", str(payload))
     _ok("no snapshot/restore wired (ONLINE mode) -> plan_real fails gracefully, same contract as rollback")
+
+    # 6. Probe/checkpoint integration (found live 27.08 on the first
+    #    OFFLINE pod run: explore-first fired 153x in 37 min because probes
+    #    were invisible to it): a UNIFORM probe with a visible effect
+    #    credits that control kind for explore-first; a uniform inert probe
+    #    counts toward the same 3-attempt inert resolution.
+    probe_state_path = tmp_dir / "probe_credit_state.json"
+    probe_env = WalkEnv(probe_state_path, goal=5)
+    probe_agent = _make_agent(probe_state_path, probe_env)
+    probe_agent._current_valid_actions = ["UP", "DOWN"]
+    probe_agent._run_python_tool(
+        probe_state_path, {"code": "result = try_actions([['UP', 'UP'], ['UP', 'DOWN']])\n"}
+    )
+    if "UP" not in probe_agent._atlas_action_kinds_resolved:
+        _fail(
+            "a uniform probe with a visible effect credits its kind for explore-first",
+            str(probe_agent._atlas_action_kinds_resolved),
+        )
+    if "DOWN" in probe_agent._atlas_action_kinds_resolved:
+        _fail(
+            "a MIXED probe sequence credits nothing (effect not attributable)",
+            str(probe_agent._atlas_action_kinds_resolved),
+        )
+    for _ in range(3):
+        probe_agent._run_python_tool(probe_state_path, {"code": "result = try_actions([['DOWN']])\n"})
+    if "DOWN" not in probe_agent._atlas_action_kinds_resolved:
+        _fail(
+            "3 uniform inert probes resolve the kind as inert (same rule as real actions)",
+            str(probe_agent._atlas_action_kind_attempts),
+        )
+    _ok("probes feed explore-first: uniform+effect credits the kind, mixed credits nothing, "
+        "3 inert uniform probes resolve as inert")
+
+    # 7. Theory-nag grace after probes: a successfully executed probe
+    #    keeps the soft theory nag AND theory-force quiet for
+    #    _ATLAS_PROBE_THEORY_GRACE_CALLS calls; once the grace elapses
+    #    with no further probes, the nag resumes.
+    prompt = probe_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+    if "THIS turn, write predict" in prompt or "ZERO verify_theory() calls" in prompt:
+        _fail("theory nags stay quiet right after a probe", prompt[-400:])
+    for _ in range(_ATLAS_PROBE_THEORY_GRACE_CALLS):
+        probe_agent._run_python_tool(probe_state_path, {"code": "result = 1\n"})
+        probe_agent._atlas_calls_since_real_action = 0
+    if probe_agent._atlas_python_call_index < _ATLAS_THEORY_NAG_AFTER_CALLS:
+        _fail("test setup: past the soft theory threshold", str(probe_agent._atlas_python_call_index))
+    prompt = probe_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+    if "THIS turn, write predict" not in prompt and "ZERO verify_theory() calls" not in prompt:
+        _fail("theory nag resumes once the probe grace elapses", prompt[-500:])
+    _ok(f"a real probe opens a {_ATLAS_PROBE_THEORY_GRACE_CALLS}-call grace window for theory nags, "
+        "after which they resume")
 
     print("\nAll atlas real-search (try_actions/plan_real) checks passed.")
 

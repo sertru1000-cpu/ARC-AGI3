@@ -489,24 +489,27 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             reply = _checkpoint_request({"action": "probe_sequences", "sequences": normalized})
             return {"results": reply.get("results"), "note": reply.get("note")}
 
-        def plan_real(actions=None, max_depth=6, max_nodes=120):
+        def plan_real(actions=None, max_depth=6, max_nodes=120, rollouts=True):
             '''Search the REAL engine for an action sequence that completes
-            the current level (or wins the game) -- breadth-first over
-            actual engine states via snapshot/rewind, deduplicating
-            repeated board states. NO predict() or theory needed: the
-            engine itself is the world model, so this works even when a
-            pixel-perfect theory is out of reach. By default tries every
-            currently-valid non-MOUSE action; for click games pass
-            explicit candidates: plan_real(actions=[{'action': 'MOUSE',
-            'row': r, 'col': c}, ...], max_depth=4) with a SHORT list of
-            promising clicks (each extra candidate multiplies the search).
-            Returns {'plan': [...] or None, 'reason': ...}; on success,
-            execute with action(res['plan']) -- the found plan was
+            the current level (or wins the game) -- two phases on actual
+            engine states via snapshot/rewind: (1) a novelty-guided
+            systematic frontier up to max_depth (deduplicating repeated
+            boards, biggest board-changes explored first), then (2) random
+            DEEP rollouts (Monte-Carlo, up to ~24 steps) with the leftover
+            budget, which can stumble into solutions far deeper than
+            max_depth. NO predict() or theory needed: the engine itself is
+            the world model. By default tries every currently-valid
+            non-MOUSE action; for click games pass explicit candidates:
+            plan_real(actions=[{'action': 'MOUSE', 'row': r, 'col': c},
+            ...], max_depth=4) with a SHORT list of promising clicks (each
+            extra candidate multiplies the search). Returns {'plan': [...]
+            or None, 'reason': ..., 'found_by': 'frontier'|'rollout'}; on
+            success execute with action(res['plan']) -- the plan was
             verified on the real engine, then rewound, so replaying it is
-            deterministic. Budgeted (~10s, a few hundred engine states);
-            "state_space_exhausted" means everything reachable within
-            max_depth was genuinely tried. Costs zero recorded actions
-            either way.'''
+            deterministic. Budgeted (~10s); "state_space_exhausted" means
+            everything reachable within max_depth was genuinely tried
+            (rollout misses, by contrast, prove nothing). Costs zero
+            recorded actions either way.'''
             candidates = None
             if actions is not None:
                 candidates = _normalize_actions(list(actions))
@@ -516,13 +519,16 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                     "candidates": candidates,
                     "max_depth": int(max_depth),
                     "max_nodes": int(max_nodes),
+                    "rollouts": bool(rollouts),
                 }
             )
             return {
                 "plan": reply.get("plan"),
                 "reason": reply.get("reason"),
+                "found_by": reply.get("found_by"),
                 "nodes_explored": reply.get("nodes_explored"),
                 "unique_states_reached": reply.get("unique_states_reached"),
+                "rollouts": reply.get("rollouts"),
                 "note": reply.get("note"),
             }
 

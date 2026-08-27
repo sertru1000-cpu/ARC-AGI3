@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import copy
+import heapq
 import json
 import logging
 import os
+import random
 import re
 import time
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -200,6 +201,25 @@ _ATLAS_PROBE_MAX_TOTAL_STEPS = 240
 _ATLAS_SEARCH_MAX_NODES = 250
 _ATLAS_SEARCH_MAX_DEPTH = 8
 _ATLAS_SEARCH_WALL_SECONDS = 10.0
+# atlas 27.08 (plan_real v2): Monte-Carlo deep rollouts -- after the
+# systematic frontier is exhausted (or its node budget spent), leftover
+# wall-clock goes to random playouts of up to this depth from the most
+# novel frontier states. Catches solutions deeper than the systematic
+# depth cap at the cost of completeness (a miss proves nothing). Classic
+# UCT/MCTS value-backprop is deliberately NOT used: rewards here are
+# sparse/binary (level completed or not) and the engine is deterministic,
+# so a bandit layer degenerates to random search with extra bookkeeping.
+_ATLAS_ROLLOUT_DEPTH = 24
+_ATLAS_MAX_ROLLOUTS = 120
+# atlas 27.08 (probe/checkpoint integration, found live on the first
+# OFFLINE pod run): probes displaced BOTH real actions and verify_theory,
+# and the checkpoint ladder -- designed before probes existed -- responded
+# by spamming contradictory imperatives (explore-first fired 153x,
+# theory-force 52x in ~37 min, real actions halved vs baseline). A probe
+# that just ran IS empirical theory work: the engine itself answered
+# "what happens if". So the theory nag and theory-force stay quiet for
+# this many python calls after any successful probe execution.
+_ATLAS_PROBE_THEORY_GRACE_CALLS = 4
 # atlas: a non-null 'note' in a printed/returned plan_with_theory() result --
 # res['note'] is only set when the found plan has more than one step, so this
 # is a best-effort stand-in for "the model got back a multi-step plan" when
@@ -1525,6 +1545,12 @@ class ToolAgent:
         self._atlas_plan_real_auto_done_this_level = False
         self._atlas_pending_auto_plan_real = False
         self._atlas_plan_real_auto_note: str | None = None
+        # atlas 27.08 (probe/checkpoint integration): python-call index of
+        # the last SUCCESSFULLY EXECUTED probe (try_actions/plan_real that
+        # actually ran on the engine, set host-side in _handle_checkpoint,
+        # not the in-code substring tracker) -- the theory nag/force stay
+        # quiet for _ATLAS_PROBE_THEORY_GRACE_CALLS calls after it.
+        self._atlas_last_probe_call_index = -99
         # atlas 26.08: context sanitizer (idea #3) -- independent of the
         # rollback/checkpoint feature above (works in ONLINE mode too, no
         # env-snapshot needed), so tracked with its own counters rather than
@@ -1614,6 +1640,7 @@ class ToolAgent:
             self._atlas_plan_real_auto_done_this_level = False
             self._atlas_pending_auto_plan_real = False
             self._atlas_plan_real_auto_note = None
+            self._atlas_last_probe_call_index = -99
             self._atlas_calls_since_sanitize = 0
             self._atlas_context_sanitize_level = 1
             self._atlas_context_sanitize_pending = False
@@ -2121,6 +2148,8 @@ class ToolAgent:
             and not self._atlas_verify_theory_real_ever
             and (self._atlas_python_call_index - self._atlas_theory_force_eligible_from_call)
             >= _ATLAS_THEORY_FORCE_AFTER_CALLS
+            and (self._atlas_python_call_index - self._atlas_last_probe_call_index)
+            >= _ATLAS_PROBE_THEORY_GRACE_CALLS
         ):
             # atlas 27.08: checked BEFORE the soft theory nag below, not
             # after -- its threshold (8) is always >= the soft nag's (4), so
@@ -2144,6 +2173,11 @@ class ToolAgent:
                 self._atlas_last_verified_accuracy is None
                 or self._atlas_last_verified_accuracy < 0.6
             )
+            # atlas 27.08 (probe/checkpoint integration): a recent probe IS
+            # empirical dynamics work -- do not nag for a coded theory
+            # while the model is actively asking the engine directly.
+            and (self._atlas_python_call_index - self._atlas_last_probe_call_index)
+            >= _ATLAS_PROBE_THEORY_GRACE_CALLS
         ) and self._atlas_python_call_index >= _ATLAS_THEORY_NAG_AFTER_CALLS:
             lines.append(ATLAS_THEORY_CHECKPOINT)
             print(f"atlas: theory checkpoint injected (action_num={action_num})", flush=True)
@@ -2524,6 +2558,22 @@ class ToolAgent:
             executed = int(payload.get("executed_count") or 0)
             total_steps += max(1, executed)
             frame_after, _ = load_runtime_state(state_path)
+            # atlas 27.08 (probe/checkpoint integration): a probe teaches
+            # the model what a control does just as well as a real action
+            # -- credit explore-first accordingly, but only for UNIFORM
+            # sequences (all actions the same kind), where the observed
+            # effect is unambiguously attributable to that kind. Mixed
+            # sequences credit nothing. Inert uniform probes count toward
+            # the same 3-attempt inert-resolution as real actions.
+            if executed:
+                kinds = {
+                    str(s.get("action") if isinstance(s, dict) else s).strip().upper()
+                    for s in list(seq)[:executed]
+                }
+                if len(kinds) == 1:
+                    self._atlas_note_action_kind_tried(
+                        next(iter(kinds)), baseline_level, bool(payload.get("board_changed"))
+                    )
             results.append(
                 {
                     "sequence_index": index,
@@ -2590,13 +2640,47 @@ class ToolAgent:
                 ),
             }
         baseline_frame, _ = load_runtime_state(state_path)
-        visited = {board_signature(baseline_frame.grid if baseline_frame is not None else ())}
+        baseline_grid = baseline_frame.grid if baseline_frame is not None else ()
+        visited = {board_signature(baseline_grid)}
         deadline = time.monotonic() + _ATLAS_SEARCH_WALL_SECONDS
-        queue: deque[list[dict[str, Any]]] = deque([[]])
+        rollouts_enabled = bool(request.get("rollouts", True))
+
+        def _plan_found(attempt, payload, nodes, rollouts, found_by):
+            executed = int(payload.get("executed_count") or len(attempt))
+            plan = attempt[: max(1, executed)]
+            self._restore_env_callback(snapshot)
+            print(
+                f"atlas: plan_real found a plan ({len(plan)} step(s), {nodes} node(s), "
+                f"{rollouts} rollout(s), via {found_by})",
+                flush=True,
+            )
+            return {
+                "plan": plan,
+                "reason": "run_complete" if payload.get("run_complete") else "level_completed",
+                "found_by": found_by,
+                "nodes_explored": nodes,
+                "rollouts": rollouts,
+                "note": (
+                    "found on the REAL engine, then rewound -- execute it with "
+                    "action(res['plan']) to make it count."
+                ),
+            }
+
+        # Phase 1 -- novelty-guided frontier (v2): greedy best-first
+        # instead of uniform BFS. Priority = how many cells the node's
+        # last action changed vs its parent board -- "big movement first",
+        # the cheap stand-in for a value function in a sparse-reward,
+        # deterministic setting where classic MCTS backprop has nothing to
+        # propagate. Dedup on board_signature keeps it complete within
+        # max_depth given enough budget, so 'state_space_exhausted' still
+        # means what it says.
+        frontier: list = [(0, 0, [], baseline_grid)]
+        tiebreak = 0
+        explored_states: list = [([], baseline_grid)]
         nodes = 0
         budget_hit = False
-        while queue:
-            path = queue.popleft()
+        while frontier:
+            _, _, path, parent_grid = heapq.heappop(frontier)
             for candidate in candidates:
                 if nodes >= max_nodes or time.monotonic() >= deadline:
                     budget_hit = True
@@ -2608,36 +2692,51 @@ class ToolAgent:
                 if payload.get("error"):
                     continue
                 if payload.get("level_completed") or payload.get("run_complete"):
-                    self._restore_env_callback(snapshot)
-                    print(
-                        f"atlas: plan_real found a plan ({len(attempt)} step(s), {nodes} node(s) explored)",
-                        flush=True,
-                    )
-                    return {
-                        "plan": attempt,
-                        "reason": "run_complete" if payload.get("run_complete") else "level_completed",
-                        "nodes_explored": nodes,
-                        "note": (
-                            "found on the REAL engine, then rewound -- execute it with "
-                            "action(res['plan']) to make it count."
-                        ),
-                    }
+                    return _plan_found(attempt, payload, nodes, 0, "frontier")
                 if int(payload.get("executed_count") or 0) < len(attempt):
                     continue
                 if payload.get("game_over"):
                     continue
                 frame_after, _ = load_runtime_state(state_path)
-                sig = board_signature(frame_after.grid if frame_after is not None else ())
+                child_grid = frame_after.grid if frame_after is not None else ()
+                sig = board_signature(child_grid)
                 if sig in visited:
                     continue
                 visited.add(sig)
+                explored_states.append((attempt, child_grid))
                 if len(attempt) < max_depth:
-                    queue.append(attempt)
+                    change = self._atlas_grid_diff_count(parent_grid, child_grid)
+                    tiebreak += 1
+                    heapq.heappush(frontier, (-change, tiebreak, attempt, child_grid))
             if budget_hit:
                 break
+
+        # Phase 2 -- Monte-Carlo deep rollouts (v2): leftover wall-clock
+        # goes to random playouts up to _ATLAS_ROLLOUT_DEPTH from randomly
+        # chosen already-reached states. This is the genuinely
+        # Monte-Carlo part: it can stumble into solutions far deeper than
+        # the systematic depth cap, and a batched step_env call stops
+        # itself at level completion, so each rollout costs ONE call. A
+        # rollout miss proves nothing (unlike frontier exhaustion).
+        rollouts = 0
+        if rollouts_enabled and explored_states and candidates:
+            rng = random.Random(nodes * 1009 + len(visited))
+            while rollouts < _ATLAS_MAX_ROLLOUTS and time.monotonic() < deadline:
+                rollouts += 1
+                start_path, _ = explored_states[rng.randrange(len(explored_states))]
+                seq = [dict(rng.choice(candidates)) for _ in range(_ATLAS_ROLLOUT_DEPTH)]
+                self._restore_env_callback(snapshot)
+                attempt = [*start_path, *seq]
+                payload = self._step_env_callback({"actions": attempt})
+                if payload.get("error"):
+                    continue
+                if payload.get("level_completed") or payload.get("run_complete"):
+                    return _plan_found(attempt, payload, nodes, rollouts, "rollout")
+
         reason = "budget_exhausted" if budget_hit else "state_space_exhausted"
         print(
-            f"atlas: plan_real found no plan ({nodes} node(s), {len(visited) - 1} unique state(s), {reason})",
+            f"atlas: plan_real found no plan ({nodes} node(s), {len(visited) - 1} unique state(s), "
+            f"{rollouts} rollout(s), {reason})",
             flush=True,
         )
         return {
@@ -2645,10 +2744,14 @@ class ToolAgent:
             "reason": reason,
             "nodes_explored": nodes,
             "unique_states_reached": len(visited) - 1,
+            "rollouts": rollouts,
             "note": (
-                "no level-completing sequence within this depth/budget from here. A deeper or "
-                "differently-parameterized retry is fine, as is falling back to normal play; "
-                "'state_space_exhausted' means EVERY reachable state within max_depth was tried."
+                "no level-completing sequence found: the systematic frontier within max_depth "
+                + ("hit its budget" if budget_hit else "was FULLY tried")
+                + ((", and " + str(rollouts) + " random deep rollout(s) (up to depth "
+                    + str(_ATLAS_ROLLOUT_DEPTH) + ") also found nothing -- though a rollout miss, "
+                    "unlike frontier exhaustion, proves nothing") if rollouts else "")
+                + ". A deeper/differently-parameterized retry or normal play are both fine."
             ),
         }
 
@@ -3261,6 +3364,13 @@ class ToolAgent:
                     if refreshed_frame is not None:
                         noop_guard_board_sig = board_signature(refreshed_frame.grid)
                         noop_guard_level = refreshed_frame.level
+                if not probe_payload.get("error"):
+                    # atlas 27.08 (probe/checkpoint integration): a probe
+                    # that actually EXECUTED is empirical theory work --
+                    # opens the theory-nag grace window. Set host-side (not
+                    # in the in-code substring tracker) so a failed/
+                    # unavailable call never earns the grace.
+                    self._atlas_last_probe_call_index = self._atlas_python_call_index
                 probe_payload["state"] = _serialized_runtime_state(
                     next_valid_actions=list(self._current_valid_actions)
                 )
