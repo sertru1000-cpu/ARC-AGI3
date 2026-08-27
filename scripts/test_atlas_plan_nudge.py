@@ -101,8 +101,15 @@ def main() -> None:
     #    downstream assertion below about the ORIGINAL checkpoints isolated
     #    from it, the same way 5b/5c interleave real actions to isolate
     #    goal-reconsider from force-act. The memo checkpoint itself gets its
-    #    own dedicated coverage in step 8 below.
-    agent._run_python_tool(state_path, {"code": "action(['RIGHT'])\nmemo['seen'] = True\nresult = 1\n"})
+    #    own dedicated coverage in step 8 below. Also tries BOTH UP and
+    #    RIGHT (board_changed=True on both per _fake_step_env) so the new
+    #    (27.08) explore-first checkpoint -- which fires ahead of theory/
+    #    goal-reconsider/extract for any valid_actions kind never resolved
+    #    this level -- is satisfied for the rest of this test's assertions,
+    #    which pass valid_actions=["UP", "RIGHT"] throughout and are about
+    #    the ORIGINAL checkpoints, not this one (see test_atlas_explore_
+    #    first.py for its own dedicated coverage).
+    agent._run_python_tool(state_path, {"code": "action(['RIGHT'])\naction(['UP'])\nmemo['seen'] = True\nresult = 1\n"})
     if not agent._atlas_memo_ever_written:
         _fail("memo write detected", "expected _atlas_memo_ever_written=True after writing to memo")
 
@@ -243,7 +250,12 @@ def main() -> None:
         _fail("verify_theory call count tracked", str(goal_agent._atlas_verify_theory_call_count))
     if goal_agent._atlas_calls_since_real_action >= _ATLAS_GOAL_RECONSIDER_AFTER_CALLS:
         _fail("force-act stays clear", "test setup should keep force-act's counter low -- check the interleaving")
-    prompt = goal_agent._build_user_prompt(1, valid_actions=["UP", "RIGHT"])
+    # valid_actions=["RIGHT"] (not ["UP", "RIGHT"]) -- this loop only ever
+    # calls action(['RIGHT']); leaving "UP" in valid_actions would leave it
+    # permanently untried and the new (27.08) explore-first checkpoint
+    # would fire ahead of goal-reconsider instead (see
+    # test_atlas_explore_first.py for that checkpoint's own coverage).
+    prompt = goal_agent._build_user_prompt(1, valid_actions=["RIGHT"])
     if "reconsider your GOAL model" not in prompt:
         _fail("goal-reconsider checkpoint fires", f"expected it after {_ATLAS_GOAL_RECONSIDER_AFTER_CALLS} failed verify_theory calls, got: {prompt[-500:]!r}")
     if "THIS turn, write predict" in prompt:
@@ -275,7 +287,11 @@ def main() -> None:
             },
         )
         short_agent._run_python_tool(state_path, {"code": "action(['RIGHT'])\nresult = 1\n"})
-    prompt = short_agent._build_user_prompt(1, valid_actions=["UP", "RIGHT"])
+    # valid_actions=["RIGHT"] (not ["UP", "RIGHT"]) -- same reasoning as
+    # goal_agent above: this loop only ever calls action(['RIGHT']), so
+    # leaving "UP" in would trigger the new (27.08) explore-first checkpoint
+    # instead of the theory checkpoint this assertion is actually about.
+    prompt = short_agent._build_user_prompt(1, valid_actions=["RIGHT"])
     if "reconsider your GOAL model" in prompt:
         _fail("goal-reconsider respects the threshold", f"must not fire one call short of the threshold, got: {prompt[-500:]!r}")
     if "THIS turn, write predict" not in prompt:

@@ -423,7 +423,13 @@ def main() -> None:
 
     for _ in range(_ATLAS_EXTRACT_NUDGE_AFTER_CALLS):
         extract_agent._run_python_tool(extract_state_path, {"code": _wrong_predict_code()})
-    prompt = extract_agent._build_user_prompt(0, valid_actions=["UP"])
+    # valid_actions=[] here (not ["UP"]) -- this test is isolated to the
+    # extract-suggestion checkpoint specifically; extract_agent never calls
+    # action() at all, so a non-empty valid_actions would leave it
+    # perpetually "untried" and the new (27.08) explore-first checkpoint
+    # would fire ahead of extract-suggestion instead (see
+    # test_atlas_explore_first.py for that checkpoint's own coverage).
+    prompt = extract_agent._build_user_prompt(0, valid_actions=[])
     if "never once passed `extract=`" not in prompt:
         _fail(f"extract-suggestion checkpoint fires after {_ATLAS_EXTRACT_NUDGE_AFTER_CALLS} verify_theory calls", prompt[-500:])
     _ok(f"extract-suggestion checkpoint fires after {_ATLAS_EXTRACT_NUDGE_AFTER_CALLS} verify_theory( calls with no extract= used")
@@ -438,7 +444,7 @@ def main() -> None:
             )
         },
     )
-    prompt = extract_agent._build_user_prompt(0, valid_actions=["UP"])
+    prompt = extract_agent._build_user_prompt(0, valid_actions=[])
     if "never once passed `extract=`" in prompt:
         _fail("extract-suggestion checkpoint clears once extract= is used", prompt[-500:])
     _ok("extract-suggestion checkpoint goes quiet immediately after extract= is actually used")

@@ -116,6 +116,29 @@ PYTHON_ADDENDUM = (
     "- If an action result reports `game_over`, `run_complete`, `level_completed`, or `done`, stop acting immediately and re-ground on the next turn.\n"
 )
 
+# atlas 27.08: found live on r11l -- the human baseline solves this game in
+# 2 moves, but the model spent 45 minutes and tens of thousands of tokens
+# verifying a pixel-frequency theory of a MOUSE-only game without ever
+# trying more than 2 real actions. The static PYTHON_ADDENDUM already says
+# "probe... then plan", but that guidance alone did not stop the model
+# reaching for verify_theory()'s statistical rigor before it had even tried
+# every kind of control the game currently offers -- confirmed by the user's
+# own play-testing ("я, как человек, всегда начинаю с проб, что какие
+# рычаги правления делают, как реагируют фигуры"). This fires BEFORE the
+# theory checkpoint below (see the priority chain in tool_agent.py) --
+# cheap exploration of the control surface is more foundational than either
+# a goal reframe or a dynamics theory, and it's the one thing a human does
+# first that this checkpoint chain never explicitly forced.
+ATLAS_EXPLORE_FIRST_CHECKPOINT = (
+    "[atlas checkpoint] This game currently offers {valid_actions}, but you have only tried "
+    "{tried} of them for real so far -- {untried} still untested. Before building or refining a "
+    "predict() theory, spend one real action() on each untried control (any single action is "
+    "enough) and observe what changed. The fastest way to learn what a lever does is to pull it, "
+    "not to infer it from pixel statistics alone. Once every available control has been tried at "
+    "least once, verify_theory()'s statistical rigor is worth the actions it costs; before that, "
+    "it is premature."
+)
+
 # atlas: injected by tool_agent.py into a specific turn's prompt (not static
 # prompt furniture) when the harness's own state says the model has drifted
 # back to poking instead of using verify_theory/plan_with_theory. Mentioning

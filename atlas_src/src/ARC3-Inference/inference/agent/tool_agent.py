@@ -16,6 +16,7 @@ import requests
 
 from inference.agent.action_names import to_engine_action, to_model_action
 from inference.agent.prompts import (
+    ATLAS_EXPLORE_FIRST_CHECKPOINT,
     ATLAS_EXTRACT_CHECKPOINT,
     ATLAS_FORCE_ACT_OVERRIDE,
     ATLAS_FORCE_ROLLBACK_CHECKPOINT,
@@ -33,6 +34,27 @@ from inference.agent.prompts import (
     VISUAL_GAME_ADDENDUM,
 )
 
+# atlas 27.08: found live on r11l -- human baseline solves this MOUSE-only
+# game in 2 moves, but the model spent 45 minutes/tens of thousands of
+# tokens on verify_theory() without ever trying more than 2 real actions.
+# Threshold is deliberately LOWER than _ATLAS_THEORY_NAG_AFTER_CALLS below --
+# exploring the control surface is more foundational than any theory about
+# it, so this must be checked (and able to fire) before theory does, not
+# after. See _atlas_action_kinds_resolved (tracked in _handle_action) and
+# the priority chain in _build_user_prompt. Resets every level-up (see
+# _atlas_explore_level) -- a new level can introduce new mechanics or make a
+# previously-irrelevant control matter, so "resolved" from an earlier level
+# doesn't carry over.
+_ATLAS_EXPLORE_NUDGE_AFTER_CALLS = 2
+# A control kind counts as "resolved" (no longer nagged about) once it
+# either (a) visibly changed the board at least once -- the model learned
+# something real -- or (b) has been tried this many times with NO visible
+# effect. (b) exists so a control that is genuinely inert in this exact
+# spot/level (e.g. MOUSE clicks on empty water before finding the fish)
+# doesn't nag forever -- the r11l (v12) total-paralysis lesson: an
+# unsatisfiable gate ("prove this changed something") can trap a model just
+# as badly as "prove verified_accuracy >= 0.6" did.
+_ATLAS_EXPLORE_MAX_ATTEMPTS_PER_KIND = 3
 # atlas: how many python-tool calls may pass without a plan_with_theory( call
 # before the checkpoint nags again. Mirrors our own harness's PLAN_NAG_EVERY.
 _ATLAS_PLAN_NAG_EVERY = 3
@@ -1373,6 +1395,17 @@ class ToolAgent:
         # game -- the extract-suggestion checkpoint's trigger. See
         # _ATLAS_EXTRACT_NUDGE_AFTER_CALLS.
         self._atlas_extract_ever_used = False
+        # atlas 27.08: which control "kinds" (MOUSE/UP/etc, ignoring MOUSE
+        # coordinates) are RESOLVED this level -- either they visibly changed
+        # the board at least once, or they've been tried
+        # _ATLAS_EXPLORE_MAX_ATTEMPTS_PER_KIND times with no visible effect
+        # (accepted as "seems inert here" rather than nagged forever). The
+        # explore-first checkpoint's trigger. Independent of the checkpoint/
+        # rollback feature (works in ONLINE mode too), so tracked with its
+        # own level pointer rather than reusing _atlas_current_level.
+        self._atlas_action_kinds_resolved: set[str] = set()
+        self._atlas_action_kind_attempts: dict[str, int] = {}
+        self._atlas_explore_level = 1
         # atlas 26.08: save_checkpoint/rollback state -- see
         # _HarnessGameSession.atlas_snapshot_env/atlas_restore_env for the
         # actual engine-state deepcopy (OFFLINE mode only; None in ONLINE
@@ -1477,6 +1510,9 @@ class ToolAgent:
             self._atlas_memo = {}
             self._atlas_memo_ever_written = False
             self._atlas_extract_ever_used = False
+            self._atlas_action_kinds_resolved = set()
+            self._atlas_action_kind_attempts = {}
+            self._atlas_explore_level = 1
             self._atlas_checkpoints = {}
             self._atlas_checkpoint_counter = 0
             self._atlas_checkpoint_available = False
@@ -1877,6 +1913,32 @@ class ToolAgent:
                     flush=True,
                 )
         elif (
+            (self._atlas_last_verified_accuracy is None or self._atlas_last_verified_accuracy < 0.6)
+            and self._atlas_python_call_index >= _ATLAS_EXPLORE_NUDGE_AFTER_CALLS
+            and (set(_normalize_valid_actions(valid_actions)) - self._atlas_action_kinds_resolved)
+        ):
+            # atlas 27.08: checked BEFORE goal-reconsider/theory/extract --
+            # exploring what the available controls DO is more foundational
+            # than any theory, goal reframe, or extract= refinement built on
+            # top of that exploration. See _ATLAS_EXPLORE_NUDGE_AFTER_CALLS.
+            # "Resolved" means visibly changed the board at least once, or
+            # tried enough times with no effect to accept it's inert here --
+            # NOT just "called once", which a single unlucky MOUSE click
+            # into empty water would have wrongly satisfied.
+            untried = sorted(set(_normalize_valid_actions(valid_actions)) - self._atlas_action_kinds_resolved)
+            lines.append(
+                ATLAS_EXPLORE_FIRST_CHECKPOINT.format(
+                    valid_actions=_format_valid_action_line(valid_actions),
+                    tried=len(self._atlas_action_kinds_resolved),
+                    untried=", ".join(untried),
+                )
+            )
+            print(
+                f"atlas: explore-first checkpoint injected (action_num={action_num}, "
+                f"untried={untried})",
+                flush=True,
+            )
+        elif (
             self._atlas_last_verified_accuracy is None
             or self._atlas_last_verified_accuracy < 0.6
         ) and self._atlas_verify_theory_call_count >= _ATLAS_GOAL_RECONSIDER_AFTER_CALLS:
@@ -2207,6 +2269,39 @@ class ToolAgent:
         self._atlas_rollback_trigger_reason = None
         self._atlas_rollback_ultimatum_streak = 0
         return True
+
+    def _atlas_note_action_kind_tried(self, action_sig: str, level: int, board_changed: bool) -> None:
+        """Tracks which control kinds (MOUSE/UP/etc -- MOUSE coordinates are
+        stripped, only the kind matters) are RESOLVED this LEVEL, for the
+        explore-first checkpoint. A kind resolves the moment it visibly
+        changes the board (the model learned its real effect) -- calling it
+        once with no visible effect does NOT resolve it, so a single
+        unlucky MOUSE click into empty water doesn't wrongly satisfy "tried
+        MOUSE". Capped at _ATLAS_EXPLORE_MAX_ATTEMPTS_PER_KIND attempts,
+        after which a still-inert kind resolves anyway -- a control that
+        truly does nothing here must not become an unsatisfiable gate (the
+        same class of trap as the old "verified_accuracy >= 0.6" one).
+        Resets on every level-up (independent level pointer, not shared
+        with the rollback feature's _atlas_current_level) since a new level
+        can introduce new mechanics or make a previously-irrelevant control
+        matter again.
+        """
+        if level > self._atlas_explore_level:
+            self._atlas_explore_level = level
+            self._atlas_action_kinds_resolved = set()
+            self._atlas_action_kind_attempts = {}
+        if not action_sig:
+            return
+        kind = action_sig.split("(", 1)[0]
+        if kind in self._atlas_action_kinds_resolved:
+            return
+        if board_changed:
+            self._atlas_action_kinds_resolved.add(kind)
+            return
+        attempts = self._atlas_action_kind_attempts.get(kind, 0) + 1
+        self._atlas_action_kind_attempts[kind] = attempts
+        if attempts >= _ATLAS_EXPLORE_MAX_ATTEMPTS_PER_KIND:
+            self._atlas_action_kinds_resolved.add(kind)
 
     def _atlas_note_action_progress(self, compact_payload: dict[str, Any], board_sig_after: Any) -> None:
         """Trigger A/B bookkeeping for the force-rollback checkpoint, and
@@ -2560,6 +2655,10 @@ class ToolAgent:
                     noop_guard_level = refreshed_frame.level
                 self._atlas_note_action_progress(compact_payload, noop_guard_board_sig)
                 self._atlas_note_context_sanitize_progress(compact_payload, refreshed_frame)
+                if compact_payload.get("executed"):
+                    self._atlas_note_action_kind_tried(
+                        pending_action_sig, noop_guard_level, bool(compact_payload.get("board_changed"))
+                    )
                 return {
                     "action_result": compact_payload,
                     "state": _serialized_runtime_state(
@@ -2613,6 +2712,9 @@ class ToolAgent:
                     noop_guard_level = refreshed_frame.level
                 self._atlas_note_action_progress(sub_compact, noop_guard_board_sig)
                 self._atlas_note_context_sanitize_progress(sub_compact, refreshed_frame)
+                self._atlas_note_action_kind_tried(
+                    action_sig, noop_guard_level, bool(sub_compact.get("board_changed"))
+                )
                 if _terminal_action_reason(sub_compact):
                     terminal_action_result = sub_compact
                     break
