@@ -164,22 +164,20 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 750.0    # 27.08: weekly Kaggle quota has <2h left,
-                                   # user set an explicit 30-min TOTAL budget
-                                   # for this run (not per-game -- see the
-                                   # wave math below). 25 games / concurrency
-                                   # 20 (see ATLAS_CONCURRENCY above; kept
-                                   # for Phase B too after this came back
-                                   # clean) = 2 waves;
-                                   # 2*750s=1500s (25min) + ~5min setup ~=
-                                   # 30min budget. Pure crash/retry-storm
-                                   # sanity check for concurrency=20 on the
-                                   # REAL Kaggle RTX Pro 6000 backend (only
-                                   # ever validated on RunPod's A100 before
-                                   # this) plus the four new-to-live 27.08
-                                   # pieces (explore-first, extract-
-                                   # suggestion, save_checkpoint/rollback,
-                                   # context sanitizer) -- not a depth
+ATLAS_CALIBRATION_CAP_S = 600.0    # 27.08 (2nd calibration): user set an
+                                   # explicit 25-min TOTAL budget for this
+                                   # run (not per-game -- see the wave math
+                                   # below). 25 games / concurrency 20 = 2
+                                   # waves; 2*600s=1200s (20min) + ~5min
+                                   # setup ~= 25min budget. Sanity check for
+                                   # the new theory-force-override checkpoint
+                                   # (ATLAS_THEORY_FORCE_OVERRIDE, added
+                                   # after this same day's Kaggle v21
+                                   # calibration + a Gemini diagnosis found
+                                   # the soft theory nag converting to a real
+                                   # verify_theory() call only ~17% of the
+                                   # time it fired) on the REAL Kaggle RTX
+                                   # Pro 6000 backend -- not a depth
                                    # measurement.
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S

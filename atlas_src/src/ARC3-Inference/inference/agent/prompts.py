@@ -197,6 +197,48 @@ ATLAS_FORCE_ACT_OVERRIDE = (
     "LATER turns alongside real actions -- it does not have to finish first."
 )
 
+# atlas 27.08: hard backstop for a THIRD failure mode on the same test game
+# (r11l) that ATLAS_THEORY_CHECKPOINT above has already been tuned against
+# twice (v12: total paralysis; v16: soft wording silently ignored, 0/662
+# real calls). This time (Kaggle v21) the model was neither paralyzed nor
+# silent -- it kept acting normally AND kept engaging with the checkpoint in
+# its own reasoning -- but never once converted 5 checkpoint firings into a
+# verify_theory() call, despite explicitly deriving the correct dynamics
+# rule in prose twice ("the head moves halfway toward the gray blob's
+# center on each click"). Diagnosed with Gemini as an external critic: this
+# is a different ask than ATLAS_FORCE_ACT_OVERRIDE's ("call action()", a
+# zero-authoring API trigger) -- verify_theory requires the model to author
+# original code encoding a rule it already holds only in prose, and a soft
+# nudge to do that generalizes far worse than a hard directive to call an
+# already-well-defined function (see the rollback-ultimatum contrast: first
+# showing on a totally different game, wa30, got immediate compliant use).
+# Deliberately does NOT gate on accuracy (unlike the v12 mistake) -- it only
+# requires the ATTEMPT (one verify_theory() call, any result), which can
+# never become an unsatisfiable gate the way ">= 0.6 accuracy" can, and it
+# does not forbid action() in the same turn (nothing stops both calls living
+# in the same python snippet, so there is no actual "theory OR play" choice
+# being forced here, unlike ATLAS_FORCE_ACT_OVERRIDE's wording might imply).
+ATLAS_THEORY_FORCE_OVERRIDE = (
+    "[atlas checkpoint] You have made {calls} `python` calls this game with "
+    "ZERO verify_theory() calls. This is not a suggestion anymore -- your "
+    "VERY NEXT `python` call MUST define a predict(grid, action) function "
+    "and call verify_theory(predict) with it. This does not cost you the "
+    "turn: action(...) can still be called in the exact SAME snippet, "
+    "before or after verify_theory -- writing a theory and taking a real "
+    "step are not exclusive, and you do not have to pick one. A low or even "
+    "0% accuracy result is a GOOD outcome here, not a failure to avoid -- "
+    "it hands you concrete counterexamples to refine against next turn, "
+    "which is strictly more useful than the same guess held only in your "
+    "own reasoning and never tested. If you already have a specific rule in "
+    "mind (e.g. 'the object moves halfway toward the target each click'), "
+    "that rule already IS a predict() function -- write exactly that: `def "
+    "predict(grid, action): ...; return new_grid`. Do not respond with 'let "
+    "me verify this a bit more in my head first' or 'I will write the "
+    "theory once I understand this anomaly' -- that exact delay is what "
+    "produced this checkpoint, and holding a correct rule in prose without "
+    "ever encoding it does not count as progress toward the 0.6 bar."
+)
+
 # atlas 25.08: found on dc22 (a Gemini teacher-data transcript from our old
 # harness, not this one) -- 221 verify_theory( calls, but the model was
 # cycling through 4 unrelated high-level theories of what KIND of mechanic

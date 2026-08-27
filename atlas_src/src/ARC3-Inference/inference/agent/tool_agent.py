@@ -25,6 +25,7 @@ from inference.agent.prompts import (
     ATLAS_NOTE_ENFORCEMENT_CHECKPOINT,
     ATLAS_PLAN_CHECKPOINT_TEMPLATE,
     ATLAS_THEORY_CHECKPOINT,
+    ATLAS_THEORY_FORCE_OVERRIDE,
     COMPACT_TOOL_SESSION_ADDENDUM,
     GAME_OVERVIEW_ADDENDUM,
     PYTHON_ADDENDUM,
@@ -84,6 +85,14 @@ _ATLAS_THEORY_NAG_AFTER_CALLS = 4
 # force-act backstop is PROVEN to catch paralysis independent of wording --
 # safety no longer depends on how forcefully this text reads.
 _ATLAS_THEORY_CHECKPOINT_ENABLED = True
+# atlas 27.08: hard backstop for a THIRD r11l failure mode (see
+# ATLAS_THEORY_FORCE_OVERRIDE in prompts.py for the full history/rationale).
+# Unlike _ATLAS_FORCE_ACT_AFTER_CALLS below (tracks calls since the last real
+# action(), resets on every action()), this counts total python-tool calls
+# this game and never resets -- it only cares whether verify_theory( has
+# EVER been called, tracked via the existing _atlas_verify_theory_call_count.
+# 2x the soft nag's own threshold: give the soft wording a real chance first.
+_ATLAS_THEORY_FORCE_AFTER_CALLS = 8
 # atlas 25.08: hard backstop for the r11l failure mode, independent of
 # checkpoint wording. Counts real `python` tool calls since the last call
 # that actually invoked action() (see _atlas_calls_since_real_action,
@@ -1965,6 +1974,24 @@ class ToolAgent:
             print(
                 f"atlas: extract-suggestion checkpoint injected (action_num={action_num}, "
                 f"verify_theory_calls={self._atlas_verify_theory_call_count})",
+                flush=True,
+            )
+        elif (
+            _ATLAS_THEORY_CHECKPOINT_ENABLED
+            and self._atlas_verify_theory_call_count == 0
+            and self._atlas_python_call_index >= _ATLAS_THEORY_FORCE_AFTER_CALLS
+        ):
+            # atlas 27.08: checked BEFORE the soft theory nag below, not
+            # after -- its threshold (8) is always >= the soft nag's (4), so
+            # placed after it the soft nag would always already be true by
+            # the time this one's condition is, making this branch
+            # unreachable. Mutually exclusive with goal-reconsider/extract
+            # above (both require verify_theory_call_count >= 6/8, this
+            # requires == 0), so there's no ordering conflict with those.
+            lines.append(ATLAS_THEORY_FORCE_OVERRIDE.format(calls=self._atlas_python_call_index))
+            print(
+                f"atlas: theory-force override injected (action_num={action_num}, "
+                f"python_calls={self._atlas_python_call_index})",
                 flush=True,
             )
         elif (
