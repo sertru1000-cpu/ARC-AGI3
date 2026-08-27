@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot setup + run: concurrency=20, 2h clean gameplay budget, on a rented
+# One-shot setup + run: concurrency=20, 3h clean gameplay budget, on a rented
 # RunPod A100 80GB pod. Written and reviewed BEFORE renting hardware (see
 # memory: "no debugging on the meter" -- one attempt per pod, fix locally and
 # redeploy rather than iterate over a paid SSH session).
@@ -7,16 +7,19 @@
 # This is a direct derivative of scripts/runpod_v20_run.sh (26.08's
 # concurrency=20/3h A100 test, mean score 1.43, no crashes) with every
 # deployment fix from that run already baked in -- see the numbered comments
-# below for exactly which bug each one fixes. Only the timing numbers change
-# (2h net runtime instead of 3h) and the GPU-check comment is corrected (the
-# old script's header comment said RTX PRO 6000 "the same GPU as the real
-# Kaggle submission" as an aspirational note from before the card was picked;
-# 26.08's actual rental, and this one, are both A100 -- the case-insensitive
-# GPU check below already accepted A100 without warning, only the prose was
-# stale).
+# below for exactly which bug each one fixes. Only the GPU-check comment
+# changes (the old script's header comment said RTX PRO 6000 "the same GPU
+# as the real Kaggle submission" as an aspirational note from before the
+# card was picked; 26.08's actual rental, and this one, are both A100 -- the
+# case-insensitive GPU check below already accepted A100 without warning,
+# only the prose was stale). Timing is DELIBERATELY the same 3h/90-min-per-
+# game as 26.08's run, not shortened to 2h -- a matched duration is what
+# makes this run's mean score directly comparable to that 1.43 baseline,
+# rather than confounding "did the new features help" with "the games got
+# less time to develop."
 #
 # Usage on the pod (as root, fresh container):
-#   bash runpod_a100_20x2h_run.sh
+#   bash runpod_a100_20x3h_run.sh
 #
 # Assumes:
 #   - ~/.kaggle/access_token has been scp'd in already (this machine's own
@@ -26,16 +29,11 @@
 #     numbers here are directional, not a 1:1 stand-in for the real
 #     submission environment's throughput).
 #
-# IMPORTANT, read before renting: as of this writing the rollback/
-# extract-suggestion/context-sanitizer features (docs/plan_top10_by_3009.md
-# backlog item 9) are implemented and unit-tested LOCALLY but NOT committed
-# or pushed to the sertru1000-cpu/ARC-AGI3 GitHub fork this script clones
-# from. Running this script as-is right now will test the OLDER v20 code
-# (memo + force-act fixes only), NOT the new checkpoint features -- the same
-# code already validated on RunPod 26.08. If the point of this run is to
-# validate the NEW features on real hardware before a Kaggle submission,
-# commit + push those changes first (a separate, explicit step -- ask before
-# doing it, it's a shared/visible action).
+# The rollback/extract-suggestion/context-sanitizer features
+# (docs/plan_top10_by_3009.md backlog item 9) are committed and pushed to
+# the sertru1000-cpu/ARC-AGI3 GitHub fork this script clones from (commits
+# f77d17a, d9ab882) -- the grep check in step [2/7] below confirms the
+# clone actually picked them up before spending pod time on the run.
 set -euo pipefail
 
 REPO_URL="https://github.com/sertru1000-cpu/ARC-AGI3.git"
@@ -49,7 +47,7 @@ VLLM_HOST="127.0.0.1"
 VLLM_PORT="1234"
 VLLM_BASE_URL="http://${VLLM_HOST}:${VLLM_PORT}/v1"
 VLLM_LOG="/workspace/vllm-openai-server.log"
-RUN_NAME="runpod-a100-20x2h-$(date -u +%Y%m%d-%H%M%S)"
+RUN_NAME="runpod-a100-20x3h-$(date -u +%Y%m%d-%H%M%S)"
 EXPERIMENT_DIR="/workspace/atlas_runpod_runs/${RUN_NAME}"
 
 echo "=== [1/7] GPU check ==="
@@ -78,11 +76,9 @@ test -f "${ATLAS_SRC}/ARC3-Inference/pyproject.toml" || { echo "FATAL: clone inc
 # expects, rather than silently testing stale code.
 grep -q "ATLAS_MEMO_CHECKPOINT" "${ATLAS_SRC}/ARC3-Inference/inference/agent/prompts.py" \
   || { echo "FATAL: cloned code is missing ATLAS_MEMO_CHECKPOINT -- wrong branch/commit?" >&2; exit 1; }
-if grep -q "ATLAS_FORCE_ROLLBACK_CHECKPOINT" "${ATLAS_SRC}/ARC3-Inference/inference/agent/prompts.py"; then
-  echo "Cloned code includes the rollback/extract-suggestion/context-sanitizer features (pushed after all)."
-else
-  echo "NOTE: cloned code does NOT include the rollback/extract-suggestion/context-sanitizer features -- this run tests the older v20 baseline only. See the header comment if that's not what was intended."
-fi
+grep -q "ATLAS_FORCE_ROLLBACK_CHECKPOINT" "${ATLAS_SRC}/ARC3-Inference/inference/agent/prompts.py" \
+  || { echo "FATAL: cloned code is missing the rollback/extract-suggestion/context-sanitizer features (commits f77d17a/d9ab882) -- this run's whole point is to test them at a duration matched to the 26.08 baseline. Wrong branch/commit, or the push didn't land?" >&2; exit 1; }
+echo "Cloned code includes the rollback/extract-suggestion/context-sanitizer features -- confirmed."
 
 # Bug #1 (26.08): BOTH ARC3-Inference AND tufa-arc-agi-framework pin
 # requires-python=="3.12.12" exactly (missed the second one on the first
@@ -179,10 +175,10 @@ while [ "$(date +%s)" -lt "${deadline}" ]; do
 done
 curl -sf "${VLLM_BASE_URL}/models" >/dev/null 2>&1 || { echo "FATAL: vLLM never became ready" >&2; tail -n 100 "${VLLM_LOG}" >&2; exit 1; }
 
-echo "=== [7/7] Run all 25 official games, concurrency=20, 2h clean gameplay budget ==="
-# 25 games / concurrency 20 = 2 waves. 2h total / 2 waves = 60 min/wave --
-# matches how the 3h/concurrency=20/2-wave math worked out to 90 min/wave
-# yesterday (docs/plan_top10_by_3009.md backlog item 7).
+echo "=== [7/7] Run all 25 official games, concurrency=20, 3h clean gameplay budget ==="
+# 25 games / concurrency 20 = 2 waves. 3h total / 2 waves = 90 min/wave --
+# same per-game budget as 26.08's baseline run (docs/plan_top10_by_3009.md
+# backlog item 7), so this run's mean score is directly comparable to 1.43.
 mkdir -p "${EXPERIMENT_DIR}"
 export MPLBACKEND=Agg
 export LOCAL_ANALYZER_BASE_URL="${VLLM_BASE_URL}"
@@ -223,8 +219,8 @@ set +e
   --deployment-target inline \
   --concurrent-jobs 20 \
   --n-passes 1 \
-  --max-runtime-minutes 60 \
-  --max-experiment-runtime-hours 2 \
+  --max-runtime-minutes 90 \
+  --max-experiment-runtime-hours 3 \
   --run-name "${RUN_NAME}" \
   --experiment-dir "${EXPERIMENT_DIR}" \
   2>&1 | tee "/workspace/${RUN_NAME}.log"
