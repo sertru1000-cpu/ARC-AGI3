@@ -1,6 +1,7 @@
 """Direct OpenAI-compatible tool-calling analyzer for ARC puzzle runs."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -15,7 +16,9 @@ import requests
 
 from inference.agent.action_names import to_engine_action, to_model_action
 from inference.agent.prompts import (
+    ATLAS_EXTRACT_CHECKPOINT,
     ATLAS_FORCE_ACT_OVERRIDE,
+    ATLAS_FORCE_ROLLBACK_CHECKPOINT,
     ATLAS_GOAL_RECONSIDER_CHECKPOINT,
     ATLAS_MEMO_CHECKPOINT,
     ATLAS_NOTE_ENFORCEMENT_CHECKPOINT,
@@ -85,6 +88,40 @@ _ATLAS_GOAL_RECONSIDER_AFTER_CALLS = 8
 # Threshold above _ATLAS_THEORY_NAG_AFTER_CALLS so a game gets a real chance
 # to need memo before being nagged about it.
 _ATLAS_MEMO_NUDGE_AFTER_CALLS = 10
+# atlas 26.08: idea #2 from Gemini's strategy review -- extract= is documented
+# but, like memo, has near-zero voluntary uptake. Threshold sits between
+# theory's (4) and goal-reconsider's (8): give a game a real chance to need
+# extract before nagging about it, but nag before the bigger goal-reconsider
+# reframe fires. NOTE: in _build_user_prompt's elif chain this is checked
+# BEFORE the generic theory checkpoint despite firing "after" it here --
+# theory's lower threshold is always already satisfied once this one's is,
+# so checking theory first would make this branch unreachable.
+_ATLAS_EXTRACT_NUDGE_AFTER_CALLS = 6
+# atlas 26.08: idea #1 (rollback), refined per Gemini's risk-mitigation
+# design. Trigger A -- "soft stall": this many real actions taken since the
+# last level-progress event (tracked via _atlas_actions_since_level_progress,
+# reset on level-up) without progress raises the FORCE_ROLLBACK ultimatum.
+_ATLAS_ROLLBACK_STALL_AFTER_CALLS = 15
+# Trigger B -- "hard loop": current board_signature() matches one seen this
+# many actions ago (a real repeat, not mere similarity) -- Gemini's own
+# example was "вернулся в состояние экрана, в котором уже был 2 хода назад",
+# so this is set to exactly that rather than a looser guess.
+_ATLAS_ROLLBACK_LOOP_WINDOW = 2
+# After this many consecutive turns where the model was given the two-step
+# coercion ultimatum and still did not call rollback(), the harness performs
+# the rollback itself (to the most recent auto-anchor) as a hard backstop --
+# mirrors the project's C0 lesson that voluntary adoption of an unfamiliar
+# tool under pressure cannot be assumed even with an explicit ultimatum.
+_ATLAS_ROLLBACK_AUTO_FORCE_AFTER = 3
+# atlas 26.08: idea #3 from Gemini's strategy review -- context sanitizer.
+# Games run up to ~4h; the raw action/observation transcript accumulates
+# false theories, analyzer-timeout artifacts, and dead-end attempts that
+# token-budget trimming only prunes reactively (oldest-block-first, once the
+# context gets too big), never deliberately. After this many real actions
+# since the last sanitize with no level-up (see _atlas_context_sanitize_level),
+# a HOST-triggered (not model-voluntary -- same C0 lesson as rollback/memo)
+# sanitize fires, same as a level-up always does regardless of this count.
+_ATLAS_CONTEXT_SANITIZE_EVERY_CALLS = 20
 _ATLAS_ACCURACY_RE = re.compile(r"['\"]accuracy['\"]\s*:\s*([0-9]*\.?[0-9]+)")
 # atlas: a non-null 'note' in a printed/returned plan_with_theory() result --
 # res['note'] is only set when the found plan has more than one step, so this
@@ -1332,6 +1369,64 @@ class ToolAgent:
         # atlas: has the model EVER written to memo this game -- the memo
         # checkpoint's trigger. See _ATLAS_MEMO_NUDGE_AFTER_CALLS.
         self._atlas_memo_ever_written = False
+        # atlas 26.08: has extract= EVER been passed to verify_theory this
+        # game -- the extract-suggestion checkpoint's trigger. See
+        # _ATLAS_EXTRACT_NUDGE_AFTER_CALLS.
+        self._atlas_extract_ever_used = False
+        # atlas 26.08: save_checkpoint/rollback state -- see
+        # _HarnessGameSession.atlas_snapshot_env/atlas_restore_env for the
+        # actual engine-state deepcopy (OFFLINE mode only; None in ONLINE
+        # mode disables the whole feature for that session).
+        self._checkpoint_env_callback: Callable[[], dict[str, Any] | None] | None = None
+        self._restore_env_callback: Callable[[dict[str, Any] | None], bool] | None = None
+        self._atlas_checkpoints: dict[str, dict[str, Any]] = {}
+        self._atlas_checkpoint_counter = 0
+        self._atlas_checkpoint_available = False  # set True on first successful save this session
+        # Trigger A (soft stall): real actions since the last level-up.
+        self._atlas_actions_since_level_progress = 0
+        self._atlas_current_level = 1
+        # Trigger B (hard loop): rolling window of board signatures after
+        # each real action, to catch "back to a state seen a couple of
+        # actions ago" ping-pong loops.
+        self._atlas_recent_board_sigs: list[Any] = []
+        # One-shot injection for the turn right after a rollback lands --
+        # same "queue it, show it once, clear it" pattern as
+        # _atlas_note_incident.
+        self._atlas_rollback_lesson: str | None = None
+        self._atlas_rollback_target_checkpoint: str | None = None
+        # Freeform reason text for whichever trigger set the target above --
+        # threaded into ATLAS_FORCE_ROLLBACK_CHECKPOINT's {reason} slot.
+        self._atlas_rollback_trigger_reason: str | None = None
+        # How many turns in a row the force-rollback ultimatum has fired
+        # without the model complying -- once this crosses
+        # _ATLAS_ROLLBACK_AUTO_FORCE_AFTER, the harness performs the
+        # rollback itself with a generic lesson instead of nagging forever.
+        self._atlas_rollback_ultimatum_streak = 0
+        # Most recently created checkpoint id (auto or manual) -- what a
+        # newly-fired trigger points the ultimatum at.
+        self._atlas_last_checkpoint_id: str | None = None
+        # Set by _build_user_prompt once the ultimatum streak caps out;
+        # consumed at the top of the NEXT _run_python_tool call, which has
+        # state_path and performs the actual restore there (same code path
+        # as a model-initiated rollback()).
+        self._atlas_pending_auto_rollback: str | None = None
+        # atlas 26.08: context sanitizer (idea #3) -- independent of the
+        # rollback/checkpoint feature above (works in ONLINE mode too, no
+        # env-snapshot needed), so tracked with its own counters rather than
+        # piggybacking on _atlas_current_level/_atlas_actions_since_level_progress.
+        self._atlas_calls_since_sanitize = 0
+        self._atlas_context_sanitize_level = 1
+        self._atlas_context_sanitize_pending = False
+        self._atlas_context_sanitize_reason: str | None = None
+        # Frozen at TRIGGER time (inside _handle_action), not at execution
+        # time (start of the NEXT analyze() call) -- a level-up trigger fires
+        # right before _run_python_tool's end-of-call bookkeeping WIPES
+        # _summarized_knowledge for the level that just ended (see
+        # _update_summarized_knowledge_from_step_summary), so capturing late
+        # would lose exactly the content this feature exists to preserve.
+        self._atlas_context_sanitize_input: dict[str, Any] | None = None
+        self._atlas_context_snapshot: str | None = None
+        self._atlas_context_sanitize_count = 0
         # Explicit ctor arg (e.g. from a pickled HarnessSolver deployed to
         # Kaggle) takes precedence over the local process environment, so the
         # flag state chosen at deploy time survives the trip into the kernel.
@@ -1381,9 +1476,44 @@ class ToolAgent:
             self._atlas_note_incident = None
             self._atlas_memo = {}
             self._atlas_memo_ever_written = False
+            self._atlas_extract_ever_used = False
+            self._atlas_checkpoints = {}
+            self._atlas_checkpoint_counter = 0
+            self._atlas_checkpoint_available = False
+            self._atlas_actions_since_level_progress = 0
+            self._atlas_current_level = 1
+            self._atlas_recent_board_sigs = []
+            self._atlas_rollback_lesson = None
+            self._atlas_rollback_target_checkpoint = None
+            self._atlas_rollback_trigger_reason = None
+            self._atlas_rollback_ultimatum_streak = 0
+            self._atlas_last_checkpoint_id = None
+            self._atlas_pending_auto_rollback = None
+            self._atlas_calls_since_sanitize = 0
+            self._atlas_context_sanitize_level = 1
+            self._atlas_context_sanitize_pending = False
+            self._atlas_context_sanitize_reason = None
+            self._atlas_context_sanitize_input = None
+            self._atlas_context_snapshot = None
+            self._atlas_context_sanitize_count = 0
             self._noop_guard = NoopGuard() if self._hard_noop_guard_enabled else None
             self.animation_counters = {}
             self._reset_animation_hint_state()
+            if self._checkpoint_env_callback is not None:
+                snapshot = self._checkpoint_env_callback()
+                if snapshot is not None:
+                    self._atlas_checkpoint_counter += 1
+                    checkpoint_id = "sys_start"
+                    self._atlas_checkpoints[checkpoint_id] = {
+                        "label": "game start",
+                        "env_snapshot": snapshot,
+                        "memo": {},
+                        "level": 1,
+                        "auto": True,
+                    }
+                    self._atlas_checkpoint_available = True
+                    self._atlas_last_checkpoint_id = checkpoint_id
+                    print("atlas: auto-anchor created (sys_start)", flush=True)
 
     @property
     def total_tokens(self) -> int:
@@ -1717,6 +1847,35 @@ class ToolAgent:
                 f"calls_since_real_action={self._atlas_calls_since_real_action})",
                 flush=True,
             )
+        elif self._atlas_rollback_target_checkpoint is not None:
+            self._atlas_rollback_ultimatum_streak += 1
+            if self._atlas_rollback_ultimatum_streak > _ATLAS_ROLLBACK_AUTO_FORCE_AFTER:
+                self._atlas_pending_auto_rollback = self._atlas_rollback_target_checkpoint
+                lines.append(
+                    "[atlas checkpoint] The rollback ultimatum below was shown "
+                    f"{self._atlas_rollback_ultimatum_streak - 1} time(s) in a row without compliance. "
+                    f"The harness will perform rollback('{self._atlas_rollback_target_checkpoint}') itself "
+                    "before your next `python` call runs, with a generic note instead of your own diagnosis."
+                )
+                print(
+                    f"atlas: rollback ultimatum auto-force scheduled (action_num={action_num}, "
+                    f"target={self._atlas_rollback_target_checkpoint})",
+                    flush=True,
+                )
+            else:
+                lines.append(
+                    ATLAS_FORCE_ROLLBACK_CHECKPOINT.format(
+                        reason=self._atlas_rollback_trigger_reason or "Progress has stalled.",
+                        checkpoint_id=self._atlas_rollback_target_checkpoint,
+                        streak=self._atlas_rollback_ultimatum_streak,
+                    )
+                )
+                print(
+                    f"atlas: force-rollback checkpoint injected (action_num={action_num}, "
+                    f"target={self._atlas_rollback_target_checkpoint}, "
+                    f"streak={self._atlas_rollback_ultimatum_streak})",
+                    flush=True,
+                )
         elif (
             self._atlas_last_verified_accuracy is None
             or self._atlas_last_verified_accuracy < 0.6
@@ -1724,6 +1883,25 @@ class ToolAgent:
             lines.append(ATLAS_GOAL_RECONSIDER_CHECKPOINT.format(calls=self._atlas_verify_theory_call_count))
             print(
                 f"atlas: goal-reconsider checkpoint injected (action_num={action_num}, "
+                f"verify_theory_calls={self._atlas_verify_theory_call_count})",
+                flush=True,
+            )
+        elif (
+            (self._atlas_last_verified_accuracy is None or self._atlas_last_verified_accuracy < 0.6)
+            and not self._atlas_extract_ever_used
+            and self._atlas_verify_theory_call_count >= _ATLAS_EXTRACT_NUDGE_AFTER_CALLS
+        ):
+            # atlas 26.08: checked BEFORE the generic theory checkpoint below,
+            # not after -- its threshold (verify_theory_call_count) is always
+            # >= python_call_index's floor for the same call count, so if it
+            # were placed after theory in this chain, theory's lower
+            # threshold (4) would ALWAYS already be true by the time this
+            # one's condition is, making this branch unreachable dead code.
+            # Same reasoning as goal-reconsider (also a bigger, more specific
+            # reframe) already being checked ahead of the generic nag.
+            lines.append(ATLAS_EXTRACT_CHECKPOINT.format(calls=self._atlas_verify_theory_call_count))
+            print(
+                f"atlas: extract-suggestion checkpoint injected (action_num={action_num}, "
                 f"verify_theory_calls={self._atlas_verify_theory_call_count})",
                 flush=True,
             )
@@ -1769,6 +1947,17 @@ class ToolAgent:
             lines.append(ATLAS_NOTE_ENFORCEMENT_CHECKPOINT.format(detail=self._atlas_note_incident))
             print(f"atlas: note enforcement checkpoint injected (action_num={action_num})", flush=True)
             self._atlas_note_incident = None
+        # atlas 26.08: one-shot, same pattern as the note-incident block above
+        # -- the ONE thing that survives a rollback's context wipe, injected
+        # as a message from the model's own past self the turn right after
+        # the rollback (model-initiated or harness auto-forced) lands.
+        if self._atlas_rollback_lesson:
+            lines.append(
+                "[rollback landed] A note from your past self before the rollback: "
+                f"{self._atlas_rollback_lesson}"
+            )
+            print(f"atlas: rollback lesson injected (action_num={action_num})", flush=True)
+            self._atlas_rollback_lesson = None
         action_effect_lines = _atlas_action_effect_summary(history_entries)
         if action_effect_lines:
             print(
@@ -1996,8 +2185,236 @@ class ToolAgent:
             compact["animation"] = dict(animation)
         return compact
 
+    def _restore_to_checkpoint(self, checkpoint_id: str, lesson_learned: str) -> bool:
+        """Shared restore path for both a model-initiated rollback() call and
+        the harness's own auto-force backstop. Only mutates env/memo/rollback
+        bookkeeping; callers refresh their own local frame/board-sig state
+        (via load_runtime_state) since write_runtime_state() already ran
+        inside atlas_restore_env by the time this returns True.
+        """
+        entry = self._atlas_checkpoints.get(checkpoint_id)
+        if entry is None or self._restore_env_callback is None:
+            return False
+        restored = self._restore_env_callback(entry.get("env_snapshot"))
+        if not restored:
+            return False
+        self._atlas_memo = copy.deepcopy(entry.get("memo") or {})
+        self._atlas_current_level = int(entry.get("level") or self._atlas_current_level)
+        self._atlas_actions_since_level_progress = 0
+        self._atlas_recent_board_sigs = []
+        self._atlas_rollback_lesson = lesson_learned
+        self._atlas_rollback_target_checkpoint = None
+        self._atlas_rollback_trigger_reason = None
+        self._atlas_rollback_ultimatum_streak = 0
+        return True
+
+    def _atlas_note_action_progress(self, compact_payload: dict[str, Any], board_sig_after: Any) -> None:
+        """Trigger A/B bookkeeping for the force-rollback checkpoint, and
+        auto-anchor creation on level-up. Called after every REAL executed
+        action from _handle_action (both the single- and batch-action
+        paths). No-op when the checkpoint feature is unavailable (ONLINE
+        mode) so this stays free of behavior change there.
+        """
+        if self._checkpoint_env_callback is None or not compact_payload.get("executed"):
+            return
+        try:
+            level = int(compact_payload.get("level"))
+        except (TypeError, ValueError):
+            level = self._atlas_current_level
+        if compact_payload.get("level_completed") or level > self._atlas_current_level:
+            self._atlas_current_level = max(self._atlas_current_level, level)
+            snapshot = self._checkpoint_env_callback()
+            if snapshot is not None:
+                self._atlas_checkpoint_counter += 1
+                checkpoint_id = f"sys_level_{self._atlas_current_level}"
+                self._atlas_checkpoints[checkpoint_id] = {
+                    "label": f"start of level {self._atlas_current_level}",
+                    "env_snapshot": snapshot,
+                    "memo": copy.deepcopy(self._atlas_memo),
+                    "level": self._atlas_current_level,
+                    "auto": True,
+                }
+                self._atlas_checkpoint_available = True
+                self._atlas_last_checkpoint_id = checkpoint_id
+                print(f"atlas: auto-anchor created ({checkpoint_id})", flush=True)
+            self._atlas_actions_since_level_progress = 0
+            self._atlas_recent_board_sigs = []
+            self._atlas_rollback_target_checkpoint = None
+            self._atlas_rollback_trigger_reason = None
+            self._atlas_rollback_ultimatum_streak = 0
+            return
+        self._atlas_actions_since_level_progress += 1
+        if board_sig_after is not None:
+            self._atlas_recent_board_sigs.append(board_sig_after)
+            max_len = _ATLAS_ROLLBACK_LOOP_WINDOW + 1
+            if len(self._atlas_recent_board_sigs) > max_len:
+                self._atlas_recent_board_sigs = self._atlas_recent_board_sigs[-max_len:]
+        if self._atlas_rollback_target_checkpoint is not None or self._atlas_last_checkpoint_id is None:
+            return
+        trigger_reason: str | None = None
+        if self._atlas_actions_since_level_progress >= _ATLAS_ROLLBACK_STALL_AFTER_CALLS:
+            trigger_reason = (
+                f"You have taken {self._atlas_actions_since_level_progress} real actions since the last "
+                "level progress with no advancement."
+            )
+        elif (
+            board_sig_after is not None
+            and len(self._atlas_recent_board_sigs) > _ATLAS_ROLLBACK_LOOP_WINDOW
+            and board_sig_after == self._atlas_recent_board_sigs[-(_ATLAS_ROLLBACK_LOOP_WINDOW + 1)]
+        ):
+            trigger_reason = (
+                f"The board has returned to a state it was already in {_ATLAS_ROLLBACK_LOOP_WINDOW} "
+                "actions ago -- a ping-pong loop."
+            )
+        if trigger_reason is not None:
+            self._atlas_rollback_target_checkpoint = self._atlas_last_checkpoint_id
+            self._atlas_rollback_trigger_reason = trigger_reason
+            self._atlas_rollback_ultimatum_streak = 0
+            print(
+                f"atlas: rollback trigger fired ({trigger_reason!r}), "
+                f"target={self._atlas_last_checkpoint_id}",
+                flush=True,
+            )
+
+    def _atlas_note_context_sanitize_progress(self, compact_payload: dict[str, Any], frame: Frame | None) -> None:
+        """Trigger detection for the context sanitizer (idea #3): a level-up
+        OR _ATLAS_CONTEXT_SANITIZE_EVERY_CALLS real actions since the last
+        sanitize. Independent of the checkpoint/rollback feature above --
+        works in ONLINE mode too, since it never touches engine state, only
+        the chat message history. Called after every REAL executed action
+        from _handle_action, same call sites as _atlas_note_action_progress.
+        """
+        if not compact_payload.get("executed") or self._atlas_context_sanitize_pending:
+            return
+        try:
+            level = int(compact_payload.get("level"))
+        except (TypeError, ValueError):
+            level = None
+        level_up = bool(compact_payload.get("level_completed")) or (
+            level is not None and level > self._atlas_context_sanitize_level
+        )
+        self._atlas_calls_since_sanitize += 1
+        if level is not None:
+            self._atlas_context_sanitize_level = max(self._atlas_context_sanitize_level, level)
+        if not (level_up or self._atlas_calls_since_sanitize >= _ATLAS_CONTEXT_SANITIZE_EVERY_CALLS):
+            return
+        self._atlas_context_sanitize_pending = True
+        self._atlas_context_sanitize_reason = "level_up" if level_up else "step_count"
+        # Captured NOW, at trigger time, not when the sanitizer actually runs
+        # (start of the NEXT analyze() call) -- see the field's docstring in
+        # __init__ for why a level-up trigger specifically would otherwise
+        # capture already-wiped knowledge.
+        self._atlas_context_sanitize_input = {
+            "memo": copy.deepcopy(self._atlas_memo),
+            "knowledge_lines": list(self._summarized_knowledge_lines()),
+            "level": frame.level if frame is not None else level,
+            "step": frame.step if frame is not None else None,
+            "ascii": frame.ascii if frame is not None else "",
+        }
+        print(
+            f"atlas: context-sanitize trigger fired (reason={self._atlas_context_sanitize_reason}, "
+            f"calls_since_sanitize={self._atlas_calls_since_sanitize})",
+            flush=True,
+        )
+
+    def _atlas_run_context_sanitizer(self, *, analyzer_log: Path) -> None:
+        """Executes the pending context sanitize (idea #3): a separate,
+        tool-free LLM call synthesizes the frozen memo/world-model/board
+        snapshot captured at trigger time into a compact "state of the
+        world", then _history_messages -- the raw action/observation
+        transcript accumulated over potentially hours of play -- is REPLACED
+        with a single synthetic exchange carrying that synthesis. Called
+        from analyze(), which has _chat_completion and transcript logging
+        available; a failure here just skips the sanitize for this turn
+        (existing history is left untouched), same fail-open pattern as the
+        time-bank/retry-storm backstops elsewhere in this file.
+        """
+        self._atlas_context_sanitize_pending = False
+        self._atlas_calls_since_sanitize = 0
+        reason = self._atlas_context_sanitize_reason or "step_count"
+        self._atlas_context_sanitize_reason = None
+        snapshot_input = self._atlas_context_sanitize_input or {}
+        self._atlas_context_sanitize_input = None
+        if not self._history_messages:
+            return
+        sanitizer_system = (
+            "You are a compact state-of-the-world synthesizer for a long-running ARC-AGI "
+            "game-playing agent. You will be given the agent's persistent memo, its running "
+            "world/goal/action model notes, and the current board state. Produce a SHORT, dense "
+            "synthesis (a few sentences or a compact bulleted list, not a story) that captures "
+            "everything a fresh agent would need to keep playing well from here: confirmed facts "
+            "about the mechanic, the current goal, what has already been tried and failed (so it is "
+            "not repeated), and any invariants worth remembering. Output ONLY the synthesis -- no "
+            "preamble, no meta-commentary about this request."
+        )
+        parts: list[str] = []
+        memo = snapshot_input.get("memo") or {}
+        if memo:
+            parts.append(f"Persistent memo: {json.dumps(memo, ensure_ascii=False)}")
+        knowledge_lines = snapshot_input.get("knowledge_lines") or []
+        if knowledge_lines:
+            parts.append("Running world/goal/action model:\n" + "\n".join(knowledge_lines))
+        level = snapshot_input.get("level")
+        if level is not None:
+            parts.append(f"Level: {level}, step: {snapshot_input.get('step')}")
+        ascii_view = snapshot_input.get("ascii") or ""
+        if ascii_view:
+            parts.append(f"Current board:\n{ascii_view}")
+        sanitizer_user = "\n\n".join(parts) or "(no accumulated knowledge yet -- write a minimal placeholder synthesis)"
+        try:
+            result = self._chat_completion(
+                [
+                    {"role": "system", "content": sanitizer_system},
+                    {"role": "user", "content": sanitizer_user},
+                ],
+                tools=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"atlas: context sanitizer request failed ({exc}) -- keeping existing history untouched", flush=True)
+            _append_transcript_section(analyzer_log, "CONTEXT SANITIZER", f"failed ({reason}): {exc}")
+            return
+        snapshot = str((result.message or {}).get("content", "") or "").strip()
+        if not snapshot:
+            print("atlas: context sanitizer returned empty content -- keeping existing history untouched", flush=True)
+            return
+        self._atlas_context_snapshot = snapshot
+        self._atlas_context_sanitize_count += 1
+        dropped = len(self._history_messages)
+        self._history_messages = [
+            {
+                "role": "user",
+                "content": (
+                    f"[context sanitizer, {reason}] The raw action/observation history up to this "
+                    f"point has been cleared and replaced with this synthesized state of the world:"
+                    f"\n\n{snapshot}"
+                ),
+            },
+            {"role": "assistant", "content": "Understood -- continuing from this synthesized state."},
+        ]
+        _append_transcript_section(
+            analyzer_log,
+            "CONTEXT SANITIZER",
+            f"reason={reason}, dropped {dropped} history message(s)\n\n{snapshot}",
+        )
+        print(
+            f"atlas: context sanitizer ran (reason={reason}, dropped {dropped} history message(s), "
+            f"snapshot_chars={len(snapshot)})",
+            flush=True,
+        )
+
     def _run_python_tool(self, state_path: Path, arguments: dict[str, Any]) -> _ToolDispatchResult:
         self._ensure_session(state_path)
+        if self._atlas_pending_auto_rollback is not None:
+            target = self._atlas_pending_auto_rollback
+            self._atlas_pending_auto_rollback = None
+            restored = self._restore_to_checkpoint(
+                target,
+                "[harness auto-rollback: the rollback ultimatum was shown "
+                f"{_ATLAS_ROLLBACK_AUTO_FORCE_AFTER} times in a row without compliance, so the harness "
+                "performed the rollback itself with this generic note instead of your own diagnosis.]",
+            )
+            if restored:
+                print(f"atlas: harness auto-performed rollback (target={target})", flush=True)
         code = str(arguments.get("code", "")).rstrip()
         if not code:
             return _ToolDispatchResult(json.dumps({"error": "python requires a non-empty `code` string."}, indent=2))
@@ -2141,6 +2558,8 @@ class ToolAgent:
                 if refreshed_frame is not None:
                     noop_guard_board_sig = board_signature(refreshed_frame.grid)
                     noop_guard_level = refreshed_frame.level
+                self._atlas_note_action_progress(compact_payload, noop_guard_board_sig)
+                self._atlas_note_context_sanitize_progress(compact_payload, refreshed_frame)
                 return {
                     "action_result": compact_payload,
                     "state": _serialized_runtime_state(
@@ -2192,6 +2611,8 @@ class ToolAgent:
                 if refreshed_frame is not None:
                     noop_guard_board_sig = board_signature(refreshed_frame.grid)
                     noop_guard_level = refreshed_frame.level
+                self._atlas_note_action_progress(sub_compact, noop_guard_board_sig)
+                self._atlas_note_context_sanitize_progress(sub_compact, refreshed_frame)
                 if _terminal_action_reason(sub_compact):
                     terminal_action_result = sub_compact
                     break
@@ -2237,12 +2658,75 @@ class ToolAgent:
                 self._bump_animation_counter("stage2_animation_requests_served")
             return view
 
+        def _handle_checkpoint(request: dict[str, Any]) -> dict[str, Any]:
+            nonlocal noop_guard_board_sig, noop_guard_level, terminal_action_result
+            if self._checkpoint_env_callback is None or self._restore_env_callback is None:
+                return {"error": "save_checkpoint/rollback are not available in this session (no undo in ONLINE mode)."}
+            action = str(request.get("action") or "").strip()
+            if action == "save":
+                label = str(request.get("label") or "").strip() or "checkpoint"
+                snapshot = self._checkpoint_env_callback()
+                if snapshot is None:
+                    return {"error": "save_checkpoint failed: environment snapshot unavailable."}
+                self._atlas_checkpoint_counter += 1
+                checkpoint_id = f"cp{self._atlas_checkpoint_counter}"
+                request_memo = request.get("memo")
+                self._atlas_checkpoints[checkpoint_id] = {
+                    "label": label,
+                    "env_snapshot": snapshot,
+                    "memo": copy.deepcopy(request_memo) if isinstance(request_memo, dict) else copy.deepcopy(self._atlas_memo),
+                    "level": noop_guard_level,
+                    "auto": False,
+                }
+                self._atlas_checkpoint_available = True
+                self._atlas_last_checkpoint_id = checkpoint_id
+                print(f"atlas: model called save_checkpoint( (id={checkpoint_id}, label={label!r})", flush=True)
+                return {"checkpoint_id": checkpoint_id}
+            if action == "rollback":
+                checkpoint_id = str(request.get("checkpoint_id") or "").strip()
+                lesson_learned = str(request.get("lesson_learned") or "").strip()
+                if checkpoint_id not in self._atlas_checkpoints:
+                    return {
+                        "error": (
+                            f"Unknown checkpoint_id {checkpoint_id!r}. Use an id returned by save_checkpoint(...) "
+                            "or one of the announced auto-anchors (sys_start, sys_level_N)."
+                        )
+                    }
+                if not lesson_learned:
+                    return {
+                        "error": (
+                            "rollback(checkpoint_id, lesson_learned) requires a non-empty lesson_learned -- "
+                            "state what specifically will be done differently this time."
+                        )
+                    }
+                if not self._restore_to_checkpoint(checkpoint_id, lesson_learned):
+                    return {"error": "rollback failed: environment restore was rejected."}
+                refreshed_frame, _ = load_runtime_state(state_path)
+                if refreshed_frame is not None:
+                    noop_guard_board_sig = board_signature(refreshed_frame.grid)
+                    noop_guard_level = refreshed_frame.level
+                terminal_action_result = None
+                print(f"atlas: model called rollback( to {checkpoint_id!r}, lesson={lesson_learned!r})", flush=True)
+                return {
+                    "state": _serialized_runtime_state(next_valid_actions=list(self._current_valid_actions)),
+                    # atlas: the sandbox's rollback() applies this to its OWN
+                    # local `memo` global (unlike a normal action-result reply,
+                    # which deliberately leaves memo alone) -- without this,
+                    # the subprocess keeps its stale pre-rollback memo for the
+                    # rest of the script, which then overwrites this correct
+                    # restore right back to the stale value when the script
+                    # ends and self._atlas_memo is synced from sandbox_result.
+                    "memo": copy.deepcopy(self._atlas_memo),
+                }
+            return {"error": f"Unknown checkpoint action {action!r}; expected 'save' or 'rollback'."}
+
         sandbox_result = run_sandboxed_python(
             code=code,
             timeout_seconds=self._python_timeout,
             initial_state=_serialized_runtime_state(),
             action_handler=_handle_action,
             animation_handler=_handle_animation if self._animation_awareness_enabled else None,
+            checkpoint_handler=_handle_checkpoint if self._checkpoint_env_callback is not None else None,
         )
 
         action_results = [
@@ -2333,6 +2817,8 @@ class ToolAgent:
             )
             if accuracy is not None:
                 self._atlas_last_verified_accuracy = accuracy
+            if "extract=" in code or "extract =" in code:
+                self._atlas_extract_ever_used = True
         if rendered_error:
             payload["error"] = rendered_error
             if rendered_stdout:
@@ -2483,6 +2969,8 @@ class ToolAgent:
         action_num: int,
         valid_actions: list[str] | None = None,
         step_env: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        checkpoint_env: Callable[[], dict[str, Any] | None] | None = None,
+        restore_env: Callable[[dict[str, Any] | None], bool] | None = None,
         transcript_path: Path | None = None,
         analysis_step: int | None = None,
         transcript_updated: Callable[[str], None] | None = None,
@@ -2491,13 +2979,33 @@ class ToolAgent:
     ) -> AnalyzerTurnResult | None:
         if not state_path.exists():
             return None
-        self._ensure_session(state_path)
+        # atlas 26.08: set BEFORE _ensure_session -- a new-session detection
+        # there auto-creates the sys_start checkpoint anchor using this exact
+        # callback, and this ToolAgent instance is reused across games, so
+        # setting it after would let a brand-new game's sys_start snapshot
+        # the PREVIOUS game's still-assigned callback for one call.
         self._step_env_callback = step_env
+        # atlas 26.08: save_checkpoint/rollback only offered to the model
+        # when checkpoint_env is actually wired AND returns a real snapshot
+        # -- ONLINE-mode sessions pass None here (see
+        # _HarnessGameSession.atlas_snapshot_env), and the sandbox tool is
+        # withheld entirely rather than exposing a rollback that can't
+        # revert anything.
+        self._checkpoint_env_callback = checkpoint_env
+        self._restore_env_callback = restore_env
+        self._ensure_session(state_path)
         self._current_valid_actions = _normalize_valid_actions(valid_actions)
 
         analyzer_log = transcript_path or (state_path.parent / f"{state_path.stem}_analyzer.txt")
         prompt_log = _resolve_prompt_log_path(state_path)
         current_frame, history_entries = load_runtime_state(state_path)
+        # atlas 26.08: context sanitizer (idea #3) -- runs at the START of
+        # the turn AFTER the trigger fired (inside the previous turn's
+        # _run_python_tool), before this turn's messages/history snapshot
+        # are built below, so a fresh sanitize is what this turn's request
+        # actually sends.
+        if self._atlas_context_sanitize_pending:
+            self._atlas_run_context_sanitizer(analyzer_log=analyzer_log)
         user_prompt = self._build_user_prompt(
             action_num,
             valid_actions=valid_actions,

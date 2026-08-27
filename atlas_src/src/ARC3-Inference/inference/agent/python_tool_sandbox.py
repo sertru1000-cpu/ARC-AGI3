@@ -399,6 +399,59 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                 raise RuntimeError("Invalid animation response from sandbox host.")
             return reply.get("animation") or {}
 
+        def save_checkpoint(label):
+            '''Record a named point to return to later: snapshots the real
+            game state, memo, and where you are in the conversation. Returns
+            a checkpoint_id string to pass to rollback() later. The host
+            also auto-creates one at game start (sys_start) and at every
+            level-up (sys_level_N) -- see the runtime state each turn.'''
+            _send(
+                {
+                    "type": "checkpoint",
+                    "request": {
+                        "action": "save",
+                        "label": str(label),
+                        "memo": _json_safe(runtime_globals.get("memo") or {}),
+                    },
+                }
+            )
+            reply = _recv()
+            if reply.get("type") == "checkpoint_error":
+                raise RuntimeError(str(reply.get("error", "save_checkpoint failed")))
+            if reply.get("type") != "checkpoint_result":
+                raise RuntimeError("Invalid checkpoint response from sandbox host.")
+            return reply.get("checkpoint_id")
+
+        def rollback(checkpoint_id, lesson_learned):
+            '''Revert the real game state to checkpoint_id AND erase the
+            conversation since then. lesson_learned (a short summary of what
+            you tried and why it failed) is the one thing that survives --
+            it gets injected as a message from your past self once the
+            rollback lands next turn. Use this when the current line of
+            reasoning is a dead end, not to casually rewind.'''
+            _send(
+                {
+                    "type": "checkpoint",
+                    "request": {
+                        "action": "rollback",
+                        "checkpoint_id": str(checkpoint_id),
+                        "lesson_learned": str(lesson_learned),
+                    },
+                }
+            )
+            reply = _recv()
+            if reply.get("type") == "checkpoint_error":
+                raise RuntimeError(str(reply.get("error", "rollback failed")))
+            if reply.get("type") != "checkpoint_result":
+                raise RuntimeError("Invalid checkpoint response from sandbox host.")
+            state_payload = reply.get("state") or {}
+            if state_payload:
+                _refresh_state(state_payload)
+            restored_memo = reply.get("memo")
+            if isinstance(restored_memo, dict):
+                runtime_globals["memo"] = restored_memo
+            return {"checkpoint_id": reply.get("checkpoint_id"), "reverted": True}
+
         def _action_display(spec):
             if isinstance(spec, str):
                 return spec.strip()
@@ -720,6 +773,8 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
         runtime_globals["verify_theory"] = verify_theory
         runtime_globals["plan_with_theory"] = plan_with_theory
         runtime_globals["execute_plan"] = execute_plan
+        runtime_globals["save_checkpoint"] = save_checkpoint
+        runtime_globals["rollback"] = rollback
         if initial.get("animation_enabled"):
             runtime_globals["animation"] = animation
         _refresh_state(initial.get("state") or {})
@@ -813,6 +868,7 @@ def run_sandboxed_python(
     initial_state: dict[str, Any],
     action_handler: Callable[[list[dict[str, Any]]], dict[str, Any]],
     animation_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    checkpoint_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="rgb_python_tool_") as sandbox_dir:
         host_action_results: list[dict[str, Any]] = []
@@ -952,6 +1008,33 @@ def run_sandboxed_python(
                     process.stdin,
                     {"type": "animation_result", "animation": animation_payload},
                 )
+                continue
+
+            if msg_type == "checkpoint":
+                if checkpoint_handler is None:
+                    _send_json_line(
+                        process.stdin,
+                        {"type": "checkpoint_error", "error": "save_checkpoint/rollback are not available in this session."},
+                    )
+                    continue
+                try:
+                    checkpoint_payload = checkpoint_handler(dict(message.get("request") or {}))
+                except Exception:  # noqa: BLE001
+                    _send_json_line(
+                        process.stdin,
+                        {"type": "checkpoint_error", "error": "checkpoint operation failed in sandbox host."},
+                    )
+                    continue
+                if not isinstance(checkpoint_payload, dict) or checkpoint_payload.get("error"):
+                    _send_json_line(
+                        process.stdin,
+                        {
+                            "type": "checkpoint_error",
+                            "error": str((checkpoint_payload or {}).get("error", "checkpoint operation failed.")),
+                        },
+                    )
+                    continue
+                _send_json_line(process.stdin, {"type": "checkpoint_result", **checkpoint_payload})
                 continue
 
             if msg_type in {"final", "error"}:

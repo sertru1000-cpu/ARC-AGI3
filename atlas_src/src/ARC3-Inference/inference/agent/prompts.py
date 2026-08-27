@@ -98,6 +98,8 @@ PYTHON_ADDENDUM = (
     "- This is a genuine alternative to writing your own BFS by hand: once you trust a `predict()`, `plan_with_theory` searches over its predicted states for you and hands back a ready-to-execute plan.\n"
     "- `memo` is a dict (starts empty) that survives across every `python` call for the rest of this game -- unlike everything else here, it is NOT reset each call. Use it to remember things you would otherwise have to re-derive: `memo['tried_targets'] = memo.get('tried_targets', []) + [(row, col)]`. Only JSON-safe values survive (dicts, lists, strings, numbers, booleans, null); anything else is silently stringified when read back next turn, so keep it small and simple.\n"
     "- For alignment/positioning puzzles (move an object to a target, dock two shapes, navigate to a spot), persist the CONFIRMED position in `memo` once you have it (e.g. `memo['anchor'] = {'row': r, 'col': c, 'step': current_frame.step}`), rather than re-deriving absolute coordinates from the image from scratch every turn. Re-deriving from scratch each turn is a known failure mode -- small per-turn read errors compound over many turns into a position that never actually converges on the target, even when the mechanic itself is well understood. Use `segmentation['nodes'][i]['hash']` to re-identify the SAME tracked object across frames regardless of where it moved (equal hash = same object), then update the anchor from the confirmed diff (`last_transition.before_frame` vs `after_frame`) instead of reading the whole board fresh.\n"
+    "- `save_checkpoint(label)` records a named point you can return to later: it snapshots the real game state, `memo`, and where you are in the conversation, and returns a `checkpoint_id` string. The host ALSO auto-creates one at game start (`sys_start`) and at every level-up (`sys_level_N`) -- these are announced each turn, so you always have somewhere safe to return to even if you never call this yourself.\n"
+    "- `rollback(checkpoint_id, lesson_learned)` reverts the real game state to that checkpoint AND erases the conversation since then -- everything after it is gone from your context. `lesson_learned` is the ONE thing that survives: a short summary of what you were trying and why it failed, injected as a message from your past self once the rollback lands. Use this when you recognize you are in a dead end (repeating a failed idea, or the board has looped back to a state you already tried), instead of continuing to reason from context that the failed attempt has already corrupted.\n"
     "- Optimize for the shortest reliable sequence that advances the current goal as described by your world model. If confidence is low, program a discriminating probe and revise the world model from the result.\n"
     "- Once the important state variables and action effects are sufficiently understood, stop probing and search in the inferred state space.\n"
     "- Inspect current and history frames from Python instead of describing frames freehand.\n"
@@ -234,6 +236,52 @@ ATLAS_MEMO_CHECKPOINT = (
     "every turn is a known failure mode: small per-turn read errors compound "
     "over many turns into a value that never actually converges, even when "
     "the underlying mechanic is already well understood."
+)
+
+# atlas 26.08 (from an external design review of the memo-adoption finding):
+# theory-building keeps failing on some games not because the MECHANIC is
+# hard, but because pixel-perfect predict() is the wrong bar for it (noise,
+# HUD, rendering) -- ATLAS_THEORY_CHECKPOINT already mentions `extract=` as an
+# option, but mentioning-as-an-option clearly isn't a strong enough nudge on
+# its own (extract= adoption was real but partial, ~30% of games, even after
+# the memo-checkpoint fix). This fires when verify_theory keeps failing AND
+# extract was never tried this game -- a narrower, more specific suggestion
+# than ATLAS_GOAL_RECONSIDER_CHECKPOINT (which questions the GOAL model);
+# this one questions the PREDICTION APPROACH instead, and fires first since
+# it is the cheaper thing to try before concluding the goal itself is wrong.
+ATLAS_EXTRACT_CHECKPOINT = (
+    "[atlas checkpoint] You have called verify_theory {calls} times this game, "
+    "still below 0.6 accuracy, and never once passed `extract=`. Before "
+    "concluding the mechanic or goal is wrong, try abstracting the board "
+    "first: write extract(grid) -> a small JSON-safe state (e.g. "
+    "{{'player': (r, c), 'keys': [...]}} or a coarse tile grid) and call "
+    "verify_theory(predict, extract=extract) THIS turn. Pixel-perfect "
+    "whole-board prediction is often the wrong bar -- decorative motion, HUD "
+    "elements, or rendering noise can make it fail even when your "
+    "understanding of the actual mechanic is already correct."
+)
+
+# atlas 26.08 (from the same external design review, addressing "action
+# paralysis" -- clicking without progress -- as distinct from the
+# "analysis paralysis" ATLAS_FORCE_ACT_OVERRIDE already covers). Fires on
+# either of two host-detected signals: (a) many real actions with zero level
+# progress, or (b) the board has returned to a state it was already in a
+# couple of actions ago (a tight ping-pong loop). Names a specific SYSTEM
+# anchor (auto-created by the host at game start and at every level-up, not
+# something the model had to remember to create itself -- voluntary
+# save_checkpoint adoption would suffer the exact same near-zero rate memo
+# did) and, like ATLAS_FORCE_ACT_OVERRIDE, forces the very next call rather
+# than leaving compliance timing open to interpretation.
+ATLAS_FORCE_ROLLBACK_CHECKPOINT = (
+    "[atlas checkpoint] {reason} The current line of reasoning is corrupted "
+    "-- more actions from here are unlikely to help. Your VERY NEXT `python` "
+    "call MUST call rollback('{checkpoint_id}', lesson_learned=...). In "
+    "`lesson_learned`, summarize what specific hypothesis you were testing "
+    "since that checkpoint and why it failed -- that summary is the ONLY "
+    "thing that survives the rollback, so make it count. Do not attempt any "
+    "other action first. This has been shown {streak} time(s) in a row; if "
+    "it is ignored much longer the harness will perform the rollback for you "
+    "with a generic note instead of your own diagnosis."
 )
 
 ATLAS_PLAN_CHECKPOINT_TEMPLATE = (

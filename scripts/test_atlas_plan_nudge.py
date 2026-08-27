@@ -250,14 +250,29 @@ def main() -> None:
         _fail("goal-reconsider overrides theory checkpoint", "the plain theory checkpoint must not ALSO appear once this fires")
     _ok(f"goal-reconsider checkpoint fires after {_ATLAS_GOAL_RECONSIDER_AFTER_CALLS} failed verify_theory( calls, overriding the theory checkpoint")
 
-    # 5c. One call short of the threshold -> the plain theory checkpoint still fires instead.
+    # 5c. One call short of the threshold -> the plain theory checkpoint still
+    #     fires instead. Passes extract= throughout (unlike 5b above) so the
+    #     26.08 extract-suggestion checkpoint -- which sits BETWEEN theory and
+    #     goal-reconsider and would otherwise fire once verify_theory_call_count
+    #     reaches _ATLAS_EXTRACT_NUDGE_AFTER_CALLS -- stays satisfied and out
+    #     of this test's way; see test_atlas_rollback.py for its own coverage.
     short_agent = ToolAgent(model="test-model")
     short_agent._step_env_callback = _fake_step_env
     short_agent._current_valid_actions = ["UP", "RIGHT", "DOWN", "LEFT"]
     for _ in range(_ATLAS_GOAL_RECONSIDER_AFTER_CALLS - 1):
         short_agent._run_python_tool(
             state_path,
-            {"code": "def predict(grid, action):\n    return grid\nresult = verify_theory(predict)\n"},
+            {
+                "code": (
+                    "def predict(state, action):\n    return state\n"
+                    # An empty dict never counts as a match (verify_theory's own
+                    # documented rule) -- keeps accuracy at 0.0 regardless of
+                    # real transition content, same as 5b's plain wrong
+                    # predict(), so this stays a below-0.6 scenario.
+                    "def extract(grid):\n    return {}\n"
+                    "result = verify_theory(predict, extract=extract)\n"
+                )
+            },
         )
         short_agent._run_python_tool(state_path, {"code": "action(['RIGHT'])\nresult = 1\n"})
     prompt = short_agent._build_user_prompt(1, valid_actions=["UP", "RIGHT"])

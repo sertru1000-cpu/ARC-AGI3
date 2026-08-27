@@ -357,6 +357,56 @@ class _HarnessGameSession:
             history=self.history_entries,
         )
 
+    def atlas_snapshot_env(self) -> dict[str, Any] | None:
+        """Deep-copy enough of the real engine to later restore an exact
+        mid-episode point (save_checkpoint/rollback, 26.08). Only possible
+        in OFFLINE mode: the raw ARCBaseGame object (`env._game`) is a plain
+        Python object with no network/lock handles, confirmed deepcopy-safe
+        (it already implements `.clone()` used internally on every reset).
+        ONLINE mode has no local engine object at all (server-authoritative,
+        HTTP only) -- returns None there, and callers must treat that as
+        "checkpoint/rollback unavailable this session", not retry.
+        `game_run` (action-count/history bookkeeping, separate from the raw
+        engine and from the scorecard) is snapshotted alongside it so
+        `action_count`/`current_frame()` -- both derived properties, not
+        stored fields -- report the reverted state with no further syncing
+        needed once restored. Deliberately does NOT touch the scorecard:
+        confirmed scoring is a monotonic max() over already-recorded
+        history, independent of live engine state, so rollback cannot
+        un-record an already-achieved level -- nothing to snapshot there.
+        """
+        env = getattr(self.game, "env", None)
+        raw_game = getattr(env, "_game", None) if env is not None else None
+        if raw_game is None:
+            return None
+        try:
+            return {
+                "game": copy.deepcopy(raw_game),
+                "game_run": copy.deepcopy(self.game.game_run),
+                "history_entries": [
+                    HistoryEntry(action=e.action, frame=e.frame) for e in self.history_entries
+                ],
+            }
+        except Exception:
+            return None
+
+    def atlas_restore_env(self, snapshot: dict[str, Any] | None) -> bool:
+        if not snapshot:
+            return False
+        env = getattr(self.game, "env", None)
+        if env is None:
+            return False
+        try:
+            env._game = copy.deepcopy(snapshot["game"])
+            self.game.game_run = copy.deepcopy(snapshot["game_run"])
+        except Exception:
+            return False
+        self.history_entries = [
+            HistoryEntry(action=e.action, frame=e.frame) for e in snapshot["history_entries"]
+        ]
+        self.write_runtime_state()
+        return True
+
     def seed_initial_history(self) -> None:
         if not self.history_entries:
             self.history_entries.append(
@@ -553,6 +603,8 @@ class _HarnessGameSession:
                         self.action_count,
                         valid_actions=_engine_action_names(self.game),
                         step_env=self.step_env,
+                        checkpoint_env=self.atlas_snapshot_env,
+                        restore_env=self.atlas_restore_env,
                         transcript_path=self.transcript_path,
                         analysis_step=analysis_step,
                         request_timeout_seconds=self.request_timeout_seconds(),
