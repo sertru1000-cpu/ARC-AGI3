@@ -26,6 +26,10 @@ from inference.agent.prompts import (
     ATLAS_NOTE_ENFORCEMENT_CHECKPOINT,
     ATLAS_PLAN_CHECKPOINT_TEMPLATE,
     ATLAS_PLAN_FORCE_OVERRIDE,
+    ATLAS_PLAN_REAL_ESCALATION_DEFAULT,
+    ATLAS_PLAN_REAL_ESCALATION_MOUSE,
+    ATLAS_PLAN_REAL_FORCE_CHECKPOINT,
+    ATLAS_PLAN_REAL_MOUSE_ARGS_HINT,
     ATLAS_THEORY_CHECKPOINT,
     ATLAS_THEORY_FORCE_OVERRIDE,
     COMPACT_TOOL_SESSION_ADDENDUM,
@@ -140,6 +144,16 @@ _ATLAS_EXTRACT_NUDGE_AFTER_CALLS = 6
 # last level-progress event (tracked via _atlas_actions_since_level_progress,
 # reset on level-up) without progress raises the FORCE_ROLLBACK ultimatum.
 _ATLAS_ROLLBACK_STALL_AFTER_CALLS = 15
+# atlas 27.08 (late): plan_real principle-force -- fires EARLIER than the
+# rollback stall trigger above (search constructively before giving up and
+# rewinding), and only while no rollback ultimatum is active.
+_ATLAS_PLAN_REAL_STALL_AFTER_ACTIONS = 10
+# After this many consecutive showings without a plan_real( call, the
+# harness runs the search itself (non-MOUSE games only -- for MOUSE games
+# it cannot pick candidate clicks, so there the nag just stops after
+# _ATLAS_PLAN_REAL_NAG_CAP showings instead of nagging forever).
+_ATLAS_PLAN_REAL_AUTO_FORCE_AFTER = 2
+_ATLAS_PLAN_REAL_NAG_CAP = 5
 # Trigger B -- "hard loop": current board_signature() matches one seen this
 # many actions ago (a real repeat, not mere similarity) -- Gemini's own
 # example was "вернулся в состояние экрана, в котором уже был 2 хода назад",
@@ -1502,6 +1516,15 @@ class ToolAgent:
         # state_path and performs the actual restore there (same code path
         # as a model-initiated rollback()).
         self._atlas_pending_auto_rollback: str | None = None
+        # atlas 27.08 (late): plan_real principle-force state -- same
+        # two-layer design as the rollback ultimatum above. Per-level usage
+        # flag + showing streak + auto-run bookkeeping; all reset on
+        # level-up in _atlas_note_action_progress.
+        self._atlas_plan_real_used_this_level = False
+        self._atlas_plan_real_force_streak = 0
+        self._atlas_plan_real_auto_done_this_level = False
+        self._atlas_pending_auto_plan_real = False
+        self._atlas_plan_real_auto_note: str | None = None
         # atlas 26.08: context sanitizer (idea #3) -- independent of the
         # rollback/checkpoint feature above (works in ONLINE mode too, no
         # env-snapshot needed), so tracked with its own counters rather than
@@ -1586,6 +1609,11 @@ class ToolAgent:
             self._atlas_rollback_ultimatum_streak = 0
             self._atlas_last_checkpoint_id = None
             self._atlas_pending_auto_rollback = None
+            self._atlas_plan_real_used_this_level = False
+            self._atlas_plan_real_force_streak = 0
+            self._atlas_plan_real_auto_done_this_level = False
+            self._atlas_pending_auto_plan_real = False
+            self._atlas_plan_real_auto_note = None
             self._atlas_calls_since_sanitize = 0
             self._atlas_context_sanitize_level = 1
             self._atlas_context_sanitize_pending = False
@@ -2000,6 +2028,66 @@ class ToolAgent:
                 flush=True,
             )
         elif (
+            self._atlas_actions_since_level_progress >= _ATLAS_PLAN_REAL_STALL_AFTER_ACTIONS
+            and not self._atlas_plan_real_used_this_level
+            and not self._atlas_plan_real_auto_done_this_level
+            and self._atlas_rollback_target_checkpoint is None
+            and self._atlas_checkpoint_available
+            and self._step_env_callback is not None
+        ):
+            # atlas 27.08 (late): plan_real principle-force. Fires at a
+            # LOWER stall threshold than the rollback trigger (search
+            # constructively before giving up), after explore-first (know
+            # your controls before searching over them), and never while a
+            # rollback ultimatum is active. MOUSE-only games get the
+            # clicks-variant text and never auto-run (the harness cannot
+            # pick candidate clicks); their nag stops after
+            # _ATLAS_PLAN_REAL_NAG_CAP showings instead of running forever.
+            self._atlas_plan_real_force_streak += 1
+            mouse_only = not (
+                set(_normalize_valid_actions(valid_actions)) - {"MOUSE", "RESET"}
+            )
+            if mouse_only:
+                if self._atlas_plan_real_force_streak > _ATLAS_PLAN_REAL_NAG_CAP:
+                    self._atlas_plan_real_auto_done_this_level = True
+                lines.append(
+                    ATLAS_PLAN_REAL_FORCE_CHECKPOINT.format(
+                        stalled=self._atlas_actions_since_level_progress,
+                        args_hint=ATLAS_PLAN_REAL_MOUSE_ARGS_HINT,
+                        escalation=ATLAS_PLAN_REAL_ESCALATION_MOUSE,
+                    )
+                )
+            elif self._atlas_plan_real_force_streak > _ATLAS_PLAN_REAL_AUTO_FORCE_AFTER:
+                self._atlas_pending_auto_plan_real = True
+                self._atlas_plan_real_auto_done_this_level = True
+                lines.append(
+                    "[atlas checkpoint] The plan_real() directive was shown "
+                    f"{self._atlas_plan_real_force_streak - 1} time(s) in a row without compliance. "
+                    "The harness will run the search itself before your next `python` call executes, "
+                    "with default settings, and report the result."
+                )
+                print(
+                    f"atlas: plan_real auto-run scheduled (action_num={action_num}, "
+                    f"streak={self._atlas_plan_real_force_streak - 1})",
+                    flush=True,
+                )
+            else:
+                lines.append(
+                    ATLAS_PLAN_REAL_FORCE_CHECKPOINT.format(
+                        stalled=self._atlas_actions_since_level_progress,
+                        args_hint="",
+                        escalation=ATLAS_PLAN_REAL_ESCALATION_DEFAULT.format(
+                            streak=self._atlas_plan_real_force_streak
+                        ),
+                    )
+                )
+            if not self._atlas_pending_auto_plan_real:
+                print(
+                    f"atlas: plan_real force checkpoint injected (action_num={action_num}, "
+                    f"streak={self._atlas_plan_real_force_streak}, mouse_only={mouse_only})",
+                    flush=True,
+                )
+        elif (
             self._atlas_last_verified_accuracy is None
             or self._atlas_last_verified_accuracy < 0.6
         ) and self._atlas_verify_theory_call_count >= _ATLAS_GOAL_RECONSIDER_AFTER_CALLS:
@@ -2126,6 +2214,11 @@ class ToolAgent:
             )
             print(f"atlas: rollback lesson injected (action_num={action_num})", flush=True)
             self._atlas_rollback_lesson = None
+        # atlas 27.08 (late): one-shot result of a harness-auto plan_real run.
+        if self._atlas_plan_real_auto_note:
+            lines.append(self._atlas_plan_real_auto_note)
+            print(f"atlas: auto-plan_real note injected (action_num={action_num})", flush=True)
+            self._atlas_plan_real_auto_note = None
         action_effect_lines = _atlas_action_effect_summary(history_entries)
         if action_effect_lines:
             print(
@@ -2559,6 +2652,56 @@ class ToolAgent:
             ),
         }
 
+    def _atlas_auto_plan_real(self, state_path: Path) -> str:
+        """Second layer of the plan_real principle-force: the harness runs
+        the search itself with default settings. A found plan is EXECUTED
+        immediately (it is engine-verified and completes a level -- there is
+        no scenario where the model is better served by being handed the
+        plan and asked to copy it). Returns the one-shot note for the next
+        prompt. Never raises: any failure degrades to an honest note."""
+        if self._step_env_callback is None or self._checkpoint_env_callback is None:
+            return "[atlas] the harness tried to run plan_real() itself but the session no longer supports it."
+        snapshot = self._checkpoint_env_callback()
+        if snapshot is None:
+            return "[atlas] the harness tried to run plan_real() itself but no engine snapshot is available."
+        try:
+            result = self._atlas_search_real_plan({"max_depth": 6, "max_nodes": 120}, state_path, snapshot)
+        except Exception as exc:
+            result = {"plan": None, "reason": f"search failed: {exc!r}"}
+        finally:
+            self._restore_env_callback(snapshot)
+        plan = result.get("plan")
+        if not plan:
+            return (
+                "[atlas] You ignored the plan_real() directive, so the harness ran the search itself: "
+                f"NO level-completing sequence exists within depth 6 from here over the non-MOUSE "
+                f"actions (reason={result.get('reason')}, nodes={result.get('nodes_explored')}, "
+                f"unique_states={result.get('unique_states_reached')}). That is real information: this "
+                "level needs MOUSE targets, a longer sequence, or a different read of the goal -- "
+                "stop repeating single-action probes that cannot work."
+            )
+        payload = self._step_env_callback({"actions": list(plan)}) or {}
+        executed = int(payload.get("executed_count") or 0)
+        outcome = (
+            "the level is COMPLETE" if payload.get("level_completed")
+            else "the game is WON" if payload.get("run_complete")
+            else f"execution stopped early (stop_reason={payload.get('stop_reason')})"
+        )
+        plan_display = ", ".join(
+            str(s.get("action")) + (f"({s.get('row')},{s.get('col')})" if "row" in s else "")
+            for s in plan
+        )
+        print(
+            f"atlas: harness auto-ran plan_real and executed the plan ({executed}/{len(plan)} step(s), "
+            f"outcome={outcome})",
+            flush=True,
+        )
+        return (
+            "[atlas] You ignored the plan_real() directive, so the harness ran the search itself, "
+            f"found a verified sequence [{plan_display}] and EXECUTED it: {outcome}. Re-ground on "
+            "the newest frame before acting further."
+        )
+
     def _atlas_note_action_kind_tried(self, action_sig: str, level: int, board_changed: bool) -> None:
         """Tracks which control kinds (MOUSE/UP/etc -- MOUSE coordinates are
         stripped, only the kind matters) are RESOLVED this LEVEL, for the
@@ -2626,6 +2769,13 @@ class ToolAgent:
             self._atlas_rollback_target_checkpoint = None
             self._atlas_rollback_trigger_reason = None
             self._atlas_rollback_ultimatum_streak = 0
+            # atlas 27.08 (late): a new level gets a fresh plan_real
+            # runway -- usage flag, showing streak, and the once-per-level
+            # auto-run allowance all reset here.
+            self._atlas_plan_real_used_this_level = False
+            self._atlas_plan_real_force_streak = 0
+            self._atlas_plan_real_auto_done_this_level = False
+            self._atlas_pending_auto_plan_real = False
             return
         self._atlas_actions_since_level_progress += 1
         if board_sig_after is not None:
@@ -2799,6 +2949,15 @@ class ToolAgent:
             )
             if restored:
                 print(f"atlas: harness auto-performed rollback (target={target})", flush=True)
+        # atlas 27.08 (late): harness-auto plan_real -- the second layer of
+        # the plan_real principle-force, mirroring the auto-rollback block
+        # above. Runs the search itself with default settings; if a plan is
+        # found it is EXECUTED for real (engine-verified, strictly
+        # beneficial -- it completes a level), and either way a one-shot
+        # note lands in the next prompt.
+        if self._atlas_pending_auto_plan_real:
+            self._atlas_pending_auto_plan_real = False
+            self._atlas_plan_real_auto_note = self._atlas_auto_plan_real(state_path)
         code = str(arguments.get("code", "")).rstrip()
         if not code:
             return _ToolDispatchResult(json.dumps({"error": "python requires a non-empty `code` string."}, indent=2))
@@ -3219,6 +3378,15 @@ class ToolAgent:
                 )
         if "execute_plan(" in code:
             print(f"atlas: model called execute_plan( (call #{self._atlas_python_call_index})", flush=True)
+        if "plan_real(" in code or "try_actions(" in code:
+            # atlas 27.08 (late): real-engine probe usage -- satisfies the
+            # plan_real principle-force for this level and resets its streak.
+            self._atlas_plan_real_used_this_level = True
+            self._atlas_plan_real_force_streak = 0
+            print(
+                f"atlas: model called plan_real/try_actions (call #{self._atlas_python_call_index})",
+                flush=True,
+            )
         if "verify_theory(" in code:
             self._atlas_verify_theory_call_count += 1
             sandbox_payload_result = sandbox_result.get("result")

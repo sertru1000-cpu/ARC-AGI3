@@ -249,6 +249,43 @@ ATLAS_THEORY_FORCE_OVERRIDE = (
     "verify_theory() again against it."
 )
 
+# atlas 27.08 (late): principle-force for plan_real, prepared the same day
+# the tool shipped -- the plan_real RunPod adoption run showed the familiar
+# ~0% voluntary uptake (0 calls across the run's first hour despite the
+# static docs and the theory-checkpoint pointer), the exact pattern every
+# un-nudged tool here has shown (memo 0%, verify_theory 0.2%). Same
+# two-layer playbook as rollback: a hard checkpoint at stall, then the
+# harness runs the search ITSELF if ignored (possible precisely because
+# plan_real needs no model-authored code for non-MOUSE games). For
+# MOUSE-only games the harness cannot pick candidate clicks, so there the
+# checkpoint asks the model for a short click list and never auto-runs.
+ATLAS_PLAN_REAL_FORCE_CHECKPOINT = (
+    "[atlas checkpoint] You have taken {stalled} real actions on this level "
+    "with no progress, and plan_real() has not been tried once. Your VERY "
+    "NEXT `python` call MUST call plan_real({args_hint}) -- it searches the "
+    "REAL engine for a level-completing sequence (snapshot -> try -> "
+    "rewind), needs NO predict() or theory, costs zero recorded actions, "
+    "and either hands you a verified plan to execute with "
+    "action(res['plan']) or PROVES no such sequence exists within its "
+    "depth, which is also real information (the level then needs something "
+    "outside that move set). Do not respond with 'let me investigate a bit "
+    "more first' -- {stalled} actions of investigation are exactly what "
+    "produced this checkpoint. {escalation}"
+)
+ATLAS_PLAN_REAL_ESCALATION_DEFAULT = (
+    "This has been shown {streak} time(s) in a row; if it is ignored again, "
+    "the harness will run the search itself with default settings."
+)
+ATLAS_PLAN_REAL_ESCALATION_MOUSE = (
+    "This is a MOUSE game, so only you can pick the candidate clicks -- the "
+    "harness cannot run this search for you. Pass a SHORT list (3-8) of the "
+    "most promising clicks, e.g. centers of interactive-looking objects "
+    "from segmentation."
+)
+ATLAS_PLAN_REAL_MOUSE_ARGS_HINT = (
+    "actions=[{'action': 'MOUSE', 'row': r, 'col': c}, ...], max_depth=3"
+)
+
 # atlas 25.08: found on dc22 (a Gemini teacher-data transcript from our old
 # harness, not this one) -- 221 verify_theory( calls, but the model was
 # cycling through 4 unrelated high-level theories of what KIND of mechanic
