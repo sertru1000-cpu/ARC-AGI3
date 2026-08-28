@@ -132,13 +132,17 @@ ATLAS_SUBMISSION_BUDGET_S = 28800.0   # 8 h of the 9 h hard cap -- 1h margin
 # bm.solver.max_runtime_s_per_game (7920s, the bundle's own undocumented
 # default), which silently absorbed the whole budget increase above for any
 # n_games <= 42 (v3/v5/v6/v8/v10/v12's real behavior). Raised 7920 -> 8500
-# (user's call, more conservative than the 10000 that was also costed) after
-# a v7 regression (0.06) from removing this ceiling entirely -- this version
-# keeps a firm ceiling, just a higher one. At n_games in 15..42 this raises
-# the per-game cap from 7920s to 8500s and total wall-clock from ~4.4-6.6h to
-# ~4.7-7.1h -- still well under the 8h budget / 9h hard cap. For n_games>42
-# this constant has no effect at all (affordable already binds below it).
-ATLAS_SUBMISSION_GAME_CAP_CEILING_S = 8500.0
+# 28.08 (user's call: "так подними его"): raised 8500 -> 14400 (4h/game)
+# alongside the planned Phase B concurrency increase. Context: the hidden
+# Phase B set is ~110 games (55 semi-private + 55 fully-private per the
+# ARC-AGI-3 technical report), so at concurrency 20 the affordable cap was
+# only 80 min/game -- the leading explanation for v20's real 0.82 vs 1.43
+# on the stand. With concurrency ~55, affordable becomes 14400s (110 games,
+# 2 waves) or 28800s (55 games, 1 wave); this ceiling admits the 4h/game
+# the 28.08 rehearsals validated while still bounding any single game to
+# half the 8h budget. History: a v7 regression (0.06) came from removing
+# the ceiling ENTIRELY -- keep it firm and named, never delete it.
+ATLAS_SUBMISSION_GAME_CAP_CEILING_S = 14400.0
 ATLAS_MIN_GAME_CAP_S = 1800.0
 
 print("atlas: solver config as it came from the bundle:")
