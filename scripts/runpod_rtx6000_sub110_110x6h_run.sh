@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SUBMISSION-SHAPED REHEARSAL (28.08): 110 cloned games (the FULL hidden-set
 # shape: 55 semi-private + 55 fully-private per
-# the ARC-AGI-3 technical report), concurrency=110, 4h per game, ONE wave -- ALL games at once
+# the ARC-AGI-3 technical report), concurrency=110, 6h per game, ONE wave -- ALL games at once
 # (4h total), OFFLINE, intended for an RTX PRO 6000 pod (same GPU class as
 # the real Kaggle rerun). Parameters set by the user 28.08 ("всего 55 игр
 # и 1 волна на 4 часа, этого достаточно").
@@ -25,7 +25,7 @@
 # grep printed at the end (expect ~55).
 #
 # Usage on the pod (as root, fresh container):
-#   bash runpod_rtx6000_sub110_110x4h_run.sh
+#   bash runpod_rtx6000_sub110_110x6h_run.sh
 #
 # Assumes:
 #   - ~/.kaggle/access_token has been scp'd in already.
@@ -43,7 +43,7 @@ VLLM_HOST="127.0.0.1"
 VLLM_PORT="1234"
 VLLM_BASE_URL="http://${VLLM_HOST}:${VLLM_PORT}/v1"
 VLLM_LOG="/workspace/vllm-openai-server.log"
-RUN_NAME="runpod-rtx6000-sub110-off-110x4h-$(date -u +%Y%m%d-%H%M%S)"
+RUN_NAME="runpod-rtx6000-sub110-off-110x6h-$(date -u +%Y%m%d-%H%M%S)"
 EXPERIMENT_DIR="/workspace/atlas_runpod_runs/${RUN_NAME}"
 
 echo "=== [1/8] GPU check ==="
@@ -306,8 +306,8 @@ set +e
   --deployment-target inline \
   --concurrent-jobs 110 \
   --n-passes 1 \
-  --max-runtime-minutes 240 \
-  --max-experiment-runtime-hours 4 \
+  --max-runtime-minutes 360 \
+  --max-experiment-runtime-hours 6 \
   --environments-dir "${CLONE_ENV_DIR}" \
   --run-name "${RUN_NAME}" \
   --experiment-dir "${EXPERIMENT_DIR}" \
