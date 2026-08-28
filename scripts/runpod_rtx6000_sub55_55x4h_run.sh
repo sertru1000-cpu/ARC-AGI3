@@ -1,30 +1,31 @@
 #!/usr/bin/env bash
-# SUBMISSION-SHAPED REHEARSAL (28.08): 110 cloned games (the hidden Phase B
-# set's shape: 55 semi-private + 55 fully-private per the ARC-AGI-3
-# technical report), concurrency=55, 4h per game, 8h total (2 waves x 55),
-# OFFLINE, intended for an RTX PRO 6000 pod (same GPU class as the real
-# Kaggle rerun). Parameters set by the user 28.08.
+# SUBMISSION-SHAPED REHEARSAL (28.08): 55 cloned games (one hidden-set
+# half: the Phase B hidden set is 55 semi-private + 55 fully-private per
+# the ARC-AGI-3 technical report), concurrency=55, 4h per game, ONE wave
+# (4h total), OFFLINE, intended for an RTX PRO 6000 pod (same GPU class as
+# the real Kaggle rerun). Parameters set by the user 28.08 ("всего 55 игр
+# и 1 волна на 4 часа, этого достаточно").
 #
 # What this run measures BEFORE Saturday's Kaggle build:
-#   - wave math and harness stability at 110 games / 55 concurrent;
+#   - harness stability at 55 games / 55 concurrent (one full wave);
 #   - vLLM under 55 concurrent games with the KERNEL's server settings
 #     (no --max-num-seqs cap, default gpu-memory-utilization -- mirrored
 #     from inference/framework/kaggle.py start_vllm_server);
 #   - analyzer-timeout rate under queueing (the concurrency decision for
 #     Phase B: 20 vs 25 vs 40+);
 #   - CPU contention with 55 concurrent engine processes.
-# The 110 clones are built on-pod by scripts/build_clone_env_110.py: each
+# The 55 clones are built on-pod by scripts/build_clone_env_110.py (each
 # clone keeps the ORIGINAL game .py and gets its own metadata.json with a
-# unique id (k000..k109) -- same id scheme as taaf's own 110-run REST clone
-# set (competition_arcade.py), but offline/ArcadeSpec-shaped like the real
+# public game cloned twice-ish, ids k000..k054) -- same id scheme as taaf's
+# own 110-run REST clone set, but offline/ArcadeSpec-shaped like the real
 # kernel. run.py passes full unknown ids through verbatim since 28.08.
 #
 # OFFLINE is MANDATORY: without --environments-dir the entire snapshot
 # stack is silently dead (27.08 lesson). Verify via the sys_start-anchor
-# grep printed at the end (expect ~110).
+# grep printed at the end (expect ~55).
 #
 # Usage on the pod (as root, fresh container):
-#   bash runpod_rtx6000_sub110_55x4h_run.sh
+#   bash runpod_rtx6000_sub55_55x4h_run.sh
 #
 # Assumes:
 #   - ~/.kaggle/access_token has been scp'd in already.
@@ -42,7 +43,7 @@ VLLM_HOST="127.0.0.1"
 VLLM_PORT="1234"
 VLLM_BASE_URL="http://${VLLM_HOST}:${VLLM_PORT}/v1"
 VLLM_LOG="/workspace/vllm-openai-server.log"
-RUN_NAME="runpod-rtx6000-sub110-off-55x4h-$(date -u +%Y%m%d-%H%M%S)"
+RUN_NAME="runpod-rtx6000-sub55-off-55x4h-$(date -u +%Y%m%d-%H%M%S)"
 EXPERIMENT_DIR="/workspace/atlas_runpod_runs/${RUN_NAME}"
 
 echo "=== [1/8] GPU check ==="
@@ -235,21 +236,21 @@ while [ "$(date +%s)" -lt "${deadline}" ]; do
 done
 curl -sf "${VLLM_BASE_URL}/models" >/dev/null 2>&1 || { echo "FATAL: vLLM never became ready" >&2; tail -n 100 "${VLLM_LOG}" >&2; exit 1; }
 
-echo "=== [8/8] SUBMISSION-SHAPED REHEARSAL: 110 cloned games, concurrency=55, 4h/game, 8h total ==="
-# 110 clones of the 25 public games (see scripts/build_clone_env_110.py) =
-# the hidden Phase B set's SHAPE (55 semi-private + 55 fully-private per
-# the ARC-AGI-3 technical report). 110 / 55 = 2 waves x 4h. What this run
-# measures: wave math at scale, vLLM behavior under 55 concurrent games
+echo "=== [8/8] SUBMISSION-SHAPED REHEARSAL: 55 cloned games, concurrency=55, 4h/game, ONE wave ==="
+# 55 clones of the 25 public games (see scripts/build_clone_env_110.py) =
+# one half of the hidden Phase B set (55 games), all running at once --
+# no wave switch at all. What this run
+# measures: vLLM behavior under 55 concurrent games
 # with the KERNEL's server settings (no --max-num-seqs cap, like
 # inference/framework/kaggle.py), CPU contention, and the per-game score
 # curve at a bigger-than-real per-game budget.
-CLONE_ENV_DIR="/workspace/comp/environment_files_110"
+CLONE_ENV_DIR="/workspace/comp/environment_files_55"
 "${VENV_PYTHON}" "${REPO_DIR}/scripts/build_clone_env_110.py" \
-  --source "${ENV_FILES_DIR}" --dest "${CLONE_ENV_DIR}" --count 110
+  --source "${ENV_FILES_DIR}" --dest "${CLONE_ENV_DIR}" --count 55
 GAME_IDS=$(cat "${CLONE_ENV_DIR}/game_ids.txt")
 CLONE_COUNT=$(awk -F',' '{print NF}' "${CLONE_ENV_DIR}/game_ids.txt")
-if [ "${CLONE_COUNT}" != "110" ]; then
-  echo "FATAL: expected 110 clone ids, got ${CLONE_COUNT}" >&2
+if [ "${CLONE_COUNT}" != "55" ]; then
+  echo "FATAL: expected 55 clone ids, got ${CLONE_COUNT}" >&2
   exit 1
 fi
 
@@ -294,7 +295,7 @@ set +e
   --concurrent-jobs 55 \
   --n-passes 1 \
   --max-runtime-minutes 240 \
-  --max-experiment-runtime-hours 8 \
+  --max-experiment-runtime-hours 4 \
   --environments-dir "${CLONE_ENV_DIR}" \
   --run-name "${RUN_NAME}" \
   --experiment-dir "${EXPERIMENT_DIR}" \
