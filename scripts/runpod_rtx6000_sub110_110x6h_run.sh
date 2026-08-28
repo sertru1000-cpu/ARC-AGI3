@@ -278,6 +278,9 @@ export LOCAL_ANALYZER_MAX_OUTPUT=4000
 # eviction/recompute spirals (observed: 5 of 25 games starved to 1 action
 # in 105 min even at concurrency 25). Python-side queueing is cheap.
 export ATLAS_LLM_MAX_CONCURRENT_REQUESTS=25
+# Single wave: every game already holds the whole budget -- time-bank DRAWS
+# off (deposits stay: early exits free GPU share). User call 28.08.
+export ATLAS_TIME_BANK_DRAWS=0
 export LOCAL_ANALYZER_TIMEOUT=480
 export ANALYZER_TIMEOUT=480
 export LOCAL_ANALYZER_TEMPERATURE=0.6

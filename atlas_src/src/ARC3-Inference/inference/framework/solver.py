@@ -81,6 +81,12 @@ _ATLAS_SPEEDRUN_ENABLED = os.environ.get("ATLAS_SPEEDRUN_AFTER_WIN", "1") != "0"
 # one lucky game can't starve everything else (including games still queued
 # behind the concurrency semaphore).
 _ATLAS_TIME_BANK_ENABLED = os.environ.get("ATLAS_TIME_BANK_ENABLED", "1") != "0"
+# atlas 28.08 (single-wave configs, user's call): with concurrency >= game
+# count every game already holds the whole budget, so DRAWING extra time is
+# meaningless -- but the DEPOSIT side (stalled games ending early) stays
+# valuable at one wave too: an early exit frees the finished game's share
+# of the GPU for everyone still playing. This flag disables only the draws.
+_ATLAS_TIME_BANK_DRAWS_ENABLED = os.environ.get("ATLAS_TIME_BANK_DRAWS", "1") != "0"
 # Only allow the early-stop-and-deposit path once this fraction of the base
 # per-game cap has elapsed with ZERO level progress -- guards against cutting
 # off a game that's just a slow, legitimate starter. Raised 0.4->0.5 in v19
@@ -477,6 +483,8 @@ class _HarnessGameSession:
             # Mark this level "tried" regardless of whether a grant follows --
             # a new level with no bank room left must not re-ask every poll.
             self._atlas_last_credited_level = current_level
+        if requested > 0 and not _ATLAS_TIME_BANK_DRAWS_ENABLED:
+            requested = 0
         if requested > 0:
             granted = self.solver.atlas_draw_time(requested)
             if granted > 0:
