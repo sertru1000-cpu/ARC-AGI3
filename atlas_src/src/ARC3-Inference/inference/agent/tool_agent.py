@@ -233,6 +233,14 @@ _ATLAS_PROBE_RATION_FREE = 3
 # before the model spends any turns, and executes a found plan. Zero model
 # turns per auto-solved level; a miss costs ~10s wall and stays silent.
 _ATLAS_PLAN_REAL_PROACTIVE = os.environ.get("ATLAS_PLAN_REAL_PROACTIVE", "1") != "0"
+# atlas 28.08 (Gemini round 5, L2): auto-replay of SOLVED levels. The run
+# records the action sequence that completed each level; when the game
+# falls back to an earlier level (RESET after game over, or a deliberate
+# full restart), the harness batch-replays the known solutions instead of
+# letting the model re-derive them turn by turn. Saves model TURNS and
+# wall-clock, not recorded actions (the play's action counter is
+# cumulative either way). Stops honestly on the first divergence.
+_ATLAS_LEVEL_AUTO_REPLAY = os.environ.get("ATLAS_LEVEL_AUTO_REPLAY", "1") != "0"
 # atlas 28.08 (Gemini round 5, L3): cap CONCURRENT LLM HTTP requests
 # below the game concurrency -- 55 simultaneous vLLM requests thrash the
 # KV cache into eviction/recompute spirals and starve every game (observed
@@ -1577,6 +1585,10 @@ class ToolAgent:
         self._atlas_pending_auto_plan_real = False
         self._atlas_pending_auto_plan_real_proactive = False
         self._atlas_plan_real_auto_note: str | None = None
+        self._atlas_level_solutions: dict[int, list[dict[str, Any]]] = {}
+        self._atlas_current_level_actions: list[dict[str, Any]] = []
+        self._atlas_auto_replay_note: str | None = None
+        self._atlas_in_auto_replay = False
         # atlas 27.08 (probe/checkpoint integration): python-call index of
         # the last SUCCESSFULLY EXECUTED probe (try_actions/plan_real that
         # actually ran on the engine, set host-side in _handle_checkpoint,
@@ -1679,6 +1691,10 @@ class ToolAgent:
             self._atlas_pending_auto_plan_real = False
             self._atlas_pending_auto_plan_real_proactive = False
             self._atlas_plan_real_auto_note = None
+            self._atlas_level_solutions = {}
+            self._atlas_current_level_actions = []
+            self._atlas_auto_replay_note = None
+            self._atlas_in_auto_replay = False
             self._atlas_last_probe_call_index = -99
             self._atlas_probes_since_real_action = 0
             self._atlas_probe_findings = []
@@ -2325,6 +2341,12 @@ class ToolAgent:
             lines.append(self._atlas_plan_real_auto_note)
             print(f"atlas: auto-plan_real note injected (action_num={action_num})", flush=True)
             self._atlas_plan_real_auto_note = None
+        # atlas 28.08 (Gemini round 5, L2): one-shot result of an auto-replay
+        # of solved levels after a game restart.
+        if self._atlas_auto_replay_note:
+            lines.append(self._atlas_auto_replay_note)
+            print(f"atlas: auto-replay note injected (action_num={action_num})", flush=True)
+            self._atlas_auto_replay_note = None
         action_effect_lines = _atlas_action_effect_summary(history_entries)
         if action_effect_lines:
             print(
@@ -2571,6 +2593,11 @@ class ToolAgent:
             return False
         self._atlas_memo = copy.deepcopy(entry.get("memo") or {})
         self._atlas_current_level = int(entry.get("level") or self._atlas_current_level)
+        # L2 (28.08): the rolled-back attempt's actions are not part of any
+        # solution -- and updating _atlas_current_level here is also what
+        # keeps a VOLUNTARY rollback from tripping the auto-replay's
+        # fell-back-a-level detection (that path is for engine RESETs).
+        self._atlas_current_level_actions = []
         self._atlas_actions_since_level_progress = 0
         self._atlas_recent_board_sigs = []
         self._atlas_rollback_lesson = lesson_learned
@@ -2980,10 +3007,13 @@ class ToolAgent:
             )
         payload = self._step_env_callback({"actions": list(plan)}) or {}
         executed = int(payload.get("executed_count") or 0)
-        # Run the same level-up bookkeeping a real action would (anchor for
-        # the new level, per-level resets, proactive re-seeding for the
-        # NEXT level -- auto-solved levels chain).
+        # Record the executed steps as this level's solution (L2 replay),
+        # then run the same level-up bookkeeping a real action would
+        # (anchor for the new level, per-level resets, proactive
+        # re-seeding for the NEXT level -- auto-solved levels chain).
         try:
+            for step in list(plan)[: executed or len(plan)]:
+                self._atlas_record_level_action(step, {"executed": True})
             self._atlas_note_action_progress(payload, None)
         except Exception:
             pass
@@ -3046,6 +3076,77 @@ class ToolAgent:
         if attempts >= _ATLAS_EXPLORE_MAX_ATTEMPTS_PER_KIND:
             self._atlas_action_kinds_resolved.add(kind)
 
+    def _atlas_record_level_action(self, spec: Any, compact_payload: dict[str, Any]) -> None:
+        """L2 solution recorder (28.08): remember every REAL executed action
+        of the current level attempt so a completed level's sequence can be
+        replayed after a future full reset. A RESET clears the attempt (its
+        actions are not part of any solution)."""
+        if not compact_payload.get("executed"):
+            return
+        kind = str(spec.get("action") if isinstance(spec, dict) else spec).strip().upper()
+        if not kind:
+            return
+        if kind == "RESET":
+            self._atlas_current_level_actions = []
+            return
+        entry: dict[str, Any] = {"action": kind}
+        if isinstance(spec, dict) and "row" in spec and "col" in spec:
+            try:
+                entry["row"] = int(spec["row"])
+                entry["col"] = int(spec["col"])
+            except (TypeError, ValueError):
+                pass
+        self._atlas_current_level_actions.append(entry)
+
+    def _atlas_auto_replay_solved_levels(self, from_level: int, upto_level: int) -> None:
+        """L2 replay (28.08): after a fall back to `from_level`, batch-replay
+        the recorded solutions for from_level..upto_level-1. Each level's
+        sequence is engine-history ground truth from THIS play, but the
+        replay still verifies each level actually completes and stops
+        honestly on the first divergence (mechanics can be stateful)."""
+        self._atlas_in_auto_replay = True
+        replayed: list[int] = []
+        diverged: str | None = None
+        try:
+            for lv in range(max(1, from_level), upto_level):
+                solution = self._atlas_level_solutions.get(lv)
+                if not solution:
+                    diverged = f"no recorded solution for level {lv}"
+                    break
+                payload = self._step_env_callback({"actions": [dict(s) for s in solution]}) or {}
+                advanced = bool(payload.get("level_completed") or payload.get("run_complete"))
+                try:
+                    after_level = int(payload.get("level") or 0)
+                except (TypeError, ValueError):
+                    after_level = 0
+                self._atlas_note_action_progress(payload, None)
+                if not advanced and after_level <= lv:
+                    diverged = (
+                        f"level {lv} did not complete on replay "
+                        f"(stop_reason={payload.get('stop_reason')}) -- mechanics may be "
+                        "stateful/randomized; play it manually"
+                    )
+                    break
+                replayed.append(lv)
+                if payload.get("run_complete") or payload.get("game_over"):
+                    break
+        finally:
+            self._atlas_in_auto_replay = False
+        if replayed or diverged:
+            summary = (
+                f"[atlas autopilot] The game restarted from level {max(1, from_level)}. The harness "
+                f"auto-replayed your OWN previously successful solutions for level(s) "
+                f"{', '.join(str(x) for x in replayed) if replayed else 'none'}"
+                + (f"; stopped: {diverged}" if diverged else "")
+                + ". Re-ground on the newest frame -- you are past the replayed levels, do not solve them again."
+            )
+            self._atlas_auto_replay_note = summary
+            print(
+                f"atlas: auto-replayed solved level(s) {replayed or []} after a game restart"
+                + (f" (stopped: {diverged})" if diverged else ""),
+                flush=True,
+            )
+
     def _atlas_note_action_progress(self, compact_payload: dict[str, Any], board_sig_after: Any) -> None:
         """Trigger A/B bookkeeping for the force-rollback checkpoint, and
         auto-anchor creation on level-up. Called after every REAL executed
@@ -3059,7 +3160,31 @@ class ToolAgent:
             level = int(compact_payload.get("level"))
         except (TypeError, ValueError):
             level = self._atlas_current_level
+        # atlas 28.08 (Gemini round 5, L2): the game fell back to an
+        # earlier level -- a full reset (RESET after game over, or a
+        # deliberate restart). If the run has recorded solutions for the
+        # levels between here and where we were, batch-replay them instead
+        # of letting the model re-derive solved levels turn by turn.
+        if (
+            level < self._atlas_current_level
+            and not self._atlas_in_auto_replay
+            and not compact_payload.get("game_over")
+        ):
+            fell_from = self._atlas_current_level
+            self._atlas_current_level = max(1, level)
+            self._atlas_current_level_actions = []
+            if _ATLAS_LEVEL_AUTO_REPLAY and self._step_env_callback is not None:
+                self._atlas_auto_replay_solved_levels(self._atlas_current_level, fell_from)
+            return
         if compact_payload.get("level_completed") or level > self._atlas_current_level:
+            # Record the sequence that just completed the level BEFORE the
+            # level pointer moves -- it is the replayable solution for the
+            # level we were on.
+            if self._atlas_current_level_actions:
+                self._atlas_level_solutions[self._atlas_current_level] = list(
+                    self._atlas_current_level_actions
+                )
+            self._atlas_current_level_actions = []
             self._atlas_current_level = max(self._atlas_current_level, level)
             snapshot = self._checkpoint_env_callback()
             if snapshot is not None:
@@ -3429,6 +3554,7 @@ class ToolAgent:
                 if refreshed_frame is not None:
                     noop_guard_board_sig = board_signature(refreshed_frame.grid)
                     noop_guard_level = refreshed_frame.level
+                self._atlas_record_level_action(normalized_actions[0], compact_payload)
                 self._atlas_note_action_progress(compact_payload, noop_guard_board_sig)
                 self._atlas_note_context_sanitize_progress(compact_payload, refreshed_frame)
                 if compact_payload.get("executed"):
@@ -3486,6 +3612,7 @@ class ToolAgent:
                 if refreshed_frame is not None:
                     noop_guard_board_sig = board_signature(refreshed_frame.grid)
                     noop_guard_level = refreshed_frame.level
+                self._atlas_record_level_action(action, sub_compact)
                 self._atlas_note_action_progress(sub_compact, noop_guard_board_sig)
                 self._atlas_note_context_sanitize_progress(sub_compact, refreshed_frame)
                 self._atlas_note_action_kind_tried(
@@ -3639,6 +3766,8 @@ class ToolAgent:
                     exec_payload = self._step_env_callback({"actions": plan_steps}) or {}
                     exec_count = int(exec_payload.get("executed_count") or 0)
                     try:
+                        for step in plan_steps[: exec_count or len(plan_steps)]:
+                            self._atlas_record_level_action(step, {"executed": True})
                         self._atlas_note_action_progress(exec_payload, None)
                     except Exception:
                         pass
