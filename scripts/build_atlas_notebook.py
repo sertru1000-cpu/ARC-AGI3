@@ -178,7 +178,14 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 750.0    # 27.08 (3rd calibration, kernel v23):
+ATLAS_CALIBRATION_CAP_S = 14400.0  # 28.08 (kernel v24, user): 4h/game --
+                                   # Phase A becomes the MATCHED CONTROL
+                                   # against the probe-branch decisive run
+                                   # (25 public games, 4h each, one wave at
+                                   # the new concurrency) on the kernel's
+                                   # own RTX Pro 6000. ~4.7h of the 45h
+                                   # weekly quota. Prior value 750s (v23's
+                                   # 30-min total calibration):
                                    # user set a 30-min TOTAL budget (not
                                    # per-game -- see the wave math below).
                                    # 25 games / concurrency 20 = 2 waves;
