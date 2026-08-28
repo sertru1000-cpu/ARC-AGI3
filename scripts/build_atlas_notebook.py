@@ -196,7 +196,13 @@ if hasattr(_atlas_tool_agent, "_ATLAS_LLM_REQUEST_GATE"):
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-ATLAS_CALIBRATION_CAP_S = 14400.0  # 28.08 (kernel v24, user): 4h/game --
+import os as _os
+# 28.08: env-overridable so one builder serves both calibration shapes:
+#   v24 (default 14400 = 4h/game matched control) and
+#   v25 (ATLAS_CALIBRATION_CAP_S=1500 -> 25 min at one wave = the 30-min
+#   total sanity check the user set for the probes build).
+ATLAS_CALIBRATION_CAP_S = float(_os.environ.get("ATLAS_CALIBRATION_CAP_S", "14400"))
+                                   # 28.08 (kernel v24, user): 4h/game --
                                    # Phase A becomes the MATCHED CONTROL
                                    # against the probe-branch decisive run
                                    # (25 public games, 4h each, one wave at
