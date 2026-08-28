@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# V23 CONTROL RUN (28.08): the checkpoint-only submission candidate at its
-# EXACT commit (7265cbd, planforce+rollbackfix -- no probes, no plan_real,
-# no round-3/4/5 code), concurrency=25, 4h per game, ONE wave (4h total),
-# 25 public games, OFFLINE. The matched-duration baseline that was missing
-# from every probes-vs-checkpoint comparison: same pod class (RTX PRO
-# 6000), same vLLM settings, same wave shape as the decisive probe run's
-# first 4 hours. Run AFTER the 55x55 rehearsal (user's order 28.08:
-# "после 55x55 запускаем v23 с concurrency 25, время прогона 4 часа,
-# время на игру - 4 часа").
+# V23 CONTROL RUN, 55x55 form (28.08): the checkpoint-only submission
+# candidate at its EXACT agent commit (7265cbd -- no probes, no plan_real,
+# no round-3/4/5 agent code) on the SAME 55-clone set / concurrency 55 /
+# 4h one-wave shape as the probe-build rehearsal -- a direct build-vs-build
+# pair under identical conditions, and simultaneously a simulation of
+# "v23 + concurrency 55" as a Saturday build option. Two NEWER framework
+# files are taken from main on top of the 7265cbd checkout: run.py (clone
+# game-id passthrough -- CLI only) and scripts/build_clone_env_110.py (the
+# clone builder); agent behavior stays pure v23.
 #
 # OFFLINE is MANDATORY (step [6/8]): without --environments-dir v23's
 # rollback/anchor stack is silently dead (27.08 lesson). Verify via the
 # sys_start-anchor grep printed at the end.
 #
 # Usage on the pod (as root, fresh container):
-#   bash runpod_rtx6000_v23ctl_25x4h_run.sh
+#   bash runpod_rtx6000_v23ctl_55x4h_run.sh
 #
 # Assumes:
 #   - ~/.kaggle/access_token has been scp'd in already.
@@ -33,7 +33,7 @@ VLLM_HOST="127.0.0.1"
 VLLM_PORT="1234"
 VLLM_BASE_URL="http://${VLLM_HOST}:${VLLM_PORT}/v1"
 VLLM_LOG="/workspace/vllm-openai-server.log"
-RUN_NAME="runpod-a100-v23ctl-off-25x4h-$(date -u +%Y%m%d-%H%M%S)"
+RUN_NAME="runpod-a100-v23ctl-off-55x4h-$(date -u +%Y%m%d-%H%M%S)"
 EXPERIMENT_DIR="/workspace/atlas_runpod_runs/${RUN_NAME}"
 
 echo "=== [1/8] GPU check ==="
@@ -61,6 +61,10 @@ rm -rf "${REPO_DIR}"
 git clone --branch "${BRANCH}" --single-branch "${REPO_URL}" "${REPO_DIR}"
 git -C "${REPO_DIR}" checkout --quiet 7265cbd \
   || { echo "FATAL: commit 7265cbd not found in the clone" >&2; exit 1; }
+# Clone-set support only -- agent files stay pure 7265cbd (verified below).
+git -C "${REPO_DIR}" checkout --quiet origin/main -- \
+  atlas_src/src/ARC3-Inference/inference/framework/run.py \
+  scripts/build_clone_env_110.py
 ATLAS_SRC="${REPO_DIR}/atlas_src/src"
 test -f "${ATLAS_SRC}/tufa-arc-agi-framework/pyproject.toml" || { echo "FATAL: clone incomplete" >&2; exit 1; }
 test -f "${ATLAS_SRC}/ARC3-Inference/pyproject.toml" || { echo "FATAL: clone incomplete" >&2; exit 1; }
@@ -207,8 +211,6 @@ ${VENV_PYTHON} -m vllm.entrypoints.openai.api_server \
   --host ${VLLM_HOST} --port ${VLLM_PORT} \
   --tensor-parallel-size 1 \
   --max-model-len 65536 \
-  --max-num-seqs 24 \
-  --gpu-memory-utilization 0.92 \
   --trust-remote-code \
   --generation-config vllm \
   --enable-prefix-caching \
@@ -237,10 +239,17 @@ while [ "$(date +%s)" -lt "${deadline}" ]; do
 done
 curl -sf "${VLLM_BASE_URL}/models" >/dev/null 2>&1 || { echo "FATAL: vLLM never became ready" >&2; tail -n 100 "${VLLM_LOG}" >&2; exit 1; }
 
-echo "=== [8/8] V23 CONTROL: 25 official games OFFLINE, concurrency=25, 4h/game, one wave ==="
+echo "=== [8/8] V23 CONTROL: 55 clones OFFLINE, concurrency=55, 4h/game, one wave ==="
 # 25 games / concurrency 25 = ONE wave: every game gets the full 4h --
 # matched to the probe-branch decisive run for a fair baseline.
 
+
+CLONE_ENV_DIR="/workspace/comp/environment_files_55"
+if [ ! -f "${CLONE_ENV_DIR}/game_ids.txt" ]; then
+  "${VENV_PYTHON}" "${REPO_DIR}/scripts/build_clone_env_110.py" \
+    --source "${ENV_FILES_DIR}" --dest "${CLONE_ENV_DIR}" --count 55
+fi
+GAME_IDS=$(cat "${CLONE_ENV_DIR}/game_ids.txt")
 
 mkdir -p "${EXPERIMENT_DIR}"
 export MPLBACKEND=Agg
@@ -253,7 +262,11 @@ export LOCAL_ANALYZER_MODEL_ID="${SERVED_MODEL_NAME}"
 export INFERENCE_ANALYZER_MODEL="${SERVED_MODEL_NAME}"
 export LOCAL_ANALYZER_APP_NAME="ARC3 Agent Harness"
 export LOCAL_ANALYZER_CONTEXT_WINDOW=32768
-export LOCAL_ANALYZER_MAX_OUTPUT=8000
+# Matched to the probe rehearsal for a fair pair. NOTE: v23's code does not
+# read ATLAS_LLM_MAX_CONCURRENT_REQUESTS (the request gate is a round-5
+# feature) -- running ungated at 55 IS part of what "v23 at 55" means.
+export LOCAL_ANALYZER_MAX_OUTPUT=4000
+export ATLAS_LLM_MAX_CONCURRENT_REQUESTS=25
 export LOCAL_ANALYZER_TIMEOUT=480
 export ANALYZER_TIMEOUT=480
 export LOCAL_ANALYZER_TEMPERATURE=0.6
@@ -275,16 +288,16 @@ cd "${ATLAS_SRC}/ARC3-Inference"
 # itself ended (a game-level failure is not the same as "nothing to save").
 set +e
 "${VENV_DIR}/bin/inference-taaf-run" \
-  --include-tags official \
+  --game "${GAME_IDS}" \
   --agent inference \
   --model "${SERVED_MODEL_NAME}" \
   --analyzer-timeout 480 \
   --deployment-target inline \
-  --concurrent-jobs 25 \
+  --concurrent-jobs 55 \
   --n-passes 1 \
   --max-runtime-minutes 240 \
   --max-experiment-runtime-hours 4 \
-  --environments-dir "${ENV_FILES_DIR}" \
+  --environments-dir "${CLONE_ENV_DIR}" \
   --run-name "${RUN_NAME}" \
   --experiment-dir "${EXPERIMENT_DIR}" \
   2>&1 | tee "/workspace/${RUN_NAME}.log"
