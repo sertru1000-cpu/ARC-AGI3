@@ -220,6 +220,21 @@ _ATLAS_MAX_ROLLOUTS = 120
 # "what happens if". So the theory nag and theory-force stay quiet for
 # this many python calls after any successful probe execution.
 _ATLAS_PROBE_THEORY_GRACE_CALLS = 4
+# atlas 28.08 (Gemini round 3): probe rationing -- probes are score-free
+# but consume LLM turns and wall-clock inside the game's fixed time
+# budget (measured live: probe-heavy runs halved real actions and scored
+# 0.39-0.44 vs 0.96-1.10 for checkpoint-only). After this many
+# consecutive probe-executing calls with no real action() in between, a
+# one-line "convert knowledge into moves" nudge is appended.
+_ATLAS_PROBE_RATION_FREE = 3
+# Cap on the per-level probe-findings memory injected into the prompt so
+# the model does not re-probe what it already learned.
+_ATLAS_PROBE_FINDINGS_MAX = 12
+# Auto-derived MOUSE candidate clicks for plan_real (centers of the
+# largest non-background segmentation objects) -- lets click games be
+# searched with zero model authorship. Small K: every candidate
+# multiplies the frontier.
+_ATLAS_MOUSE_AUTO_CANDIDATES = 6
 # atlas: a non-null 'note' in a printed/returned plan_with_theory() result --
 # res['note'] is only set when the found plan has more than one step, so this
 # is a best-effort stand-in for "the model got back a multi-step plan" when
@@ -373,6 +388,8 @@ from inference.utils.animation import (
     should_suggest_animation,
 )
 from inference.agent.python_tool_sandbox import run_sandboxed_python
+from inference.utils.grid_utils import ARC_COLOR_CHARS
+from inference.utils.segmentation import segment_layer
 from inference.agent.runtime_state import Frame, HistoryEntry, RUNTIME_STATE_FILENAME, load_runtime_state
 from inference.utils.openai_compat import build_chat_payload, build_headers
 
@@ -1551,6 +1568,12 @@ class ToolAgent:
         # not the in-code substring tracker) -- the theory nag/force stay
         # quiet for _ATLAS_PROBE_THEORY_GRACE_CALLS calls after it.
         self._atlas_last_probe_call_index = -99
+        # atlas 28.08: consecutive probe-executing python calls without a
+        # real action() in between (rationing nudge trigger), and the
+        # per-level compact memory of probe findings injected into the
+        # prompt so learned effects are not re-probed.
+        self._atlas_probes_since_real_action = 0
+        self._atlas_probe_findings: list[str] = []
         # atlas 26.08: context sanitizer (idea #3) -- independent of the
         # rollback/checkpoint feature above (works in ONLINE mode too, no
         # env-snapshot needed), so tracked with its own counters rather than
@@ -1641,6 +1664,8 @@ class ToolAgent:
             self._atlas_pending_auto_plan_real = False
             self._atlas_plan_real_auto_note = None
             self._atlas_last_probe_call_index = -99
+            self._atlas_probes_since_real_action = 0
+            self._atlas_probe_findings = []
             self._atlas_calls_since_sanitize = 0
             self._atlas_context_sanitize_level = 1
             self._atlas_context_sanitize_pending = False
@@ -2032,6 +2057,12 @@ class ToolAgent:
             (self._atlas_last_verified_accuracy is None or self._atlas_last_verified_accuracy < 0.6)
             and self._atlas_python_call_index >= _ATLAS_EXPLORE_NUDGE_AFTER_CALLS
             and (set(_normalize_valid_actions(valid_actions)) - self._atlas_action_kinds_resolved)
+            # atlas 28.08 (Gemini round 3): probing IS empirical
+            # exploration -- while the model is actively running
+            # simulations, nagging it to "explore first" is contradictory
+            # prompt noise (measured: 280-296 injections per probe run).
+            and (self._atlas_python_call_index - self._atlas_last_probe_call_index)
+            >= _ATLAS_PROBE_THEORY_GRACE_CALLS
         ):
             # atlas 27.08: checked BEFORE goal-reconsider/theory/extract --
             # exploring what the available controls DO is more foundational
@@ -2074,17 +2105,12 @@ class ToolAgent:
             mouse_only = not (
                 set(_normalize_valid_actions(valid_actions)) - {"MOUSE", "RESET"}
             )
-            if mouse_only:
-                if self._atlas_plan_real_force_streak > _ATLAS_PLAN_REAL_NAG_CAP:
-                    self._atlas_plan_real_auto_done_this_level = True
-                lines.append(
-                    ATLAS_PLAN_REAL_FORCE_CHECKPOINT.format(
-                        stalled=self._atlas_actions_since_level_progress,
-                        args_hint=ATLAS_PLAN_REAL_MOUSE_ARGS_HINT,
-                        escalation=ATLAS_PLAN_REAL_ESCALATION_MOUSE,
-                    )
-                )
-            elif self._atlas_plan_real_force_streak > _ATLAS_PLAN_REAL_AUTO_FORCE_AFTER:
+            # atlas 28.08 (Gemini round 3): with segmentation-derived MOUSE
+            # candidates the harness CAN now auto-run click games too --
+            # the MOUSE-only branch keeps its clicks-hint wording (the
+            # model's own candidates are better than object centers) but
+            # escalates to auto-run like everyone else.
+            if self._atlas_plan_real_force_streak > _ATLAS_PLAN_REAL_AUTO_FORCE_AFTER:
                 self._atlas_pending_auto_plan_real = True
                 self._atlas_plan_real_auto_done_this_level = True
                 lines.append(
@@ -2102,9 +2128,12 @@ class ToolAgent:
                 lines.append(
                     ATLAS_PLAN_REAL_FORCE_CHECKPOINT.format(
                         stalled=self._atlas_actions_since_level_progress,
-                        args_hint="",
-                        escalation=ATLAS_PLAN_REAL_ESCALATION_DEFAULT.format(
-                            streak=self._atlas_plan_real_force_streak
+                        args_hint=ATLAS_PLAN_REAL_MOUSE_ARGS_HINT if mouse_only else "",
+                        escalation=(
+                            ATLAS_PLAN_REAL_ESCALATION_MOUSE if mouse_only
+                            else ATLAS_PLAN_REAL_ESCALATION_DEFAULT.format(
+                                streak=self._atlas_plan_real_force_streak
+                            )
                         ),
                     )
                 )
@@ -2248,6 +2277,27 @@ class ToolAgent:
             )
             print(f"atlas: rollback lesson injected (action_num={action_num})", flush=True)
             self._atlas_rollback_lesson = None
+        # atlas 28.08 (Gemini round 3): persistent per-level probe memory --
+        # a probe's result must outlive the turn it ran in, or the model
+        # re-probes what it already knows (turn displacement tax).
+        if self._atlas_probe_findings:
+            lines.append(
+                "Probe memory (free simulations already run this level): "
+                + "; ".join(self._atlas_probe_findings[-_ATLAS_PROBE_FINDINGS_MAX:])
+            )
+        # atlas 28.08 (Gemini round 3): probe rationing -- knowledge only
+        # scores once converted into real moves.
+        if self._atlas_probes_since_real_action >= _ATLAS_PROBE_RATION_FREE:
+            lines.append(
+                f"[atlas] You have run {self._atlas_probes_since_real_action} probe calls in a row "
+                "without advancing the real game. Simulations are free in actions but not in time -- "
+                "execute your best option with action(...) now; probe knowledge only scores once "
+                "converted into real moves."
+            )
+            print(
+                f"atlas: probe ration nudge injected (probes_in_row={self._atlas_probes_since_real_action})",
+                flush=True,
+            )
         # atlas 27.08 (late): one-shot result of a harness-auto plan_real run.
         if self._atlas_plan_real_auto_note:
             lines.append(self._atlas_plan_real_auto_note)
@@ -2574,24 +2624,46 @@ class ToolAgent:
                     self._atlas_note_action_kind_tried(
                         next(iter(kinds)), baseline_level, bool(payload.get("board_changed"))
                     )
-            results.append(
-                {
-                    "sequence_index": index,
-                    "requested": payload.get("requested_actions") or [str(s) for s in seq],
-                    "executed_count": executed,
-                    "error": payload.get("error"),
-                    "board_changed": bool(payload.get("board_changed")),
-                    "cells_changed_vs_start": self._atlas_grid_diff_count(
-                        baseline_grid, frame_after.grid if frame_after is not None else ()
-                    ),
-                    "level_before": baseline_level,
-                    "level_after": frame_after.level if frame_after is not None else baseline_level,
-                    "level_completed": bool(payload.get("level_completed")),
-                    "game_over": bool(payload.get("game_over")),
-                    "run_complete": bool(payload.get("run_complete")),
-                    "stop_reason": payload.get("stop_reason"),
-                }
+            cells_changed = self._atlas_grid_diff_count(
+                baseline_grid, frame_after.grid if frame_after is not None else ()
             )
+            # Compact result (Gemini round 3): drop what the model already
+            # knows (its own requested sequence) and every falsy flag --
+            # probe output is prompt-context it pays for on every later turn.
+            entry: dict[str, Any] = {
+                "sequence_index": index,
+                "executed_count": executed,
+                "board_changed": bool(payload.get("board_changed")),
+                "cells_changed_vs_start": cells_changed,
+                "level_after": frame_after.level if frame_after is not None else baseline_level,
+                "level_completed": bool(payload.get("level_completed")),
+            }
+            if payload.get("error"):
+                entry["error"] = payload.get("error")
+            if payload.get("game_over"):
+                entry["game_over"] = True
+            if payload.get("run_complete"):
+                entry["run_complete"] = True
+            if payload.get("stop_reason"):
+                entry["stop_reason"] = payload.get("stop_reason")
+            results.append(entry)
+            # Persist a one-line finding for the prompt-side probe memory.
+            seq_label = ",".join(
+                str(sp.get("action") if isinstance(sp, dict) else sp)
+                + (f"({sp.get('row')},{sp.get('col')})" if isinstance(sp, dict) and "row" in sp else "")
+                for sp in list(seq)[:4]
+            )
+            if len(seq) > 4:
+                seq_label += f"..x{len(seq)}"
+            outcome_label = (
+                "WIN" if payload.get("run_complete")
+                else "LEVEL DONE" if payload.get("level_completed")
+                else "game_over" if payload.get("game_over")
+                else f"{cells_changed}c changed" if cells_changed else "no effect"
+            )
+            self._atlas_probe_findings.append(f"{seq_label}->{outcome_label}")
+            if len(self._atlas_probe_findings) > _ATLAS_PROBE_FINDINGS_MAX:
+                self._atlas_probe_findings = self._atlas_probe_findings[-_ATLAS_PROBE_FINDINGS_MAX:]
         note = (
             "speculative: the engine was rewound after each sequence -- none of the above is "
             "recorded in the real run. Replay the winner with action(...) to make it count."
@@ -2603,6 +2675,45 @@ class ToolAgent:
             flush=True,
         )
         return {"results": results, "note": note}
+
+    @staticmethod
+    def _atlas_default_mouse_candidates(grid: Any, k: int = _ATLAS_MOUSE_AUTO_CANDIDATES) -> list[dict[str, Any]]:
+        """Auto-derived candidate clicks for plan_real (Gemini round 3):
+        centers of the K largest non-background segmentation objects.
+        Background = any component covering >30% of the board, plus the
+        single largest component. Centroid = mean of the boundary corner
+        points (an approximation -- exact for rectangles, good enough for
+        a candidate click). Near-duplicate centers (within 2 cells) are
+        dropped. Zero model authorship needed; zero-effect candidates are
+        pruned naturally by the frontier's dedup."""
+        try:
+            rows = [list(r) for r in (grid or ())]
+            if not rows or not rows[0]:
+                return []
+            total = len(rows) * len(rows[0])
+            nodes = (segment_layer(rows, ARC_COLOR_CHARS) or {}).get("nodes") or []
+        except Exception:
+            return []
+        sized = [n for n in nodes if n.get("pixels")]
+        if not sized:
+            return []
+        largest = max(n["pixels"] for n in sized)
+        objects = [
+            n for n in sized
+            if n["pixels"] < 0.3 * total and n["pixels"] != largest and n.get("boundary")
+        ]
+        objects.sort(key=lambda n: -n["pixels"])
+        out: list[dict[str, Any]] = []
+        for n in objects:
+            pts = n["boundary"]
+            r = int(round(sum(p[0] for p in pts) / len(pts)))
+            c = int(round(sum(p[1] for p in pts) / len(pts)))
+            if any(abs(r - o["row"]) <= 2 and abs(c - o["col"]) <= 2 for o in out):
+                continue
+            out.append({"action": "MOUSE", "row": r, "col": c})
+            if len(out) >= k:
+                break
+        return out
 
     def _atlas_search_real_plan(
         self, request: dict[str, Any], state_path: Path, snapshot: dict[str, Any]
@@ -2624,22 +2735,31 @@ class ToolAgent:
             max_nodes = max(1, min(_ATLAS_SEARCH_MAX_NODES, int(request.get("max_nodes") or 120)))
         except (TypeError, ValueError):
             max_nodes = 120
+        baseline_frame, _ = load_runtime_state(state_path)
         candidates = request.get("candidates")
+        auto_mouse = 0
         if not candidates:
             candidates = [
                 {"action": kind}
                 for kind in self._current_valid_actions
                 if kind not in ("MOUSE", "RESET")
             ]
+            if "MOUSE" in self._current_valid_actions:
+                mouse_candidates = self._atlas_default_mouse_candidates(
+                    baseline_frame.grid if baseline_frame is not None else ()
+                )
+                auto_mouse = len(mouse_candidates)
+                candidates.extend(mouse_candidates)
         if not candidates:
             return {
                 "plan": None,
                 "reason": (
-                    "no candidate actions -- this is probably a MOUSE-only game; pass explicit "
-                    "click specs via plan_real(actions=[{'action': 'MOUSE', 'row': r, 'col': c}, ...])."
+                    "no candidate actions -- segmentation found no clickable objects either; pass "
+                    "explicit click specs via plan_real(actions=[{'action': 'MOUSE', 'row': r, 'col': c}, ...])."
                 ),
             }
-        baseline_frame, _ = load_runtime_state(state_path)
+        if auto_mouse:
+            print(f"atlas: plan_real auto-derived {auto_mouse} MOUSE candidate(s) from segmentation", flush=True)
         baseline_grid = baseline_frame.grid if baseline_frame is not None else ()
         visited = {board_signature(baseline_grid)}
         deadline = time.monotonic() + _ATLAS_SEARCH_WALL_SECONDS
@@ -2777,8 +2897,9 @@ class ToolAgent:
         if not plan:
             return (
                 "[atlas] You ignored the plan_real() directive, so the harness ran the search itself: "
-                f"NO level-completing sequence exists within depth 6 from here over the non-MOUSE "
-                f"actions (reason={result.get('reason')}, nodes={result.get('nodes_explored')}, "
+                f"NO level-completing sequence was found within depth 6 from here over the default "
+                f"move set (non-MOUSE actions plus auto-derived object-center clicks) "
+                f"(reason={result.get('reason')}, nodes={result.get('nodes_explored')}, "
                 f"unique_states={result.get('unique_states_reached')}). That is real information: this "
                 "level needs MOUSE targets, a longer sequence, or a different read of the goal -- "
                 "stop repeating single-action probes that cannot work."
@@ -2879,6 +3000,7 @@ class ToolAgent:
             self._atlas_plan_real_force_streak = 0
             self._atlas_plan_real_auto_done_this_level = False
             self._atlas_pending_auto_plan_real = False
+            self._atlas_probe_findings = []
             return
         self._atlas_actions_since_level_progress += 1
         if board_sig_after is not None:
@@ -3371,6 +3493,7 @@ class ToolAgent:
                     # in the in-code substring tracker) so a failed/
                     # unavailable call never earns the grace.
                     self._atlas_last_probe_call_index = self._atlas_python_call_index
+                    self._atlas_probes_since_real_action += 1
                 probe_payload["state"] = _serialized_runtime_state(
                     next_valid_actions=list(self._current_valid_actions)
                 )
@@ -3455,6 +3578,7 @@ class ToolAgent:
         self._atlas_python_call_index += 1
         if action_results:
             self._atlas_calls_since_real_action = 0
+            self._atlas_probes_since_real_action = 0
         else:
             self._atlas_calls_since_real_action += 1
         if "plan_with_theory(" in code:

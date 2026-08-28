@@ -277,10 +277,11 @@ ATLAS_PLAN_REAL_ESCALATION_DEFAULT = (
     "the harness will run the search itself with default settings."
 )
 ATLAS_PLAN_REAL_ESCALATION_MOUSE = (
-    "This is a MOUSE game, so only you can pick the candidate clicks -- the "
-    "harness cannot run this search for you. Pass a SHORT list (3-8) of the "
-    "most promising clicks, e.g. centers of interactive-looking objects "
-    "from segmentation."
+    "This is a MOUSE game: pass a SHORT list (3-8) of the most promising "
+    "clicks -- your read of the board beats any heuristic. If you ignore "
+    "this, the harness will run the search itself with auto-derived clicks "
+    "(centers of the largest segmentation objects), which are blunter than "
+    "yours."
 )
 ATLAS_PLAN_REAL_MOUSE_ARGS_HINT = (
     "actions=[{'action': 'MOUSE', 'row': r, 'col': c}, ...], max_depth=3"

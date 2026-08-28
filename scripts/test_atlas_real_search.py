@@ -307,6 +307,129 @@ def main() -> None:
     _ok(f"a real probe opens a {_ATLAS_PROBE_THEORY_GRACE_CALLS}-call grace window for theory nags, "
         "after which they resume")
 
+    # 8. Gemini round 3 -- compact probe results + prompt-side probe memory.
+    #    try_actions results drop what the model already knows (its own
+    #    requested sequence) and every falsy flag; each sequence leaves a
+    #    one-line finding that is injected into the NEXT prompt so learned
+    #    dynamics persist across turns instead of being re-probed. Findings
+    #    are per-level: completing the level clears them.
+    mem_state_path = tmp_dir / "probe_memory_state.json"
+    mem_env = WalkEnv(mem_state_path, goal=3)
+    mem_agent = _make_agent(mem_state_path, mem_env)
+    dispatch = mem_agent._run_python_tool(
+        mem_state_path, {"code": "result = try_actions([['UP'], ['DOWN']])\n"}
+    )
+    payload = json.loads(dispatch.content)
+    results = (payload.get("result") or {}).get("results") or []
+    if len(results) != 2:
+        _fail("compact scenario setup: two probe results", str(payload))
+    for entry in results:
+        for banned in ("requested", "requested_actions", "level_before"):
+            if banned in entry:
+                _fail(f"compact results drop '{banned}'", str(entry))
+        if "game_over" in entry or "run_complete" in entry:
+            _fail("falsy flags are omitted from compact results", str(entry))
+    for needed in ("sequence_index", "executed_count", "board_changed",
+                   "cells_changed_vs_start", "level_after", "level_completed"):
+        if needed not in results[0]:
+            _fail(f"compact results still carry '{needed}'", str(results[0]))
+    prompt = mem_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+    if "Probe memory (free simulations already run this level):" not in prompt:
+        _fail("probe findings are injected into the prompt", prompt[-600:])
+    if "UP->1c changed" not in prompt or "DOWN->no effect" not in prompt:
+        _fail("findings carry the sequence and its outcome", prompt[-600:])
+    mem_agent._run_python_tool(mem_state_path, {"code": "action(['UP', 'UP', 'UP'])\n"})
+    if mem_env.level != 2:
+        _fail("memory scenario setup: level completes for real", f"level={mem_env.level}")
+    if mem_agent._atlas_probe_findings:
+        _fail("level-up clears the probe memory (per-level findings)",
+              str(mem_agent._atlas_probe_findings))
+    _ok("compact try_actions results (no requested echo, falsy flags omitted) + probe memory "
+        "injected into the prompt and cleared on level-up")
+
+    # 9. Gemini round 3 -- probe rationing: probes are free in actions but
+    #    not in turns/time. 3 consecutive probe calls without a real action
+    #    earn a "convert knowledge into moves" nudge; one real action()
+    #    resets the counter and removes the nudge.
+    ration_state_path = tmp_dir / "probe_ration_state.json"
+    ration_env = WalkEnv(ration_state_path, goal=8)
+    ration_agent = _make_agent(ration_state_path, ration_env)
+    for i in range(3):
+        prompt = ration_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+        if "probe calls in a row" in prompt:
+            _fail(f"no ration nudge before the 3rd consecutive probe (after {i})", prompt[-400:])
+        ration_agent._run_python_tool(ration_state_path, {"code": "result = try_actions([['UP', 'DOWN']])\n"})
+        ration_agent._atlas_calls_since_real_action = 0
+    if ration_agent._atlas_probes_since_real_action != 3:
+        _fail("3 probes counted", str(ration_agent._atlas_probes_since_real_action))
+    prompt = ration_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+    if "You have run 3 probe calls in a row" not in prompt:
+        _fail("ration nudge fires at 3 consecutive probes", prompt[-600:])
+    ration_agent._run_python_tool(ration_state_path, {"code": "action('UP')\n"})
+    if ration_agent._atlas_probes_since_real_action != 0:
+        _fail("a real action resets the probe streak", str(ration_agent._atlas_probes_since_real_action))
+    prompt = ration_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+    if "probe calls in a row" in prompt:
+        _fail("nudge gone after a real action", prompt[-400:])
+    _ok("probe ration nudge fires on the 3rd consecutive probe call and one real action resets it")
+
+    # 10. Gemini round 3 -- probing IS exploration: an executed probe
+    #     silences the explore-first checkpoint for the same 4-call grace
+    #     window (measured live: 280-296 explore-first injections per probe
+    #     run under the old crediting-only rule). A MIXED probe is used so
+    #     no kind gets resolved -- the silencing must come from the grace
+    #     alone, not from crediting.
+    ex_state_path = tmp_dir / "explore_grace_state.json"
+    ex_env = WalkEnv(ex_state_path, goal=8)
+    ex_agent = _make_agent(ex_state_path, ex_env)
+    for _ in range(2):
+        ex_agent._run_python_tool(ex_state_path, {"code": "result = 1\n"})
+        ex_agent._atlas_calls_since_real_action = 0
+    prompt = ex_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+    if "still untested" not in prompt:
+        _fail("scenario setup: explore-first fires with unresolved kinds and no probes", prompt[-600:])
+    ex_agent._run_python_tool(ex_state_path, {"code": "result = try_actions([['UP', 'DOWN']])\n"})
+    ex_agent._atlas_calls_since_real_action = 0
+    if ex_agent._atlas_action_kinds_resolved:
+        _fail("scenario setup: the mixed probe must credit nothing", str(ex_agent._atlas_action_kinds_resolved))
+    prompt = ex_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+    if "still untested" in prompt:
+        _fail("ANY executed probe silences explore-first during the grace window", prompt[-600:])
+    for _ in range(_ATLAS_PROBE_THEORY_GRACE_CALLS):
+        ex_agent._run_python_tool(ex_state_path, {"code": "result = 1\n"})
+        ex_agent._atlas_calls_since_real_action = 0
+    prompt = ex_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+    if "still untested" not in prompt:
+        _fail("explore-first resumes once the probe grace elapses", prompt[-600:])
+    _ok(f"an executed probe silences explore-first for the {_ATLAS_PROBE_THEORY_GRACE_CALLS}-call "
+        "grace window, after which it resumes")
+
+    # 11. Gemini round 3 -- MOUSE candidate auto-derivation: centers of the
+    #     largest non-background segmentation objects, so click games get
+    #     searched with zero model authorship. Background (the >30% field
+    #     and the single largest component) is excluded.
+    grid = [[0] * 20 for _ in range(20)]
+    for r in range(2, 6):
+        for c in range(2, 6):
+            grid[r][c] = 3  # 4x4 object, 16 px
+    for r in range(10, 13):
+        for c in range(14, 17):
+            grid[r][c] = 2  # 3x3 object, 9 px
+    cands = ToolAgent._atlas_default_mouse_candidates(tuple(tuple(r) for r in grid))
+    if len(cands) != 2:
+        _fail("two non-background objects -> two candidates", str(cands))
+    if any(c["action"] != "MOUSE" for c in cands):
+        _fail("candidates are MOUSE click specs", str(cands))
+    big, small = cands[0], cands[1]
+    if abs(big["row"] - 4) > 1 or abs(big["col"] - 4) > 1:
+        _fail("largest object first, centroid near (4,4)", str(cands))
+    if abs(small["row"] - 11) > 1 or abs(small["col"] - 15) > 1:
+        _fail("second candidate centroid near (11,15)", str(cands))
+    if ToolAgent._atlas_default_mouse_candidates(((0,),)) != []:
+        _fail("a featureless board yields no candidates", "non-empty")
+    _ok("MOUSE auto-candidates: centroids of the two objects (largest first), background excluded, "
+        "featureless board -> none")
+
     print("\nAll atlas real-search (try_actions/plan_real) checks passed.")
 
 

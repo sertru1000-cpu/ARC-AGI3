@@ -216,26 +216,33 @@ def main() -> None:
     _ok("ignored showings -> harness runs the search itself, executes the found plan "
         f"(level {level_before} -> {env2.level}), and reports it once")
 
-    # 4. MOUSE-only game: clicks-variant text, no auto-run ever, nag caps.
+    # 4. MOUSE-only game (28.08 unified semantics): clicks-variant text on
+    #    the showings, and -- now that the harness can auto-derive click
+    #    candidates from segmentation -- the SAME auto-run escalation as
+    #    every other game after the ignored-showings threshold.
     env3_path = tmp_dir / "run3_state.json"
     env3 = WalkEnv(env3_path, goal=9)
     agent3 = _make_agent(env3_path, env3, valid=["MOUSE"])
     agent3._atlas_actions_since_level_progress = _ATLAS_PLAN_REAL_STALL_AFTER_ACTIONS
     agent3._atlas_checkpoint_available = True
     shown = 0
-    for _ in range(_ATLAS_PLAN_REAL_NAG_CAP + 3):
+    for _ in range(_ATLAS_PLAN_REAL_AUTO_FORCE_AFTER):
         prompt = agent3._build_user_prompt(0, valid_actions=["MOUSE"])
-        if "MUST call plan_real(" in prompt:
-            shown += 1
-            if "'action': 'MOUSE', 'row': r, 'col': c" not in prompt:
-                _fail("MOUSE variant asks for candidate clicks", prompt[-500:])
-            if "the harness will run the search itself" in prompt:
-                _fail("MOUSE variant never promises an auto-run", prompt[-500:])
-    if agent3._atlas_pending_auto_plan_real:
-        _fail("MOUSE-only game never schedules an auto-run", "pending flag set")
-    if shown != _ATLAS_PLAN_REAL_NAG_CAP + 1:
-        _fail(f"MOUSE nag caps at {_ATLAS_PLAN_REAL_NAG_CAP + 1} showings", f"shown={shown}")
-    _ok(f"MOUSE-only game: clicks-variant wording, no auto-run, nag stops after {shown} showings")
+        if "MUST call plan_real(" not in prompt:
+            _fail("MOUSE variant shows the force checkpoint", prompt[-500:])
+        shown += 1
+        if "'action': 'MOUSE', 'row': r, 'col': c" not in prompt:
+            _fail("MOUSE variant asks for candidate clicks", prompt[-500:])
+        if "auto-derived clicks" not in prompt:
+            _fail("MOUSE variant warns about the auto-derived-clicks fallback", prompt[-500:])
+    prompt = agent3._build_user_prompt(0, valid_actions=["MOUSE"])
+    if not agent3._atlas_pending_auto_plan_real:
+        _fail(
+            "MOUSE-only game NOW schedules an auto-run after ignored showings (28.08 unification)",
+            f"streak={agent3._atlas_plan_real_force_streak}",
+        )
+    _ok(f"MOUSE-only game: clicks-variant wording with auto-derived fallback warning on {shown} "
+        "showings, then the same auto-run escalation as any other game")
 
     # 5. Level-up resets the whole runway (usage flag, streak, auto-done).
     agent2._atlas_plan_real_used_this_level = True
