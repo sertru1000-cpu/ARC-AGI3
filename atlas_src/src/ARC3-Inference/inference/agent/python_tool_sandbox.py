@@ -503,10 +503,11 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             plan_real(actions=[{'action': 'MOUSE', 'row': r, 'col': c},
             ...], max_depth=4) with a SHORT list of promising clicks (each
             extra candidate multiplies the search). Returns {'plan': [...]
-            or None, 'reason': ..., 'found_by': 'frontier'|'rollout'}; on
-            success execute with action(res['plan']) -- the plan was
-            verified on the real engine, then rewound, so replaying it is
-            deterministic. Budgeted (~10s); "state_space_exhausted" means
+            or None, 'reason': ..., 'found_by': 'frontier'|'rollout'}; a
+            found plan is engine-verified and the harness EXECUTES it
+            immediately on your behalf (res['note'] reports the outcome --
+            do NOT replay it; analyze the executed sequence to learn the
+            mechanics). Budgeted (~10s); "state_space_exhausted" means
             everything reachable within max_depth was genuinely tried
             (rollout misses, by contrast, prove nothing). Costs zero
             recorded actions either way.'''
@@ -529,6 +530,10 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
                 "nodes_explored": reply.get("nodes_explored"),
                 "unique_states_reached": reply.get("unique_states_reached"),
                 "rollouts": reply.get("rollouts"),
+                # 28.08 (Gemini round 5): a found plan is executed by the
+                # HARNESS immediately -- these two report that execution.
+                "executed_by_harness": reply.get("executed_by_harness"),
+                "execution_outcome": reply.get("execution_outcome"),
                 "note": reply.get("note"),
             }
 

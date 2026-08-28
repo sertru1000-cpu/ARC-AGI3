@@ -265,7 +265,14 @@ export LOCAL_ANALYZER_MODEL_ID="${SERVED_MODEL_NAME}"
 export INFERENCE_ANALYZER_MODEL="${SERVED_MODEL_NAME}"
 export LOCAL_ANALYZER_APP_NAME="ARC3 Agent Harness"
 export LOCAL_ANALYZER_CONTEXT_WINDOW=32768
-export LOCAL_ANALYZER_MAX_OUTPUT=8000
+# Gemini round 5 (L3): cap generation so one thinking-heavy turn cannot
+# monopolize the shared server for minutes (observed: turns of 10+ min).
+export LOCAL_ANALYZER_MAX_OUTPUT=4000
+# Gemini round 5 (L3): at 55 concurrent games, gate concurrent LLM HTTP
+# requests at 25 -- 55 simultaneous requests thrash the KV cache into
+# eviction/recompute spirals (observed: 5 of 25 games starved to 1 action
+# in 105 min even at concurrency 25). Python-side queueing is cheap.
+export ATLAS_LLM_MAX_CONCURRENT_REQUESTS=25
 export LOCAL_ANALYZER_TIMEOUT=480
 export ANALYZER_TIMEOUT=480
 export LOCAL_ANALYZER_TEMPERATURE=0.6

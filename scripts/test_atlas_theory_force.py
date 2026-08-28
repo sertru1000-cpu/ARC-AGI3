@@ -33,6 +33,12 @@ real sandboxed subprocess, same pattern as test_atlas_plan_nudge.py.
 
 from __future__ import annotations
 
+import os
+
+# The 28.08 proactive level-entry plan_real would auto-solve the scripted
+# mini-games before the scenarios under test even run -- disable it for
+# this suite (dedicated proactive scenarios re-enable it via monkeypatch).
+os.environ["ATLAS_PLAN_REAL_PROACTIVE"] = "0"
 import sys
 import tempfile
 from pathlib import Path

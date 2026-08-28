@@ -25,6 +25,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+
+# The 28.08 proactive level-entry plan_real would auto-solve the scripted
+# mini-games before the scenarios under test even run -- disable it for
+# this suite (dedicated proactive scenarios re-enable it via monkeypatch).
+os.environ["ATLAS_PLAN_REAL_PROACTIVE"] = "0"
 import sys
 import tempfile
 from pathlib import Path

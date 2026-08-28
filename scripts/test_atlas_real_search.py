@@ -25,6 +25,12 @@ graceful ONLINE-mode unavailability.
 from __future__ import annotations
 
 import json
+import os
+
+# The 28.08 proactive level-entry plan_real would auto-solve the scripted
+# mini-games before the scenarios under test even run -- disable it for
+# this suite (dedicated proactive scenarios re-enable it via monkeypatch).
+os.environ["ATLAS_PLAN_REAL_PROACTIVE"] = "0"
 import sys
 import tempfile
 from pathlib import Path
@@ -180,8 +186,9 @@ def main() -> None:
         _fail("runtime state file restored after try_actions", str(frame.grid))
     _ok("try_actions judges each sequence from the same start and rewinds the real game to exactly where it was")
 
-    # 2. plan_real: BFS with default candidates finds the exact shortest
-    #    plan, pruning the ACTION7 trap and deduping the DOWN no-op.
+    # 2+3 (merged 28.08, Gemini round 5): plan_real finds the exact shortest
+    #    plan AND the harness executes it immediately on the model's behalf
+    #    -- zero extra model turns between reasoning and score.
     dispatch = agent._run_python_tool(state_path, {"code": "result = plan_real(max_depth=5)\n"})
     payload = json.loads(dispatch.content)
     if payload.get("error"):
@@ -192,15 +199,14 @@ def main() -> None:
         _fail("plan_real finds the exact shortest plan", str(result))
     if result.get("reason") != "level_completed":
         _fail("plan_real reports why it stopped", str(result))
-    if env.pos != 0 or env.level != 1 or env.game_over:
-        _fail("real game untouched after plan_real", f"pos={env.pos} level={env.level} go={env.game_over}")
-    _ok("plan_real BFS finds the exact shortest level-completing plan on the real engine, then rewinds")
-
-    # 3. The found plan replays for real -- and the game actually advances.
-    agent._run_python_tool(state_path, {"code": "action(['UP', 'UP', 'UP'])\n"})
+    if not result.get("executed_by_harness"):
+        _fail("the harness executes the found plan itself", str(result))
+    if "[Harness Auto-Action]" not in str(result.get("note")) or "deduce the game's mechanics" not in str(result.get("note")):
+        _fail("the auto-action note explains what happened and teaches the mechanics", str(result.get("note")))
     if env.level != 2 or env.pos != 3:
-        _fail("replaying the found plan for real advances the game", f"pos={env.pos} level={env.level}")
-    _ok("replaying the found plan with action(...) advances the REAL game -- speculation converted to score")
+        _fail("the REAL game advanced to level 2 via the auto-executed plan", f"pos={env.pos} level={env.level}")
+    _ok("plan_real finds the exact shortest plan and the harness EXECUTES it immediately -- "
+        "real game at level 2, zero model turns spent")
 
     # 4. Honest exhaustion: an unreachable goal within max_depth reports
     #    state_space_exhausted (every reachable state genuinely tried),
@@ -240,9 +246,10 @@ def main() -> None:
         _fail("deep goal found by the rollout phase", str(result))
     if len(plan) != 9 or {str(s.get("action")).upper() for s in plan} != {"UP"}:
         _fail("rollout plan is exactly the 9 UPs that complete the level", str(result))
-    if deep_env.pos != 0 or deep_env.level != 1:
-        _fail("real game untouched after a rollout-found plan", f"pos={deep_env.pos} level={deep_env.level}")
-    _ok("Monte-Carlo rollout finds the depth-9 solution the depth-3 frontier cannot, and rewinds cleanly")
+    if deep_env.pos != 9 or deep_env.level != 2:
+        _fail("the rollout-found plan is auto-executed too (28.08)", f"pos={deep_env.pos} level={deep_env.level}")
+    _ok("Monte-Carlo rollout finds the depth-9 solution the depth-3 frontier cannot, and the "
+        "harness executes it (level 2 reached)")
 
     # 5. ONLINE mode (no snapshot/restore wired): graceful unavailability,
     #    same contract as save_checkpoint/rollback.
@@ -452,6 +459,38 @@ def main() -> None:
         _fail("a featureless board yields no candidates", "non-empty")
     _ok("MOUSE auto-candidates: centroids of the two objects (largest first), background excluded, "
         "featureless board -> none")
+
+    # 12. Gemini round 5, L1 -- PROACTIVE plan_real on level entry: with the
+    #     flag on, the very first python call of a fresh game runs the
+    #     search harness-side, executes the found plan (level 1 solved with
+    #     ZERO model turns), injects the autopilot note, and seeds the NEXT
+    #     level's search; a proactive miss on the new level stays silent.
+    import inference.agent.tool_agent as ta_module
+    ta_module._ATLAS_PLAN_REAL_PROACTIVE = True
+    try:
+        pro_state_path = tmp_dir / "proactive_state.json"
+        pro_env = WalkEnv(pro_state_path, goal=2)
+        pro_agent = _make_agent(pro_state_path, pro_env)
+        pro_agent._run_python_tool(pro_state_path, {"code": "result = 1\n"})
+        if pro_env.level != 2 or pro_env.pos != 2:
+            _fail("proactive search auto-solves level 1 on the first python call",
+                  f"pos={pro_env.pos} level={pro_env.level}")
+        prompt = pro_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+        if "[atlas autopilot]" not in prompt or "deduce the game's mechanics" not in prompt:
+            _fail("autopilot note lands in the next prompt with the mechanics hand-off", prompt[-600:])
+        if not pro_agent._atlas_pending_auto_plan_real:
+            _fail("the level-up seeds the NEXT level's proactive search", "pending flag not set")
+        pro_env.goal = -1  # make the new level genuinely unsolvable for the search
+        pro_agent._run_python_tool(pro_state_path, {"code": "result = 2\n"})
+        prompt = pro_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
+        if "[atlas autopilot]" in prompt:
+            _fail("a proactive MISS on the unreachable level 2 stays silent", prompt[-600:])
+        if pro_env.game_over:
+            _fail("proactive search never leaves the real game dead", "game_over")
+    finally:
+        ta_module._ATLAS_PLAN_REAL_PROACTIVE = False
+    _ok("proactive plan_real: level 1 auto-solved on the first call with zero model turns, "
+        "autopilot note injected, next level seeded, miss stays silent")
 
     print("\nAll atlas real-search (try_actions/plan_real) checks passed.")
 

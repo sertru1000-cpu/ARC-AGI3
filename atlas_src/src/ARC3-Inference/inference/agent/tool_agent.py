@@ -8,6 +8,7 @@ import logging
 import os
 import random
 import re
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -227,6 +228,19 @@ _ATLAS_PROBE_THEORY_GRACE_CALLS = 4
 # consecutive probe-executing calls with no real action() in between, a
 # one-line "convert knowledge into moves" nudge is appended.
 _ATLAS_PROBE_RATION_FREE = 3
+# atlas 28.08 (Gemini round 5, L1): proactive plan_real -- at every level
+# entry (incl. game start) the harness runs the now-fast search ITSELF,
+# before the model spends any turns, and executes a found plan. Zero model
+# turns per auto-solved level; a miss costs ~10s wall and stays silent.
+_ATLAS_PLAN_REAL_PROACTIVE = os.environ.get("ATLAS_PLAN_REAL_PROACTIVE", "1") != "0"
+# atlas 28.08 (Gemini round 5, L3): cap CONCURRENT LLM HTTP requests
+# below the game concurrency -- 55 simultaneous vLLM requests thrash the
+# KV cache into eviction/recompute spirals and starve every game (observed
+# live: 5 of 25 games executed ONE action in 105 min). 0 = no gate.
+_ATLAS_LLM_MAX_CONCURRENT = int(os.environ.get("ATLAS_LLM_MAX_CONCURRENT_REQUESTS", "0") or "0")
+_ATLAS_LLM_REQUEST_GATE = (
+    threading.Semaphore(_ATLAS_LLM_MAX_CONCURRENT) if _ATLAS_LLM_MAX_CONCURRENT > 0 else None
+)
 # Cap on the per-level probe-findings memory injected into the prompt so
 # the model does not re-probe what it already learned.
 _ATLAS_PROBE_FINDINGS_MAX = 12
@@ -1561,6 +1575,7 @@ class ToolAgent:
         self._atlas_plan_real_force_streak = 0
         self._atlas_plan_real_auto_done_this_level = False
         self._atlas_pending_auto_plan_real = False
+        self._atlas_pending_auto_plan_real_proactive = False
         self._atlas_plan_real_auto_note: str | None = None
         # atlas 27.08 (probe/checkpoint integration): python-call index of
         # the last SUCCESSFULLY EXECUTED probe (try_actions/plan_real that
@@ -1662,6 +1677,7 @@ class ToolAgent:
             self._atlas_plan_real_force_streak = 0
             self._atlas_plan_real_auto_done_this_level = False
             self._atlas_pending_auto_plan_real = False
+            self._atlas_pending_auto_plan_real_proactive = False
             self._atlas_plan_real_auto_note = None
             self._atlas_last_probe_call_index = -99
             self._atlas_probes_since_real_action = 0
@@ -1691,6 +1707,12 @@ class ToolAgent:
                     self._atlas_checkpoint_available = True
                     self._atlas_last_checkpoint_id = checkpoint_id
                     print("atlas: auto-anchor created (sys_start)", flush=True)
+                    # atlas 28.08 (Gemini round 5, L1): proactive search at
+                    # game start -- fires on the first python call, before
+                    # the model has spent any turns on level 1.
+                    if _ATLAS_PLAN_REAL_PROACTIVE and self._step_env_callback is not None:
+                        self._atlas_pending_auto_plan_real = True
+                        self._atlas_pending_auto_plan_real_proactive = True
 
     @property
     def total_tokens(self) -> int:
@@ -2383,7 +2405,11 @@ class ToolAgent:
                 timeout=request_timeout_seconds if request_timeout_seconds is not None else self._timeout,
             )
 
-        response = post_chat(payload)
+        if _ATLAS_LLM_REQUEST_GATE is not None:
+            with _ATLAS_LLM_REQUEST_GATE:
+                response = post_chat(payload)
+        else:
+            response = post_chat(payload)
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
@@ -2811,8 +2837,8 @@ class ToolAgent:
                 "nodes_explored": nodes,
                 "rollouts": rollouts,
                 "note": (
-                    "found on the REAL engine, then rewound -- execute it with "
-                    "action(res['plan']) to make it count."
+                    "found on the REAL engine, then rewound -- the harness executes it "
+                    "immediately (see the final note for the outcome)."
                 ),
             }
 
@@ -2909,17 +2935,24 @@ class ToolAgent:
             ),
         }
 
-    def _atlas_auto_plan_real(self, state_path: Path) -> str:
-        """Second layer of the plan_real principle-force: the harness runs
-        the search itself with default settings. A found plan is EXECUTED
+    def _atlas_auto_plan_real(self, state_path: Path, proactive: bool = False) -> str:
+        """Harness-run plan_real. Two callers: the principle-force second
+        layer (after ignored directives) and -- since 28.08, Gemini round 5
+        L1 -- the PROACTIVE level-entry search that fires before the model
+        spends any turns on a new level. A found plan is EXECUTED
         immediately (it is engine-verified and completes a level -- there is
         no scenario where the model is better served by being handed the
         plan and asked to copy it). Returns the one-shot note for the next
-        prompt. Never raises: any failure degrades to an honest note."""
+        prompt; a proactive MISS returns "" (silent -- the model just plays
+        normally, no noise). Never raises: any failure degrades honestly."""
         if self._step_env_callback is None or self._checkpoint_env_callback is None:
+            if proactive:
+                return ""
             return "[atlas] the harness tried to run plan_real() itself but the session no longer supports it."
         snapshot = self._checkpoint_env_callback()
         if snapshot is None:
+            if proactive:
+                return ""
             return "[atlas] the harness tried to run plan_real() itself but no engine snapshot is available."
         try:
             result = self._atlas_search_real_plan({"max_depth": 6, "max_nodes": 250}, state_path, snapshot)
@@ -2929,6 +2962,13 @@ class ToolAgent:
             self._restore_env_callback(snapshot)
         plan = result.get("plan")
         if not plan:
+            if proactive:
+                print(
+                    f"atlas: proactive plan_real found no plan on level entry "
+                    f"(reason={result.get('reason')}, nodes={result.get('nodes_explored')})",
+                    flush=True,
+                )
+                return ""
             return (
                 "[atlas] You ignored the plan_real() directive, so the harness ran the search itself: "
                 f"NO level-completing sequence was found within depth 6 from here over the default "
@@ -2940,6 +2980,13 @@ class ToolAgent:
             )
         payload = self._step_env_callback({"actions": list(plan)}) or {}
         executed = int(payload.get("executed_count") or 0)
+        # Run the same level-up bookkeeping a real action would (anchor for
+        # the new level, per-level resets, proactive re-seeding for the
+        # NEXT level -- auto-solved levels chain).
+        try:
+            self._atlas_note_action_progress(payload, None)
+        except Exception:
+            pass
         outcome = (
             "the level is COMPLETE" if payload.get("level_completed")
             else "the game is WON" if payload.get("run_complete")
@@ -2950,14 +2997,20 @@ class ToolAgent:
             for s in plan
         )
         print(
-            f"atlas: harness auto-ran plan_real and executed the plan ({executed}/{len(plan)} step(s), "
-            f"outcome={outcome})",
+            f"atlas: harness {'proactively ' if proactive else ''}auto-ran plan_real and executed the plan "
+            f"({executed}/{len(plan)} step(s), outcome={outcome})",
             flush=True,
         )
+        prefix = (
+            "[atlas autopilot] On entering this level the harness ran plan_real() itself, "
+            if proactive
+            else "[atlas] You ignored the plan_real() directive, so the harness ran the search itself, "
+        )
         return (
-            "[atlas] You ignored the plan_real() directive, so the harness ran the search itself, "
-            f"found a verified sequence [{plan_display}] and EXECUTED it: {outcome}. Re-ground on "
-            "the newest frame before acting further."
+            prefix
+            + f"found a verified sequence [{plan_display}] and EXECUTED it: {outcome}. Analyze that "
+            "successful sequence to deduce the game's mechanics -- you will need them on the next "
+            "level. Re-ground on the newest frame before acting further."
         )
 
     def _atlas_note_action_kind_tried(self, action_sig: str, level: int, board_changed: bool) -> None:
@@ -3034,7 +3087,19 @@ class ToolAgent:
             self._atlas_plan_real_force_streak = 0
             self._atlas_plan_real_auto_done_this_level = False
             self._atlas_pending_auto_plan_real = False
+            self._atlas_pending_auto_plan_real_proactive = False
             self._atlas_probe_findings = []
+            # atlas 28.08 (Gemini round 5, L1): proactive search on level
+            # entry -- the harness searches the NEW level before the model
+            # spends turns on it. Chains naturally: an auto-solved level
+            # lands here again and seeds the next level's search.
+            if (
+                _ATLAS_PLAN_REAL_PROACTIVE
+                and self._atlas_checkpoint_available
+                and self._step_env_callback is not None
+            ):
+                self._atlas_pending_auto_plan_real = True
+                self._atlas_pending_auto_plan_real_proactive = True
             return
         self._atlas_actions_since_level_progress += 1
         if board_sig_after is not None:
@@ -3216,7 +3281,11 @@ class ToolAgent:
         # note lands in the next prompt.
         if self._atlas_pending_auto_plan_real:
             self._atlas_pending_auto_plan_real = False
-            self._atlas_plan_real_auto_note = self._atlas_auto_plan_real(state_path)
+            was_proactive = self._atlas_pending_auto_plan_real_proactive
+            self._atlas_pending_auto_plan_real_proactive = False
+            auto_note = self._atlas_auto_plan_real(state_path, proactive=was_proactive)
+            if auto_note:
+                self._atlas_plan_real_auto_note = auto_note
         code = str(arguments.get("code", "")).rstrip()
         if not code:
             return _ToolDispatchResult(json.dumps({"error": "python requires a non-empty `code` string."}, indent=2))
@@ -3554,6 +3623,49 @@ class ToolAgent:
                     # unavailable call never earns the grace.
                     self._atlas_last_probe_call_index = self._atlas_python_call_index
                     self._atlas_probes_since_real_action += 1
+                if (
+                    action == "plan_real"
+                    and not probe_payload.get("error")
+                    and isinstance(probe_payload.get("plan"), list)
+                    and probe_payload.get("plan")
+                ):
+                    # atlas 28.08 (Gemini round 5, the missing lever): a
+                    # found plan is engine-VERIFIED to complete the level.
+                    # Handing it back and hoping the model retypes it as
+                    # action([...]) next turn costs a turn and risks a typo
+                    # -- the harness executes it on the spot instead. Zero
+                    # extra model turns between reasoning and score.
+                    plan_steps = list(probe_payload["plan"])
+                    exec_payload = self._step_env_callback({"actions": plan_steps}) or {}
+                    exec_count = int(exec_payload.get("executed_count") or 0)
+                    try:
+                        self._atlas_note_action_progress(exec_payload, None)
+                    except Exception:
+                        pass
+                    exec_outcome = (
+                        "the level is COMPLETE" if exec_payload.get("level_completed")
+                        else "the game is WON" if exec_payload.get("run_complete")
+                        else f"execution stopped early (stop_reason={exec_payload.get('stop_reason')})"
+                    )
+                    probe_payload["executed_by_harness"] = True
+                    probe_payload["execution_outcome"] = exec_outcome
+                    probe_payload["note"] = (
+                        f"[Harness Auto-Action] plan_real found a {len(plan_steps)}-step engine-verified "
+                        f"solution and the harness EXECUTED it for real ({exec_count}/{len(plan_steps)} "
+                        f"step(s); {exec_outcome}). Do NOT replay it. Analyze the executed sequence in "
+                        "res['plan'] to deduce the game's mechanics -- you will need them on the next level."
+                    )
+                    self._atlas_probes_since_real_action = 0
+                    self._atlas_calls_since_real_action = 0
+                    refreshed_frame, _ = load_runtime_state(state_path)
+                    if refreshed_frame is not None:
+                        noop_guard_board_sig = board_signature(refreshed_frame.grid)
+                        noop_guard_level = refreshed_frame.level
+                    print(
+                        f"atlas: harness auto-executed the model-found plan_real plan "
+                        f"({exec_count}/{len(plan_steps)} step(s), outcome={exec_outcome})",
+                        flush=True,
+                    )
                 probe_payload["state"] = _serialized_runtime_state(
                     next_valid_actions=list(self._current_valid_actions)
                 )
