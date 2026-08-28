@@ -94,6 +94,19 @@ def _resolve_requested_game(
         fallback_game_id = fallback_prefix_map.get(lowered, requested)
         if fallback_game_id in fallback_available:
             return fallback_game_id
+    # atlas 28.08 (submission-shaped rehearsal): a FULL id ("prefix-version")
+    # that is not in the built-in official list passes through verbatim --
+    # cloned offline games (see scripts/build_clone_env_110.py) carry ids
+    # like "k000-0c556536" that only exist in a custom --environments-dir.
+    # The arcade scan still fails loudly at game creation if the id is a
+    # genuine typo, so this only relaxes the eager CLI-side check.
+    if "-" in requested:
+        log.warning(
+            "Game id %r is not in the built-in official list -- passing it "
+            "through verbatim (cloned/custom offline game).",
+            requested,
+        )
+        return requested
     raise ValueError(f"Unknown ARC-AGI3 game: {requested}")
 
 
