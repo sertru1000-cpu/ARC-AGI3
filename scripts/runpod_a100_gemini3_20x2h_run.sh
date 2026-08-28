@@ -166,10 +166,15 @@ if [ ! -d "${ENV_FILES_DIR}" ] || [ -z "$(ls "${ENV_FILES_DIR}" 2>/dev/null)" ];
   ( cd "${COMP_DIR}" && { unzip -oq arc-prize-2026-arc-agi-3.zip \
       || "${VENV_PYTHON}" -m zipfile -e arc-prize-2026-arc-agi-3.zip .; } )
 fi
-ENV_FILE_COUNT=$(ls "${ENV_FILES_DIR}"/*.py 2>/dev/null | wc -l)
-echo "environment_files: ${ENV_FILE_COUNT} game file(s)"
+# NOTE: environment_files/ holds one SUBDIRECTORY per game (ar25/, bp35/,
+# ...), not flat .py files. The first version of this check globbed *.py --
+# under set -e/pipefail the failed glob killed the whole script SILENTLY
+# right here (28.08, caught live). Count entries with find, which exits 0
+# either way.
+ENV_FILE_COUNT=$(find "${ENV_FILES_DIR}" -mindepth 1 -maxdepth 1 | wc -l)
+echo "environment_files: ${ENV_FILE_COUNT} game entry(ies)"
 if [ "${ENV_FILE_COUNT}" -lt 25 ]; then
-  echo "FATAL: expected 25 game .py files in ${ENV_FILES_DIR}, found ${ENV_FILE_COUNT} -- offline mode would silently degrade to ONLINE. Aborting." >&2
+  echo "FATAL: expected 25 game entries in ${ENV_FILES_DIR}, found ${ENV_FILE_COUNT} -- offline mode would silently degrade to ONLINE. Aborting." >&2
   exit 1
 fi
 
