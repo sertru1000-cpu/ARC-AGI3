@@ -198,7 +198,7 @@ _ATLAS_TRANSITIONS_TESTED_RE = re.compile(r"['\"]transitions_tested['\"]\s*:\s*(
 # model's own code room to finish.
 _ATLAS_PROBE_MAX_SEQUENCES = 16
 _ATLAS_PROBE_MAX_TOTAL_STEPS = 240
-_ATLAS_SEARCH_MAX_NODES = 250
+_ATLAS_SEARCH_MAX_NODES = 600
 _ATLAS_SEARCH_MAX_DEPTH = 8
 _ATLAS_SEARCH_WALL_SECONDS = 10.0
 # atlas 27.08 (plan_real v2): Monte-Carlo deep rollouts -- after the
@@ -210,7 +210,7 @@ _ATLAS_SEARCH_WALL_SECONDS = 10.0
 # sparse/binary (level completed or not) and the engine is deterministic,
 # so a bandit layer degenerates to random search with extra bookkeeping.
 _ATLAS_ROLLOUT_DEPTH = 24
-_ATLAS_MAX_ROLLOUTS = 120
+_ATLAS_MAX_ROLLOUTS = 300
 # atlas 27.08 (probe/checkpoint integration, found live on the first
 # OFFLINE pod run): probes displaced BOTH real actions and verify_theory,
 # and the checkpoint ladder -- designed before probes existed -- responded
@@ -2290,9 +2290,9 @@ class ToolAgent:
         if self._atlas_probes_since_real_action >= _ATLAS_PROBE_RATION_FREE:
             lines.append(
                 f"[atlas] You have run {self._atlas_probes_since_real_action} probe calls in a row "
-                "without advancing the real game. Simulations are free in actions but not in time -- "
-                "execute your best option with action(...) now; probe knowledge only scores once "
-                "converted into real moves."
+                "without advancing the real game -- try_actions is now LOCKED and will return an "
+                "error until you execute a real action(...). Convert your best probed option into "
+                "real moves now; probe knowledge only scores once converted."
             )
             print(
                 f"atlas: probe ration nudge injected (probes_in_row={self._atlas_probes_since_real_action})",
@@ -2578,6 +2578,17 @@ class ToolAgent:
                     count += 1
         return count
 
+    def _atlas_restore_probe(self, snapshot: Any) -> None:
+        """Restore inside a probe/search inner loop: ask the callback to
+        skip its runtime-state disk write (solver-side probe flag, 28.08
+        speed fix). Falls back to a plain restore for callbacks that don't
+        take the flag (tests, older wiring). The caller's final non-probe
+        restore always rewrites the file once at the end."""
+        try:
+            self._restore_env_callback(snapshot, probe=True)
+        except TypeError:
+            self._restore_env_callback(snapshot)
+
     def _atlas_probe_sequences(
         self, request: dict[str, Any], state_path: Path, snapshot: dict[str, Any]
     ) -> dict[str, Any]:
@@ -2603,11 +2614,20 @@ class ToolAgent:
                 results.append({"sequence_index": index, "skipped": "probe step budget exhausted"})
                 continue
             if index > 0:
-                self._restore_env_callback(snapshot)
-            payload = self._step_env_callback({"actions": list(seq)})
+                self._atlas_restore_probe(snapshot)
+            payload = self._step_env_callback({"actions": list(seq), "probe": True})
             executed = int(payload.get("executed_count") or 0)
             total_steps += max(1, executed)
-            frame_after, _ = load_runtime_state(state_path)
+            # Speed fix A (28.08): the probe payload carries the resulting
+            # grid; the state-file read is only the fallback for callbacks
+            # that don't implement the probe flag.
+            after_grid = payload.get("grid")
+            after_level = payload.get("level")
+            if after_grid is None:
+                frame_after, _ = load_runtime_state(state_path)
+                after_grid = frame_after.grid if frame_after is not None else ()
+                if after_level is None and frame_after is not None:
+                    after_level = frame_after.level
             # atlas 27.08 (probe/checkpoint integration): a probe teaches
             # the model what a control does just as well as a real action
             # -- credit explore-first accordingly, but only for UNIFORM
@@ -2624,9 +2644,7 @@ class ToolAgent:
                     self._atlas_note_action_kind_tried(
                         next(iter(kinds)), baseline_level, bool(payload.get("board_changed"))
                     )
-            cells_changed = self._atlas_grid_diff_count(
-                baseline_grid, frame_after.grid if frame_after is not None else ()
-            )
+            cells_changed = self._atlas_grid_diff_count(baseline_grid, after_grid or ())
             # Compact result (Gemini round 3): drop what the model already
             # knows (its own requested sequence) and every falsy flag --
             # probe output is prompt-context it pays for on every later turn.
@@ -2635,7 +2653,7 @@ class ToolAgent:
                 "executed_count": executed,
                 "board_changed": bool(payload.get("board_changed")),
                 "cells_changed_vs_start": cells_changed,
-                "level_after": frame_after.level if frame_after is not None else baseline_level,
+                "level_after": int(after_level) if after_level is not None else baseline_level,
                 "level_completed": bool(payload.get("level_completed")),
             }
             if payload.get("error"):
@@ -2732,9 +2750,9 @@ class ToolAgent:
         except (TypeError, ValueError):
             max_depth = 6
         try:
-            max_nodes = max(1, min(_ATLAS_SEARCH_MAX_NODES, int(request.get("max_nodes") or 120)))
+            max_nodes = max(1, min(_ATLAS_SEARCH_MAX_NODES, int(request.get("max_nodes") or 250)))
         except (TypeError, ValueError):
-            max_nodes = 120
+            max_nodes = 250
         baseline_frame, _ = load_runtime_state(state_path)
         candidates = request.get("candidates")
         auto_mouse = 0
@@ -2762,8 +2780,20 @@ class ToolAgent:
             print(f"atlas: plan_real auto-derived {auto_mouse} MOUSE candidate(s) from segmentation", flush=True)
         baseline_grid = baseline_frame.grid if baseline_frame is not None else ()
         visited = {board_signature(baseline_grid)}
-        deadline = time.monotonic() + _ATLAS_SEARCH_WALL_SECONDS
+        search_start = time.monotonic()
+        deadline = search_start + _ATLAS_SEARCH_WALL_SECONDS
         rollouts_enabled = bool(request.get("rollouts", True))
+        # Speed fix D (28.08, Gemini round 4): reserve a fixed slice of the
+        # wall budget for the rollout phase BEFORE the frontier can exhaust
+        # it -- 15 searches lifetime had run 0 rollouts because the frontier
+        # always ate the whole budget. Frontier gets 65%, rollouts get the
+        # guaranteed rest (the frontier still ends early on max_nodes or
+        # true state-space exhaustion, handing rollouts even more time).
+        frontier_deadline = (
+            search_start + _ATLAS_SEARCH_WALL_SECONDS * 0.65
+            if rollouts_enabled
+            else deadline
+        )
 
         def _plan_found(attempt, payload, nodes, rollouts, found_by):
             executed = int(payload.get("executed_count") or len(attempt))
@@ -2802,13 +2832,13 @@ class ToolAgent:
         while frontier:
             _, _, path, parent_grid = heapq.heappop(frontier)
             for candidate in candidates:
-                if nodes >= max_nodes or time.monotonic() >= deadline:
+                if nodes >= max_nodes or time.monotonic() >= frontier_deadline:
                     budget_hit = True
                     break
                 nodes += 1
-                self._restore_env_callback(snapshot)
+                self._atlas_restore_probe(snapshot)
                 attempt = [*path, dict(candidate)]
-                payload = self._step_env_callback({"actions": attempt})
+                payload = self._step_env_callback({"actions": attempt, "probe": True})
                 if payload.get("error"):
                     continue
                 if payload.get("level_completed") or payload.get("run_complete"):
@@ -2817,8 +2847,12 @@ class ToolAgent:
                     continue
                 if payload.get("game_over"):
                     continue
-                frame_after, _ = load_runtime_state(state_path)
-                child_grid = frame_after.grid if frame_after is not None else ()
+                # Speed fix A (28.08): grid comes back inside the probe
+                # payload; the state-file read is only the fallback.
+                child_grid = payload.get("grid")
+                if child_grid is None:
+                    frame_after, _ = load_runtime_state(state_path)
+                    child_grid = frame_after.grid if frame_after is not None else ()
                 sig = board_signature(child_grid)
                 if sig in visited:
                     continue
@@ -2845,9 +2879,9 @@ class ToolAgent:
                 rollouts += 1
                 start_path, _ = explored_states[rng.randrange(len(explored_states))]
                 seq = [dict(rng.choice(candidates)) for _ in range(_ATLAS_ROLLOUT_DEPTH)]
-                self._restore_env_callback(snapshot)
+                self._atlas_restore_probe(snapshot)
                 attempt = [*start_path, *seq]
-                payload = self._step_env_callback({"actions": attempt})
+                payload = self._step_env_callback({"actions": attempt, "probe": True})
                 if payload.get("error"):
                     continue
                 if payload.get("level_completed") or payload.get("run_complete"):
@@ -2888,7 +2922,7 @@ class ToolAgent:
         if snapshot is None:
             return "[atlas] the harness tried to run plan_real() itself but no engine snapshot is available."
         try:
-            result = self._atlas_search_real_plan({"max_depth": 6, "max_nodes": 120}, state_path, snapshot)
+            result = self._atlas_search_real_plan({"max_depth": 6, "max_nodes": 250}, state_path, snapshot)
         except Exception as exc:
             result = {"plan": None, "reason": f"search failed: {exc!r}"}
         finally:
@@ -3467,6 +3501,32 @@ class ToolAgent:
                 # (inside the snapshot) never saw any of it.
                 if self._step_env_callback is None:
                     return {"error": "try_actions/plan_real are not available: no action executor in this session."}
+                # atlas 28.08 (Gemini round 4, probe HARD GATE): the soft
+                # ration nudge was ignored in the tail (live streaks of 8
+                # consecutive probes). A nudge is a request; a blocked tool
+                # is physics. 3 probe calls in a row without a real action
+                # -> try_actions stops returning results until a real
+                # action() runs (the reset already lives in the real-action
+                # bookkeeping). plan_real stays un-gated: it is the
+                # harness's own search and fires rarely.
+                if (
+                    action == "probe_sequences"
+                    and self._atlas_probes_since_real_action >= _ATLAS_PROBE_RATION_FREE
+                ):
+                    print(
+                        f"atlas: probe hard gate blocked try_actions "
+                        f"(probes_in_row={self._atlas_probes_since_real_action})",
+                        flush=True,
+                    )
+                    return {
+                        "error": (
+                            f"Probe budget exhausted: you have run "
+                            f"{self._atlas_probes_since_real_action} probe calls in a row. "
+                            "try_actions is LOCKED until you execute a real action(...) -- "
+                            "convert your best probed option into real moves now; the lock "
+                            "lifts on the next real action."
+                        )
+                    }
                 snapshot = self._checkpoint_env_callback()
                 if snapshot is None:
                     return {

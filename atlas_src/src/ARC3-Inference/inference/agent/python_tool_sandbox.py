@@ -489,7 +489,7 @@ _SANDBOX_BOOTSTRAP = textwrap.dedent(
             reply = _checkpoint_request({"action": "probe_sequences", "sequences": normalized})
             return {"results": reply.get("results"), "note": reply.get("note")}
 
-        def plan_real(actions=None, max_depth=6, max_nodes=120, rollouts=True):
+        def plan_real(actions=None, max_depth=6, max_nodes=250, rollouts=True):
             '''Search the REAL engine for an action sequence that completes
             the current level (or wins the game) -- two phases on actual
             engine states via snapshot/rewind: (1) a novelty-guided

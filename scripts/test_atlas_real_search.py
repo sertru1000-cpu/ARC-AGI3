@@ -280,6 +280,9 @@ def main() -> None:
             str(probe_agent._atlas_action_kinds_resolved),
         )
     for _ in range(3):
+        # This scenario tests explore-first CREDITING, not rationing -- keep
+        # the 28.08 hard gate out of the way (scenario 9 covers it).
+        probe_agent._atlas_probes_since_real_action = 0
         probe_agent._run_python_tool(probe_state_path, {"code": "result = try_actions([['DOWN']])\n"})
     if "DOWN" not in probe_agent._atlas_action_kinds_resolved:
         _fail(
@@ -347,31 +350,51 @@ def main() -> None:
     _ok("compact try_actions results (no requested echo, falsy flags omitted) + probe memory "
         "injected into the prompt and cleared on level-up")
 
-    # 9. Gemini round 3 -- probe rationing: probes are free in actions but
-    #    not in turns/time. 3 consecutive probe calls without a real action
-    #    earn a "convert knowledge into moves" nudge; one real action()
-    #    resets the counter and removes the nudge.
+    # 9. Probe rationing, HARD-GATE form (28.08, Gemini round 4 -- the soft
+    #    nudge alone was ignored in live tails of 8 consecutive probes):
+    #    3 consecutive probe calls without a real action -> the prompt warns
+    #    the tool is locked AND the 4th try_actions call actually returns an
+    #    error instead of results; one real action() unlocks everything.
     ration_state_path = tmp_dir / "probe_ration_state.json"
     ration_env = WalkEnv(ration_state_path, goal=8)
     ration_agent = _make_agent(ration_state_path, ration_env)
     for i in range(3):
         prompt = ration_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
         if "probe calls in a row" in prompt:
-            _fail(f"no ration nudge before the 3rd consecutive probe (after {i})", prompt[-400:])
-        ration_agent._run_python_tool(ration_state_path, {"code": "result = try_actions([['UP', 'DOWN']])\n"})
+            _fail(f"no ration warning before the 3rd consecutive probe (after {i})", prompt[-400:])
+        dispatch = ration_agent._run_python_tool(
+            ration_state_path, {"code": "result = try_actions([['UP', 'DOWN']])\n"}
+        )
+        if "Probe budget exhausted" in dispatch.content:
+            _fail(f"probe {i + 1} of 3 is still free", dispatch.content[:300])
         ration_agent._atlas_calls_since_real_action = 0
     if ration_agent._atlas_probes_since_real_action != 3:
         _fail("3 probes counted", str(ration_agent._atlas_probes_since_real_action))
     prompt = ration_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
-    if "You have run 3 probe calls in a row" not in prompt:
-        _fail("ration nudge fires at 3 consecutive probes", prompt[-600:])
+    if "You have run 3 probe calls in a row" not in prompt or "LOCKED" not in prompt:
+        _fail("prompt warns the tool is locked at 3 consecutive probes", prompt[-600:])
+    dispatch = ration_agent._run_python_tool(
+        ration_state_path, {"code": "result = try_actions([['UP']])\n"}
+    )
+    payload = json.loads(dispatch.content)
+    err = str(payload.get("error") or "") + str((payload.get("result") or {}).get("error") or "")
+    if "Probe budget exhausted" not in err and "Probe budget exhausted" not in dispatch.content:
+        _fail("4th consecutive try_actions is BLOCKED by the hard gate", dispatch.content[:400])
+    if ration_agent._atlas_probes_since_real_action != 3:
+        _fail("a blocked call does not grow the streak", str(ration_agent._atlas_probes_since_real_action))
     ration_agent._run_python_tool(ration_state_path, {"code": "action('UP')\n"})
     if ration_agent._atlas_probes_since_real_action != 0:
         _fail("a real action resets the probe streak", str(ration_agent._atlas_probes_since_real_action))
+    dispatch = ration_agent._run_python_tool(
+        ration_state_path, {"code": "result = try_actions([['DOWN']])\n"}
+    )
+    if "Probe budget exhausted" in dispatch.content:
+        _fail("the lock lifts after a real action", dispatch.content[:300])
     prompt = ration_agent._build_user_prompt(0, valid_actions=["UP", "DOWN"])
     if "probe calls in a row" in prompt:
-        _fail("nudge gone after a real action", prompt[-400:])
-    _ok("probe ration nudge fires on the 3rd consecutive probe call and one real action resets it")
+        _fail("warning gone after a real action", prompt[-400:])
+    _ok("probe hard gate: 3 free probes, warning in the prompt, 4th call blocked with an error, "
+        "one real action unlocks")
 
     # 10. Gemini round 3 -- probing IS exploration: an executed probe
     #     silences the explore-first checkpoint for the same 4-call grace

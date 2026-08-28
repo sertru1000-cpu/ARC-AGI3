@@ -390,7 +390,12 @@ class _HarnessGameSession:
         except Exception:
             return None
 
-    def atlas_restore_env(self, snapshot: dict[str, Any] | None) -> bool:
+    def atlas_restore_env(self, snapshot: dict[str, Any] | None, probe: bool = False) -> bool:
+        # probe=True (28.08, plan_real speed fix A): a restore inside a
+        # search/probe inner loop skips the runtime-state disk write -- the
+        # caller's final non-probe restore rewrites the file once at the
+        # end. Measured: the old path cost a full JSON serialize of grid +
+        # history PER SEARCH NODE, capping the search at ~5 nodes/sec.
         if not snapshot:
             return False
         env = getattr(self.game, "env", None)
@@ -404,7 +409,8 @@ class _HarnessGameSession:
         self.history_entries = [
             HistoryEntry(action=e.action, frame=e.frame) for e in snapshot["history_entries"]
         ]
-        self.write_runtime_state()
+        if not probe:
+            self.write_runtime_state()
         return True
 
     def seed_initial_history(self) -> None:
@@ -1085,6 +1091,12 @@ class _HarnessGameSession:
         requested_actions, error = self._normalize_actions(arguments)
         if error is not None or requested_actions is None:
             return self._error_payload(error or "Could not parse action request.")
+        # probe=True (28.08, plan_real speed fix A): search/probe steps are
+        # hypothetical -- skip every per-step disk write (runtime state,
+        # viewer events/payload, animation summaries, history growth) and
+        # return the resulting grid INSIDE the payload so the searcher
+        # never has to read the state file back from disk.
+        probe = bool(arguments.get("probe"))
         if self.should_stop() or _is_engine_game_over(self.game):
             return self._terminal_payload(requested_actions)
 
@@ -1114,6 +1126,7 @@ class _HarnessGameSession:
                     batch_index=batch_index,
                     batch_size=batch_size,
                     flush_viewer_payload=False,
+                    probe=probe,
                 )
             except Exception as exc:
                 if executed_payloads:
@@ -1165,7 +1178,8 @@ class _HarnessGameSession:
         final_payload["stopped_early"] = len(executed_payloads) < batch_size
         if stop_reason is not None:
             final_payload["stop_reason"] = stop_reason
-        self.write_viewer_payload()
+        if not probe:
+            self.write_viewer_payload()
         return final_payload
 
     def _execute_auto_reset(self) -> None:
@@ -1180,6 +1194,7 @@ class _HarnessGameSession:
         batch_size: int,
         generated_tokens: int | None = None,
         flush_viewer_payload: bool = True,
+        probe: bool = False,
     ) -> dict[str, Any]:
         previous_grid = _grid_from_state(self.game.current_state)
         previous_completed = int(self.game.current_state.levels_completed)
@@ -1198,10 +1213,11 @@ class _HarnessGameSession:
             step=self.action_count,
             level=_level_number(self.game),
         )
-        self.history_entries.append(
-            HistoryEntry(action=action_display, frame=current_frame)
-        )
-        self.write_runtime_state()
+        if not probe:
+            self.history_entries.append(
+                HistoryEntry(action=action_display, frame=current_frame)
+            )
+            self.write_runtime_state()
 
         completed = int(new_state.levels_completed)
         reward = float(completed - previous_completed) / max(
@@ -1213,7 +1229,7 @@ class _HarnessGameSession:
         frame_count = len(frames)
         animation = (
             summarize_animation(frames, board_changed=board_changed)
-            if self.solver.animation_awareness
+            if self.solver.animation_awareness and not probe
             else None
         )
         level_completed = bool(
@@ -1248,6 +1264,9 @@ class _HarnessGameSession:
             "batch_size": batch_size,
             **self.timing_payload(),
         }
+        if probe:
+            payload["grid"] = current_frame.grid
+            return payload
         if animation is not None:
             payload["animation"] = animation
             self.animation_history.append(
