@@ -453,6 +453,16 @@ class _HarnessGameSession:
             remaining = max(0.0, cap - elapsed)
         return {"run_elapsed_seconds": elapsed, "time_remaining_seconds": remaining}
 
+    def _atlas_time_remaining_s(self) -> float:
+        """Seconds left on this game's wall budget (cap + granted extra
+        minus elapsed); large sentinel when no cap is set. Feeds the
+        agent's hail-mary trigger (29.08, Gemini round 6)."""
+        cap = self.solver.max_runtime_s_per_game
+        if cap is None or cap <= 0:
+            return 1e9
+        deadline = self.started_at + float(cap) + float(self._atlas_extra_time_s)
+        return max(0.0, deadline - time.monotonic())
+
     def _atlas_check_time_bank(self) -> bool:
         """Poll the time bank each should_stop() check: draw extra time if a
         new level was just reached, or end this session early (returning
@@ -623,6 +633,7 @@ class _HarnessGameSession:
                         analysis_step=analysis_step,
                         request_timeout_seconds=self.request_timeout_seconds(),
                         should_stop=self.should_stop,
+                        time_remaining=self._atlas_time_remaining_s,
                     )
                 finally:
                     transcript_delta = self._transcript_delta_since(transcript_before)

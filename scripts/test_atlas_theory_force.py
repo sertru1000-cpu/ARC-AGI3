@@ -39,6 +39,7 @@ import os
 # mini-games before the scenarios under test even run -- disable it for
 # this suite (dedicated proactive scenarios re-enable it via monkeypatch).
 os.environ["ATLAS_PLAN_REAL_PROACTIVE"] = "0"
+os.environ["ATLAS_MECHANIC_HANDOFF"] = "0"
 import sys
 import tempfile
 from pathlib import Path

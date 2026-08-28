@@ -19,6 +19,7 @@ import os
 # Proactive plan_real would auto-solve the scripted levels before the
 # scenarios run -- keep it off; this suite tests the REPLAY lever.
 os.environ["ATLAS_PLAN_REAL_PROACTIVE"] = "0"
+os.environ["ATLAS_MECHANIC_HANDOFF"] = "0"
 import sys
 import tempfile
 from pathlib import Path
@@ -199,6 +200,64 @@ def main() -> None:
     if env3.level != 2:
         _fail("rollback landed on the level-2 anchor", f"level={env3.level}")
     _ok("a voluntary rollback to an anchor never trips the auto-replay (it is for engine RESETs)")
+
+    # 4. D4 mechanic handoff (29.08, Gemini round 6): after solving level 1,
+    #    the harness probes that exact solution on level 2. Case A: the
+    #    solution does NOT solve level 2 -> diagnostic note, game untouched.
+    import inference.agent.tool_agent as ta_module
+    ta_module._ATLAS_MECHANIC_HANDOFF = True
+    try:
+        h1_path = tmp_dir / "handoff1_state.json"
+        h1_env = MultiLevelEnv(h1_path, goals=[2, 9])
+        h1_agent = _make_agent(h1_path, h1_env)
+        h1_agent._run_python_tool(h1_path, {"code": "action(['UP', 'UP'])\n"})
+        if h1_env.level != 2 or h1_agent._atlas_pending_mechanic_handoff != 1:
+            _fail("setup: level 1 solved, handoff pending", f"level={h1_env.level}")
+        h1_agent._run_python_tool(h1_path, {"code": "result = 1\n"})
+        if h1_env.level != 2 or h1_env.pos != 0:
+            _fail("a failed handoff probe leaves the real game untouched", f"pos={h1_env.pos}")
+        prompt = h1_agent._build_user_prompt(0, valid_actions=list(MultiLevelEnv.VALID))
+        if "[HARNESS DIAGNOSTIC]" not in prompt or "level NOT completed" not in prompt:
+            _fail("handoff diagnostic note lands in the prompt", prompt[-600:])
+        _ok("mechanic handoff: level-1 solution probed on level 2, escalation reported, game untouched")
+
+        # 5. Case B: the level-1 solution ALSO solves level 2 -> the harness
+        #    executes it for real, zero model turns.
+        h2_path = tmp_dir / "handoff2_state.json"
+        h2_env = MultiLevelEnv(h2_path, goals=[2, 2, 9])
+        h2_agent = _make_agent(h2_path, h2_env)
+        h2_agent._run_python_tool(h2_path, {"code": "action(['UP', 'UP'])\n"})
+        if h2_env.level != 2:
+            _fail("setup: level 1 solved (case B)", f"level={h2_env.level}")
+        h2_agent._run_python_tool(h2_path, {"code": "result = 1\n"})
+        if h2_env.level != 3:
+            _fail("handoff auto-executes a solution that also solves level 2", f"level={h2_env.level}")
+        prompt = h2_agent._build_user_prompt(0, valid_actions=list(MultiLevelEnv.VALID))
+        if "ALSO SOLVES" not in prompt:
+            _fail("auto-solve handoff note lands in the prompt", prompt[-500:])
+        _ok("mechanic handoff: a transferable solution is executed for real -- level 3 with zero model turns")
+    finally:
+        ta_module._ATLAS_MECHANIC_HANDOFF = False
+
+    # 6. Hail Mary (29.08): nearly-dead game on level 2 -> one last-gasp
+    #    deep search runs and its plan is executed for real.
+    hm_path = tmp_dir / "hailmary_state.json"
+    hm_env = MultiLevelEnv(hm_path, goals=[2, 3])
+    hm_agent = _make_agent(hm_path, hm_env)
+    hm_agent._run_python_tool(hm_path, {"code": "action(['UP', 'UP'])\n"})
+    if hm_env.level != 2:
+        _fail("setup: on level 2 for the hail mary", f"level={hm_env.level}")
+    hm_agent._atlas_time_remaining_callback = lambda: 120.0
+    hm_agent._run_python_tool(hm_path, {"code": "result = 1\n"})
+    if not hm_agent._atlas_hail_mary_done:
+        _fail("hail mary fires when the clock is nearly dead on level 2+", "flag not set")
+    if hm_env.level != 3:
+        _fail("hail-mary search solves level 2 and executes the plan", f"level={hm_env.level}")
+    prompt = hm_agent._build_user_prompt(0, valid_actions=list(MultiLevelEnv.VALID))
+    if "last-gasp" not in prompt:
+        _fail("hail-mary note lands in the prompt", prompt[-500:])
+    hm_agent._run_python_tool(hm_path, {"code": "result = 2\n"})
+    _ok("hail mary: <10 min left on level 2 -> deep search runs once, plan executed (level 3), note injected")
 
     print("\nAll atlas level-replay (L2) checks passed.")
 

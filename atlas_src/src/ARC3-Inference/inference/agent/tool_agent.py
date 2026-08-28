@@ -199,9 +199,24 @@ _ATLAS_TRANSITIONS_TESTED_RE = re.compile(r"['\"]transitions_tested['\"]\s*:\s*(
 # model's own code room to finish.
 _ATLAS_PROBE_MAX_SEQUENCES = 16
 _ATLAS_PROBE_MAX_TOTAL_STEPS = 240
-_ATLAS_SEARCH_MAX_NODES = 600
-_ATLAS_SEARCH_MAX_DEPTH = 8
+# 29.08 (Gemini round 6, D2/HailMary): hard caps raised -- the wall budget
+# is now per-request ("wall_seconds", clamped to [1, 60]): model-called
+# searches keep the 10s default (they run inside the sandbox's 30s reply
+# window), while HOST-side searches (proactive level entry, hail-mary) may
+# spend 40-60s -- engine-bound CPU time that costs zero LLM turns.
+_ATLAS_SEARCH_MAX_NODES = 5000
+_ATLAS_SEARCH_MAX_DEPTH = 12
 _ATLAS_SEARCH_WALL_SECONDS = 10.0
+_ATLAS_SEARCH_WALL_MAX_SECONDS = 60.0
+# D2: progressive proactive budget -- level 2+ carries 2x+ score weight and
+# a deeper state space; the level-entry search there gets the big budget.
+_ATLAS_PROACTIVE_L1_BUDGET = {"max_depth": 6, "max_nodes": 250, "wall_seconds": 10}
+_ATLAS_PROACTIVE_DEEP_BUDGET = {"max_depth": 10, "max_nodes": 1000, "wall_seconds": 40}
+_ATLAS_HAIL_MARY_BUDGET = {"max_depth": 12, "max_nodes": 5000, "wall_seconds": 60}
+# HailMary trigger: this many seconds (or less) left on the game's wall
+# budget while on level 2+ -> the harness stops waiting for the model and
+# brute-forces the board once.
+_ATLAS_HAIL_MARY_REMAINING_S = 600.0
 # atlas 27.08 (plan_real v2): Monte-Carlo deep rollouts -- after the
 # systematic frontier is exhausted (or its node budget spent), leftover
 # wall-clock goes to random playouts of up to this depth from the most
@@ -241,6 +256,8 @@ _ATLAS_PLAN_REAL_PROACTIVE = os.environ.get("ATLAS_PLAN_REAL_PROACTIVE", "1") !=
 # wall-clock, not recorded actions (the play's action counter is
 # cumulative either way). Stops honestly on the first divergence.
 _ATLAS_LEVEL_AUTO_REPLAY = os.environ.get("ATLAS_LEVEL_AUTO_REPLAY", "1") != "0"
+# 29.08 (Gemini round 6, D4): kill-switch for the level-up mechanic handoff.
+_ATLAS_MECHANIC_HANDOFF = os.environ.get("ATLAS_MECHANIC_HANDOFF", "1") != "0"
 # atlas 28.08 (Gemini round 5, L3): cap CONCURRENT LLM HTTP requests
 # below the game concurrency -- 55 simultaneous vLLM requests thrash the
 # KV cache into eviction/recompute spirals and starve every game (observed
@@ -248,6 +265,21 @@ _ATLAS_LEVEL_AUTO_REPLAY = os.environ.get("ATLAS_LEVEL_AUTO_REPLAY", "1") != "0"
 _ATLAS_LLM_MAX_CONCURRENT = int(os.environ.get("ATLAS_LLM_MAX_CONCURRENT_REQUESTS", "0") or "0")
 _ATLAS_LLM_REQUEST_GATE = (
     threading.Semaphore(_ATLAS_LLM_MAX_CONCURRENT) if _ATLAS_LLM_MAX_CONCURRENT > 0 else None
+)
+# 29.08 (Gemini round 6, D3 "zombie cull"): games stuck on level 1 with no
+# progress must not monopolize the request gate and starve the games that
+# actually reached level 2+ (measured: 82 zombies crowding 25 slots left
+# the median level-2 game FOUR real actions). Zombies (level 1, >=N real
+# actions since progress) must additionally hold one of these fewer slots
+# -- deep and fresh games keep priority access to the main gate.
+_ATLAS_ZOMBIE_AFTER_ACTIONS = int(os.environ.get("ATLAS_ZOMBIE_AFTER_ACTIONS", "25") or "25")
+_ATLAS_LLM_ZOMBIE_SLOTS = int(os.environ.get("ATLAS_LLM_ZOMBIE_SLOTS", "0") or "0")
+if _ATLAS_LLM_ZOMBIE_SLOTS <= 0 and _ATLAS_LLM_MAX_CONCURRENT > 0:
+    _ATLAS_LLM_ZOMBIE_SLOTS = max(1, int(_ATLAS_LLM_MAX_CONCURRENT * 0.4))
+_ATLAS_LLM_ZOMBIE_GATE = (
+    threading.Semaphore(_ATLAS_LLM_ZOMBIE_SLOTS)
+    if (_ATLAS_LLM_REQUEST_GATE is not None and _ATLAS_LLM_ZOMBIE_SLOTS > 0)
+    else None
 )
 # Cap on the per-level probe-findings memory injected into the prompt so
 # the model does not re-probe what it already learned.
@@ -1589,6 +1621,10 @@ class ToolAgent:
         self._atlas_current_level_actions: list[dict[str, Any]] = []
         self._atlas_auto_replay_note: str | None = None
         self._atlas_in_auto_replay = False
+        self._atlas_pending_mechanic_handoff: int | None = None
+        self._atlas_mechanic_handoff_note: str | None = None
+        self._atlas_hail_mary_done = False
+        self._atlas_time_remaining_callback: Callable[[], float] | None = None
         # atlas 27.08 (probe/checkpoint integration): python-call index of
         # the last SUCCESSFULLY EXECUTED probe (try_actions/plan_real that
         # actually ran on the engine, set host-side in _handle_checkpoint,
@@ -1695,6 +1731,9 @@ class ToolAgent:
             self._atlas_current_level_actions = []
             self._atlas_auto_replay_note = None
             self._atlas_in_auto_replay = False
+            self._atlas_pending_mechanic_handoff = None
+            self._atlas_mechanic_handoff_note = None
+            self._atlas_hail_mary_done = False
             self._atlas_last_probe_call_index = -99
             self._atlas_probes_since_real_action = 0
             self._atlas_probe_findings = []
@@ -2347,6 +2386,11 @@ class ToolAgent:
             lines.append(self._atlas_auto_replay_note)
             print(f"atlas: auto-replay note injected (action_num={action_num})", flush=True)
             self._atlas_auto_replay_note = None
+        # 29.08 (Gemini round 6, D4): one-shot mechanic-handoff diagnostic.
+        if self._atlas_mechanic_handoff_note:
+            lines.append(self._atlas_mechanic_handoff_note)
+            print(f"atlas: mechanic-handoff note injected (action_num={action_num})", flush=True)
+            self._atlas_mechanic_handoff_note = None
         action_effect_lines = _atlas_action_effect_summary(history_entries)
         if action_effect_lines:
             print(
@@ -2427,7 +2471,16 @@ class ToolAgent:
                 timeout=request_timeout_seconds if request_timeout_seconds is not None else self._timeout,
             )
 
-        if _ATLAS_LLM_REQUEST_GATE is not None:
+        is_zombie = (
+            _ATLAS_LLM_ZOMBIE_GATE is not None
+            and self._atlas_current_level == 1
+            and self._atlas_actions_since_level_progress >= _ATLAS_ZOMBIE_AFTER_ACTIONS
+        )
+        if _ATLAS_LLM_REQUEST_GATE is not None and is_zombie:
+            with _ATLAS_LLM_ZOMBIE_GATE:
+                with _ATLAS_LLM_REQUEST_GATE:
+                    response = post_chat(payload)
+        elif _ATLAS_LLM_REQUEST_GATE is not None:
             with _ATLAS_LLM_REQUEST_GATE:
                 response = post_chat(payload)
         else:
@@ -2806,6 +2859,11 @@ class ToolAgent:
             max_nodes = max(1, min(_ATLAS_SEARCH_MAX_NODES, int(request.get("max_nodes") or 250)))
         except (TypeError, ValueError):
             max_nodes = 250
+        try:
+            wall_seconds = max(1.0, min(_ATLAS_SEARCH_WALL_MAX_SECONDS,
+                                        float(request.get("wall_seconds") or _ATLAS_SEARCH_WALL_SECONDS)))
+        except (TypeError, ValueError):
+            wall_seconds = _ATLAS_SEARCH_WALL_SECONDS
         baseline_frame, _ = load_runtime_state(state_path)
         candidates = request.get("candidates")
         auto_mouse = 0
@@ -2834,7 +2892,7 @@ class ToolAgent:
         baseline_grid = baseline_frame.grid if baseline_frame is not None else ()
         visited = {board_signature(baseline_grid)}
         search_start = time.monotonic()
-        deadline = search_start + _ATLAS_SEARCH_WALL_SECONDS
+        deadline = search_start + wall_seconds
         rollouts_enabled = bool(request.get("rollouts", True))
         # Speed fix D (28.08, Gemini round 4): reserve a fixed slice of the
         # wall budget for the rollout phase BEFORE the frontier can exhaust
@@ -2843,7 +2901,7 @@ class ToolAgent:
         # guaranteed rest (the frontier still ends early on max_nodes or
         # true state-space exhaustion, handing rollouts even more time).
         frontier_deadline = (
-            search_start + _ATLAS_SEARCH_WALL_SECONDS * 0.65
+            search_start + wall_seconds * 0.65
             if rollouts_enabled
             else deadline
         )
@@ -2962,6 +3020,138 @@ class ToolAgent:
             ),
         }
 
+    def _atlas_run_mechanic_handoff(self, state_path: Path, prev_level: int) -> str:
+        """D4 (Gemini round 6): on entering level N+1, speculatively run the
+        exact sequence that solved level N -- one free empirical probe of
+        how the rules escalated, handed to the model as ground truth. If
+        the old solution happens to solve the NEW level outright, execute
+        it for real (zero model turns). Never raises."""
+        solution = self._atlas_level_solutions.get(prev_level)
+        if (
+            not solution
+            or self._step_env_callback is None
+            or self._checkpoint_env_callback is None
+            or self._restore_env_callback is None
+        ):
+            return ""
+        snapshot = self._checkpoint_env_callback()
+        if snapshot is None:
+            return ""
+        baseline_frame, _ = load_runtime_state(state_path)
+        baseline_grid = baseline_frame.grid if baseline_frame is not None else ()
+        seq_display = ", ".join(
+            str(s.get("action")) + (f"({s.get('row')},{s.get('col')})" if "row" in s else "")
+            for s in solution
+        )
+        try:
+            payload = self._step_env_callback(
+                {"actions": [dict(s) for s in solution], "probe": True}
+            ) or {}
+        except Exception:
+            payload = {}
+        finally:
+            self._restore_env_callback(snapshot)
+        solved = bool(payload.get("level_completed") or payload.get("run_complete"))
+        if solved:
+            exec_payload = self._step_env_callback({"actions": [dict(s) for s in solution]}) or {}
+            try:
+                for step in solution[: int(exec_payload.get("executed_count") or 0) or len(solution)]:
+                    self._atlas_record_level_action(step, {"executed": True})
+                self._atlas_note_action_progress(exec_payload, None)
+            except Exception:
+                pass
+            print(
+                f"atlas: mechanic handoff -- level {prev_level}'s solution ALSO solves "
+                f"level {prev_level + 1}, harness executed it for real",
+                flush=True,
+            )
+            return (
+                f"[HARNESS DIAGNOSTIC] The exact sequence that solved level {prev_level} "
+                f"([{seq_display}]) ALSO SOLVES level {prev_level + 1} -- the harness has already "
+                "executed it for real. Re-ground on the newest frame; you are on the next level."
+            )
+        after_grid = payload.get("grid")
+        if after_grid is None:
+            after_grid = ()
+        cells = self._atlas_grid_diff_count(baseline_grid, after_grid) if after_grid else None
+        outcome = (
+            f"level NOT completed; {cells} cell(s) changed vs level entry"
+            if cells is not None
+            else f"level NOT completed (executed {int(payload.get('executed_count') or 0)}/{len(solution)} step(s))"
+        )
+        if payload.get("game_over"):
+            outcome += "; ended in game_over (the old pattern is now DANGEROUS)"
+        if payload.get("stop_reason"):
+            outcome += f"; stop_reason={payload.get('stop_reason')}"
+        print(
+            f"atlas: mechanic handoff probe ran level {prev_level}'s solution on level "
+            f"{prev_level + 1} ({outcome})",
+            flush=True,
+        )
+        return (
+            f"[HARNESS DIAGNOSTIC] Level {prev_level} was solved with [{seq_display}]. The harness "
+            f"automatically tested that exact sequence on level {prev_level + 1} (then rewound): "
+            f"{outcome}. Use this to understand how the rules escalated -- do not re-probe the "
+            "same sequence."
+        )
+
+    def _atlas_maybe_hail_mary(self, state_path: Path) -> None:
+        """(d) 'The Last Gasp' (Gemini round 6): if this game's wall budget
+        is nearly dead while on level 2+, stop spending 10-minute model
+        turns and throw one 60s/depth-12/5000-node engine search at the
+        board. If the game is going to die anyway, let the CPU brute-force
+        the points in the final minutes. Fires at most once per game."""
+        if (
+            self._atlas_hail_mary_done
+            or self._atlas_time_remaining_callback is None
+            or self._atlas_current_level < 2
+            or self._step_env_callback is None
+            or self._checkpoint_env_callback is None
+        ):
+            return
+        try:
+            remaining = float(self._atlas_time_remaining_callback())
+        except Exception:
+            return
+        if remaining > _ATLAS_HAIL_MARY_REMAINING_S or remaining <= 0:
+            return
+        self._atlas_hail_mary_done = True
+        snapshot = self._checkpoint_env_callback()
+        if snapshot is None:
+            return
+        print(
+            f"atlas: HAIL MARY -- {remaining:.0f}s left on level {self._atlas_current_level}, "
+            "running the last-gasp search",
+            flush=True,
+        )
+        try:
+            result = self._atlas_search_real_plan(dict(_ATLAS_HAIL_MARY_BUDGET), state_path, snapshot)
+        except Exception as exc:
+            result = {"plan": None, "reason": f"search failed: {exc!r}"}
+        finally:
+            self._restore_env_callback(snapshot)
+        plan = result.get("plan")
+        if not plan:
+            print(f"atlas: hail-mary search found nothing (reason={result.get('reason')})", flush=True)
+            return
+        exec_payload = self._step_env_callback({"actions": list(plan)}) or {}
+        try:
+            for step in list(plan)[: int(exec_payload.get("executed_count") or 0) or len(plan)]:
+                self._atlas_record_level_action(step, {"executed": True})
+            self._atlas_note_action_progress(exec_payload, None)
+        except Exception:
+            pass
+        outcome = (
+            "level COMPLETE" if exec_payload.get("level_completed")
+            else "game WON" if exec_payload.get("run_complete")
+            else f"stopped early ({exec_payload.get('stop_reason')})"
+        )
+        print(f"atlas: hail-mary plan executed ({len(plan)} step(s), {outcome})", flush=True)
+        self._atlas_plan_real_auto_note = (
+            f"[atlas autopilot] Time almost up -- the harness ran a last-gasp deep search and "
+            f"executed a {len(plan)}-step engine-verified plan: {outcome}."
+        )
+
     def _atlas_auto_plan_real(self, state_path: Path, proactive: bool = False) -> str:
         """Harness-run plan_real. Two callers: the principle-force second
         layer (after ignored directives) and -- since 28.08, Gemini round 5
@@ -2981,8 +3171,17 @@ class ToolAgent:
             if proactive:
                 return ""
             return "[atlas] the harness tried to run plan_real() itself but no engine snapshot is available."
+        # D2 (Gemini round 6): progressive budget -- level 2+ carries the
+        # score weight and the deeper state space, and this search is
+        # engine-bound CPU that costs zero LLM turns. 40s of search beats
+        # a 10-minute queued model turn.
+        budget = (
+            dict(_ATLAS_PROACTIVE_DEEP_BUDGET)
+            if self._atlas_current_level >= 2
+            else dict(_ATLAS_PROACTIVE_L1_BUDGET)
+        )
         try:
-            result = self._atlas_search_real_plan({"max_depth": 6, "max_nodes": 250}, state_path, snapshot)
+            result = self._atlas_search_real_plan(budget, state_path, snapshot)
         except Exception as exc:
             result = {"plan": None, "reason": f"search failed: {exc!r}"}
         finally:
@@ -3184,6 +3383,12 @@ class ToolAgent:
                 self._atlas_level_solutions[self._atlas_current_level] = list(
                     self._atlas_current_level_actions
                 )
+                # D4 (Gemini round 6): mechanics usually escalate, not
+                # change -- schedule a free harness probe of THIS solution
+                # on the next level's board (consumed on the next python
+                # call, before the model spends any turns there).
+                if _ATLAS_MECHANIC_HANDOFF:
+                    self._atlas_pending_mechanic_handoff = self._atlas_current_level
             self._atlas_current_level_actions = []
             self._atlas_current_level = max(self._atlas_current_level, level)
             snapshot = self._checkpoint_env_callback()
@@ -3404,6 +3609,18 @@ class ToolAgent:
         # found it is EXECUTED for real (engine-verified, strictly
         # beneficial -- it completes a level), and either way a one-shot
         # note lands in the next prompt.
+        # D4 (Gemini round 6): consume a pending mechanic handoff BEFORE the
+        # proactive search -- if the previous level's solution solves this
+        # level outright, the search below then runs for the NEXT level.
+        if self._atlas_pending_mechanic_handoff is not None:
+            handoff_level = self._atlas_pending_mechanic_handoff
+            self._atlas_pending_mechanic_handoff = None
+            try:
+                handoff_note = self._atlas_run_mechanic_handoff(state_path, handoff_level)
+            except Exception:
+                handoff_note = ""
+            if handoff_note:
+                self._atlas_mechanic_handoff_note = handoff_note
         if self._atlas_pending_auto_plan_real:
             self._atlas_pending_auto_plan_real = False
             was_proactive = self._atlas_pending_auto_plan_real_proactive
@@ -3411,6 +3628,11 @@ class ToolAgent:
             auto_note = self._atlas_auto_plan_real(state_path, proactive=was_proactive)
             if auto_note:
                 self._atlas_plan_real_auto_note = auto_note
+        # (d) Hail Mary: near-death on level 2+ -> one last-gasp deep search.
+        try:
+            self._atlas_maybe_hail_mary(state_path)
+        except Exception:
+            pass
         code = str(arguments.get("code", "")).rstrip()
         if not code:
             return _ToolDispatchResult(json.dumps({"error": "python requires a non-empty `code` string."}, indent=2))
@@ -4114,6 +4336,7 @@ class ToolAgent:
         transcript_updated: Callable[[str], None] | None = None,
         request_timeout_seconds: float | None = None,
         should_stop: Callable[[], bool] | None = None,
+        time_remaining: Callable[[], float] | None = None,
     ) -> AnalyzerTurnResult | None:
         if not state_path.exists():
             return None
@@ -4131,6 +4354,10 @@ class ToolAgent:
         # revert anything.
         self._checkpoint_env_callback = checkpoint_env
         self._restore_env_callback = restore_env
+        # 29.08 (Gemini round 6, hail mary): how much of this game's wall
+        # budget is left -- lets the harness brute-force the board instead
+        # of spending a queued model turn when the game is nearly dead.
+        self._atlas_time_remaining_callback = time_remaining
         self._ensure_session(state_path)
         self._current_valid_actions = _normalize_valid_actions(valid_actions)
 

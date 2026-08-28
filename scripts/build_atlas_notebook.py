@@ -189,6 +189,12 @@ if hasattr(_atlas_tool_agent, "_ATLAS_LLM_REQUEST_GATE"):
     _atlas_tool_agent._ATLAS_LLM_MAX_CONCURRENT = 25
     _atlas_tool_agent._ATLAS_LLM_REQUEST_GATE = _atlas_threading.Semaphore(25)
     print("atlas: patched tool_agent LLM request gate = 25 (110 concurrent games)")
+if hasattr(_atlas_tool_agent, "_ATLAS_LLM_ZOMBIE_GATE"):
+    # 29.08 (round 6, D3): level-1 games with no progress get only 10 of
+    # the 25 request slots -- level-2+ games keep priority (zombie cull).
+    _atlas_tool_agent._ATLAS_LLM_ZOMBIE_SLOTS = 10
+    _atlas_tool_agent._ATLAS_LLM_ZOMBIE_GATE = _atlas_threading.Semaphore(10)
+    print("atlas: patched tool_agent zombie gate = 10 (level-1 no-progress cull)")
 
 # Phase A ONLY: shrink the per-game cap for a quick calibration check of the
 # timeout/max-output change above, on the real 25-game set (no fabricated
