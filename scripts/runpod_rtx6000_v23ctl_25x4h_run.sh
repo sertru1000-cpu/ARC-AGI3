@@ -116,7 +116,12 @@ export PIP_CACHE_DIR=/root/.cache/pip   # never on a network volume -- can wedge
 # sed-relaxing ARC3-Inference's requires-python above, uv still resolved the
 # OLD ==3.12.12 pin from a previous attempt's cache and failed the same way.
 # Clear it every run so a locally-patched pyproject.toml is always honored.
-rm -rf /root/.cache/uv
+# 28.08 FIX (caught live): the venv is built with UV_LINK_MODE=symlink,
+# so its packages POINT INTO /root/.cache/uv. Wiping the cache while
+# REUSING the venv (SKIP_DEPS=1) deletes the symlink targets and the
+# reused venv rots (vllm import passed the step-3 check, then the wipe
+# broke it). Only wipe the cache when actually rebuilding.
+if [ "${SKIP_DEPS}" = "0" ]; then rm -rf /root/.cache/uv; fi
 # Bug #4 (27.08): uv's cache (/root/.cache/uv, local disk) and VENV_DIR
 # (/workspace, network volume) are on DIFFERENT filesystems, so uv's default
 # hardlink install mode silently falls back to a full byte-for-byte copy for
