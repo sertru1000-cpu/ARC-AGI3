@@ -74,7 +74,11 @@ ATLAS_CELL = '''# ==============================================================
 
 ATLAS_ANALYZER_TIMEOUT_S = 480.0       # v1 tried 180 (measured: far too short)
 ATLAS_ANALYZER_MAX_OUTPUT_TOKENS = 8000  # v1 had this unbounded (0) -- the real bug
-ATLAS_CONCURRENCY = 20                 # bundle/notebook used 28 on a single GPU.
+ATLAS_CONCURRENCY = 110                # 28.08 (user): ONE WAVE of the ~110-game
+                                        # hidden set (55 public-LB + 55 private,
+                                        # structure confirmed 28.08). Rehearsals:
+                                        # 55x4h and 110x6h both clean on the pod.
+                                        # Was 20 through v23 (=6 waves, 80 min/game).
                                         # 27.08: kernel v21 Phase A calibration
                                         # (25 games, real Kaggle RTX Pro 6000
                                         # backend, not just RunPod A100) came
@@ -121,8 +125,14 @@ ATLAS_FALLBACK_GAME_CAP_S = 7920.0     # applied only if the bundle carries none
 # Wall-clock guard for the submission rerun. Unlike the offline run, a rerun
 # gets soft_end_time=None, so the per-game cap is the ONLY thing standing
 # between us and Kaggle killing the notebook at 9 h with no result.
-ATLAS_SUBMISSION_BUDGET_S = 28800.0   # 8 h of the 9 h hard cap -- 1h margin
-                                       # for setup (dataset mount, wheelhouse
+ATLAS_SUBMISSION_BUDGET_S = 30600.0   # 28.08 (user): 8.5 h, one-wave config --
+                                       # no per-game extensions (draws off), so
+                                       # this IS the per-game ceiling too. Rides
+                                       # closer to the platform kill than the
+                                       # old 8h+1h-margin: the 12h rule and
+                                       # v23's ~9.6h elapsed rerun say it fits.
+                                       # Margin left covers setup (dataset
+                                       # mount, wheelhouse
                                        # install if not cached, vLLM start +
                                        # smoke test measured at ~5 min alone).
                                        # Raised from 7.5h/1.19-score run
@@ -142,7 +152,7 @@ ATLAS_SUBMISSION_BUDGET_S = 28800.0   # 8 h of the 9 h hard cap -- 1h margin
 # the 28.08 rehearsals validated while still bounding any single game to
 # half the 8h budget. History: a v7 regression (0.06) came from removing
 # the ceiling ENTIRELY -- keep it firm and named, never delete it.
-ATLAS_SUBMISSION_GAME_CAP_CEILING_S = 14400.0
+ATLAS_SUBMISSION_GAME_CAP_CEILING_S = 30600.0
 ATLAS_MIN_GAME_CAP_S = 1800.0
 
 print("atlas: solver config as it came from the bundle:")
@@ -265,6 +275,11 @@ RUN_CELL_ANCHOR = """        bm.games = _competition_games()
 RUN_CELL_PATCH = """        bm.games = _competition_games()
         bm.n_passes = 1
         bm.game_weights = None
+        # atlas 28.08 (user): single-wave config -- time-bank DRAWS off (no
+        # per-game extensions; every game already holds the whole budget),
+        # stalled-game early exits stay on (they free GPU share).
+        import os as _atlas_os
+        _atlas_os.environ["ATLAS_TIME_BANK_DRAWS"] = "0"
         # atlas: a rerun has no soft deadline, so size the per-game cap to fit.
         atlas_fit_game_cap(len(bm.games))"""
 
