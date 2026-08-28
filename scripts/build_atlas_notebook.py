@@ -172,6 +172,24 @@ import inference.agent.tool_agent as _atlas_tool_agent
 _atlas_tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = ATLAS_ANALYZER_MAX_OUTPUT_TOKENS
 print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_MAX_OUTPUT_TOKENS}")
 
+# atlas 28.08 (one-wave config): module-attribute patches, NOT env vars --
+# these constants are read at import, and the modules are already imported
+# by the unpickle cell above, so os.environ would be silently too late
+# (the exact trap the max-output comment above documents). Both patches are
+# hasattr-guarded so this one notebook works with either dataset build
+# (v23-agent hybrid or the full probes build).
+import inference.framework.solver as _atlas_solver_mod
+if hasattr(_atlas_solver_mod, "_ATLAS_TIME_BANK_DRAWS_ENABLED"):
+    # No per-game extensions at one wave: a draw on top of the 8.5h cap
+    # would blow past Kaggle's 12h kill => no submission file at all.
+    _atlas_solver_mod._ATLAS_TIME_BANK_DRAWS_ENABLED = False
+    print("atlas: patched solver._ATLAS_TIME_BANK_DRAWS_ENABLED = False (one-wave: no extensions)")
+if hasattr(_atlas_tool_agent, "_ATLAS_LLM_REQUEST_GATE"):
+    import threading as _atlas_threading
+    _atlas_tool_agent._ATLAS_LLM_MAX_CONCURRENT = 25
+    _atlas_tool_agent._ATLAS_LLM_REQUEST_GATE = _atlas_threading.Semaphore(25)
+    print("atlas: patched tool_agent LLM request gate = 25 (110 concurrent games)")
+
 # Phase A ONLY: shrink the per-game cap for a quick calibration check of the
 # timeout/max-output change above, on the real 25-game set (no fabricated
 # repeats -- repeats of one game would raise vLLM's prefix-cache hit rate and
