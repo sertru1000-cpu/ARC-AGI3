@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# THE DECISIVE EXPERIMENT (Gemini round 4): concurrency=20, 4h per game /
-# 8h max experiment (25 games = 2 waves x 4h), OFFLINE, on a rented RunPod
+# THE DECISIVE EXPERIMENT (Gemini round 4): concurrency=25, 8h per game /
+# 8h max experiment (all 25 games in ONE wave, 8h each), OFFLINE, on a rented RunPod
 # A100 80GB pod. Written and reviewed BEFORE renting hardware ("no
 # debugging on the meter").
 #
 # Derivative of scripts/runpod_a100_gemini3_20x2h_run.sh with all 26-28.08
-# deployment fixes baked in. Parameters set by the user 28.08: 4h/game,
-# 8h total cap, concurrency 20.
+# deployment fixes baked in. Parameters set by the user 28.08: 8h/game,
+# 8h total cap, concurrency 25 -- one wave, no wave split.
 #
 # What this run decides: whether the probe branch can EVER pay its
 # turn/time displacement tax. It tests the round-4 build (1b43c65):
@@ -27,7 +27,7 @@
 # sys_start-anchor grep printed at the end.
 #
 # Usage on the pod (as root, fresh container):
-#   bash runpod_a100_gemini4_20x8h_run.sh
+#   bash runpod_a100_gemini4_25x8h_run.sh
 #
 # Assumes:
 #   - ~/.kaggle/access_token has been scp'd in already (this machine's own
@@ -46,7 +46,7 @@ VLLM_HOST="127.0.0.1"
 VLLM_PORT="1234"
 VLLM_BASE_URL="http://${VLLM_HOST}:${VLLM_PORT}/v1"
 VLLM_LOG="/workspace/vllm-openai-server.log"
-RUN_NAME="runpod-a100-gemini4-off-20x8h-$(date -u +%Y%m%d-%H%M%S)"
+RUN_NAME="runpod-a100-gemini4-off-25x8h-$(date -u +%Y%m%d-%H%M%S)"
 EXPERIMENT_DIR="/workspace/atlas_runpod_runs/${RUN_NAME}"
 
 echo "=== [1/8] GPU check ==="
@@ -241,8 +241,8 @@ while [ "$(date +%s)" -lt "${deadline}" ]; do
 done
 curl -sf "${VLLM_BASE_URL}/models" >/dev/null 2>&1 || { echo "FATAL: vLLM never became ready" >&2; tail -n 100 "${VLLM_LOG}" >&2; exit 1; }
 
-echo "=== [8/8] Run all 25 official games OFFLINE, concurrency=20, 4h/game, 8h total ==="
-# 25 games / concurrency 20 = 2 waves. 8h total / 2 waves = 4h/game --
+echo "=== [8/8] Run all 25 official games OFFLINE, concurrency=25, 8h/game, one wave ==="
+# 25 games / concurrency 25 = ONE wave: every game gets the full 8h --
 # the Kaggle-accurate-plus runway the round-4 verdict matrix calls for
 # (real submission gives ~2.4h/game; 4h bounds the answer from above).
 
@@ -284,9 +284,9 @@ set +e
   --model "${SERVED_MODEL_NAME}" \
   --analyzer-timeout 480 \
   --deployment-target inline \
-  --concurrent-jobs 20 \
+  --concurrent-jobs 25 \
   --n-passes 1 \
-  --max-runtime-minutes 240 \
+  --max-runtime-minutes 480 \
   --max-experiment-runtime-hours 8 \
   --environments-dir "${ENV_FILES_DIR}" \
   --run-name "${RUN_NAME}" \
