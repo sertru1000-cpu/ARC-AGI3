@@ -1281,6 +1281,207 @@ def gen_cl01_pack(rng):
     return levels, baselines
 
 
+# ---------------------------------------------------------------- pi01
+PI_OPP = {1: 4, 4: 1, 2: 8, 8: 2}
+PI_DELTA = {1: (0, -1), 2: (1, 0), 4: (0, 1), 8: (-1, 0)}
+
+
+def pi01_rot(ports, k=1):
+    for _ in range(k % 4):
+        ports = ((ports << 1) | (ports >> 3)) & 0b1111
+    return ports
+
+
+def pi01_connected(spec, ports_map):
+    sc, sr, sport = spec["source"]
+    kc, kr, kport = spec["sink"]
+    dx, dy = PI_DELTA[sport]
+    cur = (sc + dx, sr + dy)
+    if cur not in ports_map or not (ports_map[cur] & PI_OPP[sport]):
+        return False
+    seen = {cur}
+    stack = [cur]
+    while stack:
+        c, r = stack.pop()
+        ports = ports_map[(c, r)]
+        for p, (dx, dy) in PI_DELTA.items():
+            if not (ports & p):
+                continue
+            nb = (c + dx, r + dy)
+            if nb == (kc, kr) and p == PI_OPP[kport]:
+                return True
+            if nb in ports_map and (ports_map[nb] & PI_OPP[p]) and nb not in seen:
+                seen.add(nb)
+                stack.append(nb)
+    return False
+
+
+def pi01_solve_actions(spec, node_cap=200_000):
+    cells = sorted(spec["tiles"])
+    start = tuple(spec["tiles"][c] for c in cells)
+
+    def ok(states):
+        return pi01_connected(spec, {cells[i]: states[i] for i in range(len(cells))})
+
+    if ok(start):
+        return []
+    q = deque([(start, [])])
+    seen = {start}
+    nodes = 0
+    while q:
+        states, path = q.popleft()
+        nodes += 1
+        if nodes > node_cap:
+            return None
+        for i, (c, r) in enumerate(cells):
+            ns = tuple(pi01_rot(s) if j == i else s for j, s in enumerate(states))
+            if ns in seen:
+                continue
+            npath = path + [(6, c, r)]
+            if ok(ns):
+                return npath
+            seen.add(ns)
+            q.append((ns, npath))
+    return None
+
+
+def gen_pi01_level(rng, path_len, min_clicks):
+    for _ in range(6000):
+        sr = rng.randrange(2, 6)
+        kr = rng.randrange(2, 6)
+        source = (0, sr, 2)     # opens EAST into the field
+        sink = (7, kr, 8)       # accepts from the WEST
+        # random monotone path from (1,sr) to (6,kr)
+        path = [(1, sr)]
+        while path[-1] != (6, kr):
+            c, r = path[-1]
+            opts = []
+            if c < 6:
+                opts.append((c + 1, r))
+            if r < kr:
+                opts.append((c, r + 1))
+            if r > kr:
+                opts.append((c, r - 1))
+            nxt = rng.choice(opts)
+            if nxt in path:
+                break
+            path.append(nxt)
+        if path[-1] != (6, kr) or not (path_len[0] <= len(path) <= path_len[1]):
+            continue
+        # assign solved ports along the path
+        tiles = {}
+        for i, cell in enumerate(path):
+            prev_dir = 8 if i == 0 else None
+            if prev_dir is None:
+                pc, pr = path[i - 1]
+                dx, dy = cell[0] - pc, cell[1] - pr
+                for p, dd in PI_DELTA.items():
+                    if dd == (-dx, -dy):
+                        prev_dir = p
+            nxt_dir = 2 if i == len(path) - 1 else None
+            if nxt_dir is None:
+                nc_, nr_ = path[i + 1]
+                dx, dy = nc_ - cell[0], nr_ - cell[1]
+                for p, dd in PI_DELTA.items():
+                    if dd == (dx, dy):
+                        nxt_dir = p
+            tiles[cell] = prev_dir | nxt_dir
+        # scramble
+        scrambled = {c: pi01_rot(p, rng.randrange(4)) for c, p in tiles.items()}
+        spec = {"source": source, "sink": sink, "tiles": scrambled}
+        plan = pi01_solve_actions(spec)
+        if plan is None or len(plan) < min_clicks:
+            continue
+        return spec, len(plan)
+    raise RuntimeError("pi01: no layout")
+
+
+def gen_pi01_pack(rng):
+    levels, baselines = [], []
+    for path_len, min_clicks in (((6, 6), 1), ((6, 7), 2), ((7, 8), 3), ((8, 9), 3), ((9, 10), 4)):
+        spec, base = gen_pi01_level(rng, path_len, min_clicks)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
+def fmt_pi01_levels(levels):
+    parts = ["LEVELS = ["]
+    for lv in levels:
+        parts.append(f"    dict(source={lv['source']!r}, sink={lv['sink']!r},")
+        parts.append(f"         tiles={lv['tiles']!r}),")
+    parts.append("]")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------- fw01
+def fw01_solve_actions(spec):
+    rows = spec["rows"]
+    walls = set()
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+    q = deque([(start, [])])
+    seen = {start}
+    while q:
+        pos, path = q.popleft()
+        for d, a in ACTS.items():
+            np_ = (pos[0] + d[0], pos[1] + d[1])
+            if np_ in walls or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                continue
+            if np_ == exit_cell:
+                return path + [a]
+            if np_ not in seen:
+                seen.add(np_)
+                q.append((np_, path + [a]))
+    return None
+
+
+def gen_fw01_level(rng, n_walls, min_base):
+    for _ in range(6000):
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        walls = set(interior[:n_walls])
+        rest = interior[n_walls:]
+        if len(rest) < 2:
+            continue
+        start, exit_cell = rest[0], rest[1]
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7) or (c, r) in walls:
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                else:
+                    row += "."
+            rows.append(row)
+        spec = {"rows": rows}
+        plan = fw01_solve_actions(spec)
+        if plan is None or len(plan) < min_base:
+            continue
+        return spec, len(plan)
+    raise RuntimeError("fw01: no layout")
+
+
+def gen_fw01_pack(rng):
+    levels, baselines = [], []
+    for n_walls, min_base in ((10, 6), (12, 7), (12, 8), (14, 9), (14, 10)):
+        spec, base = gen_fw01_level(rng, n_walls, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
 SOLVERS = {
     "gv01": gv01_solve_actions,
     "sw01": sw01_solve_actions,
@@ -1290,6 +1491,8 @@ SOLVERS = {
     "sn01": sn01_solve_actions,
     "wf01": wf01_solve_actions,
     "cl01": cl01_solve_actions,
+    "pi01": pi01_solve_actions,
+    "fw01": fw01_solve_actions,
 }
 
 
@@ -1414,6 +1617,22 @@ MECHANICS = {
         "gen": gen_cl01_pack,
         "fmt": fmt_fl01_levels,
         "title": "Clockgates (generated)",
+    },
+    "pi01": {
+        "src": ROOT / "our_games" / "pi01" / "a9b0c1d2" / "pi01.py",
+        "class_name": "Pi01",
+        "prefix": "qg",
+        "gen": gen_pi01_pack,
+        "fmt": fmt_pi01_levels,
+        "title": "Pipes (generated)",
+    },
+    "fw01": {
+        "src": ROOT / "our_games" / "fw01" / "b0c1d2e3" / "fw01.py",
+        "class_name": "Fw01",
+        "prefix": "og",
+        "gen": gen_fw01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Fog of War (generated)",
     },
 }
 

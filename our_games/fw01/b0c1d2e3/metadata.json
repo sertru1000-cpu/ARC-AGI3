@@ -1,0 +1,12 @@
+{
+    "game_id": "fw01-b0c1d2e3",
+    "class_name": "Fw01",
+    "title": "Fog of War",
+    "baseline_actions": [
+        6,
+        7,
+        12,
+        9,
+        10
+    ]
+}
