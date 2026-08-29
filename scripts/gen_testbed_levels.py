@@ -882,11 +882,208 @@ def gen_cm01_pack(rng):
     return levels, baselines
 
 
+# ---------------------------------------------------------------- cv01
+CV_ARROWS = {"^": (0, -1), "v": (0, 1), "<": (-1, 0), ">": (1, 0)}
+
+
+def cv01_slide(pos, walls, arrows):
+    c, r = pos
+    for _ in range(8):
+        if (c, r) not in arrows:
+            break
+        dx, dy = arrows[(c, r)]
+        nc, nr = c + dx, r + dy
+        if (nc, nr) in walls or not (0 <= nc < GRID and 0 <= nr < GRID):
+            break
+        c, r = nc, nr
+    return (c, r)
+
+
+def cv01_solve_actions(spec, want_meta=False):
+    rows = spec["rows"]
+    walls, arrows = set(), {}
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+            elif ch in CV_ARROWS:
+                arrows[(c, r)] = CV_ARROWS[ch]
+    q = deque([(start, [], False)])
+    seen = {start}
+    while q:
+        pos, path, rode = q.popleft()
+        for d, a in ACTS.items():
+            np_ = (pos[0] + d[0], pos[1] + d[1])
+            if np_ in walls or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                continue
+            rd = rode or np_ in arrows
+            np_ = cv01_slide(np_, walls, arrows)
+            if np_ == exit_cell:
+                return (path + [a], rd) if want_meta else path + [a]
+            if np_ not in seen:
+                seen.add(np_)
+                q.append((np_, path + [a], rd))
+    return (None, False) if want_meta else None
+
+
+def gen_cv01_level(rng, n_arrows, n_walls, min_base):
+    for _ in range(6000):
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        walls = set(interior[:n_walls])
+        rest = interior[n_walls:]
+        if len(rest) < 2 + n_arrows:
+            continue
+        start, exit_cell = rest[0], rest[1]
+        arrow_cells = {cell: rng.choice("^v<>") for cell in rest[2:2 + n_arrows]}
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7) or (c, r) in walls:
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                elif (c, r) in arrow_cells:
+                    row += arrow_cells[(c, r)]
+                else:
+                    row += "."
+            rows.append(row)
+        spec = {"rows": rows}
+        plan, rode = cv01_solve_actions(spec, want_meta=True)
+        if plan is None or len(plan) < min_base or not rode:
+            continue
+        return spec, len(plan)
+    raise RuntimeError("cv01: no layout")
+
+
+def gen_cv01_pack(rng):
+    levels, baselines = [], []
+    for n_arrows, n_walls, min_base in ((3, 4, 5), (4, 6, 6), (5, 6, 7), (6, 8, 8), (7, 8, 9)):
+        spec, base = gen_cv01_level(rng, n_arrows, n_walls, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
+# ---------------------------------------------------------------- sn01
+SN_TRAIL = 3
+
+
+def sn01_solve_actions(spec):
+    rows = spec["rows"]
+    walls = set()
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+    state0 = (start, (start,) * SN_TRAIL)
+    q = deque([(state0, [])])
+    seen = {state0}
+    while q:
+        ((pos, trail), path) = q.popleft()
+        for d, a in ACTS.items():
+            np_ = (pos[0] + d[0], pos[1] + d[1])
+            if np_ in walls or np_ in trail or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                continue
+            if np_ == exit_cell:
+                return path + [a]
+            st = (np_, trail[1:] + (pos,))
+            if st not in seen:
+                seen.add(st)
+                q.append((st, path + [a]))
+    return None
+
+
+def sn01_plain_bfs(rows):
+    walls = set()
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+    q = deque([(start, 0)])
+    seen = {start}
+    while q:
+        pos, dist = q.popleft()
+        for d in DIRS:
+            np_ = (pos[0] + d[0], pos[1] + d[1])
+            if np_ in walls or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                continue
+            if np_ == exit_cell:
+                return dist + 1
+            if np_ not in seen:
+                seen.add(np_)
+                q.append((np_, dist + 1))
+    return None
+
+
+def gen_sn01_level(rng, n_walls, min_base):
+    for _ in range(6000):
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        walls = set(interior[:n_walls])
+        rest = interior[n_walls:]
+        if len(rest) < 2:
+            continue
+        start, exit_cell = rest[0], rest[1]
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7) or (c, r) in walls:
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                else:
+                    row += "."
+            rows.append(row)
+        spec = {"rows": rows}
+        plan = sn01_solve_actions(spec)
+        if plan is None or len(plan) < min_base:
+            continue
+        # NOTE: an optimal path never self-intersects, so the trail cannot
+        # lengthen the baseline -- it punishes WANDERING agents (dead ends
+        # become one-way pockets). Dense walls keep corridors narrow so
+        # that punishment is real.
+        return spec, len(plan)
+    raise RuntimeError("sn01: no layout")
+
+
+def gen_sn01_pack(rng):
+    levels, baselines = [], []
+    for n_walls, min_base in ((14, 6), (16, 8), (17, 8), (18, 9), (19, 10)):
+        spec, base = gen_sn01_level(rng, n_walls, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
 SOLVERS = {
     "gv01": gv01_solve_actions,
     "sw01": sw01_solve_actions,
     "lz01": lz01_solve_actions,
     "cm01": cm01_solve_actions,
+    "cv01": cv01_solve_actions,
+    "sn01": sn01_solve_actions,
 }
 
 
@@ -979,6 +1176,22 @@ MECHANICS = {
         "gen": gen_cm01_pack,
         "fmt": fmt_fl01_levels,
         "title": "Color Algebra (generated)",
+    },
+    "cv01": {
+        "src": ROOT / "our_games" / "cv01" / "c5d6e7f8" / "cv01.py",
+        "class_name": "Cv01",
+        "prefix": "vg",
+        "gen": gen_cv01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Conveyors (generated)",
+    },
+    "sn01": {
+        "src": ROOT / "our_games" / "sn01" / "d6e7f8a9" / "sn01.py",
+        "class_name": "Sn01",
+        "prefix": "ng",
+        "gen": gen_sn01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Snake Trail (generated)",
     },
 }
 

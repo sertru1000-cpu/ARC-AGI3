@@ -1,0 +1,12 @@
+{
+    "game_id": "sn01-d6e7f8a9",
+    "class_name": "Sn01",
+    "title": "Snake Trail",
+    "baseline_actions": [
+        6,
+        8,
+        8,
+        10,
+        10
+    ]
+}
