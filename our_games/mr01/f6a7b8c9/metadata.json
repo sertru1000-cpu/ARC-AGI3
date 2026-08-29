@@ -1,0 +1,17 @@
+{
+  "game_id": "mr01-f6a7b8c9",
+  "title": "Mirrors (atlas testbed original, user-designed)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard_click",
+    "atlas_own"
+  ],
+  "class_name": "Mr01",
+  "baseline_actions": [
+    6,
+    5,
+    10,
+    13,
+    22
+  ]
+}
