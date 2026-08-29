@@ -1077,6 +1077,210 @@ def gen_sn01_pack(rng):
     return levels, baselines
 
 
+# ---------------------------------------------------------------- wf01
+WF_SPREAD = 2
+
+
+def wf01_parse(rows):
+    walls, sources = set(), set()
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "F":
+                sources.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+    return walls, sources, start, exit_cell
+
+
+def wf01_burn_dist(rows):
+    walls, sources, start, exit_cell = wf01_parse(rows)
+    dist = {s: 0 for s in sources}
+    q = deque(sources)
+    while q:
+        c, r = q.popleft()
+        for dx, dy in DIRS:
+            nb = (c + dx, r + dy)
+            if nb in walls or nb in dist or nb == exit_cell:
+                continue
+            if not (0 <= nb[0] < GRID and 0 <= nb[1] < GRID):
+                continue
+            dist[nb] = dist[(c, r)] + 1
+            q.append(nb)
+    return dist
+
+
+def wf01_solve_actions(spec, t0=0, t_cap=40):
+    rows = spec["rows"]
+    walls, sources, start, exit_cell = wf01_parse(rows)
+    bd = wf01_burn_dist(rows)
+
+    def burning(cell, t):
+        d = bd.get(cell)
+        return d is not None and d * WF_SPREAD <= t
+
+    if burning(start, t0):
+        return None
+    state0 = (start, t0)
+    q = deque([(state0, [])])
+    seen = {state0}
+    while q:
+        ((pos, t), path) = q.popleft()
+        if t - t0 > t_cap:
+            continue
+        moves = [(d, a) for d, a in ACTS.items()] + [((0, 0), 5)]
+        for d, a in moves:
+            np_ = (pos[0] + d[0], pos[1] + d[1])
+            if np_ != pos:
+                if np_ in walls or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                    continue
+            if np_ == exit_cell:
+                return path + [a]
+            if burning(np_, t + 1):
+                continue
+            st = (np_, t + 1)
+            if st not in seen:
+                seen.add(st)
+                q.append((st, path + [a]))
+    return None
+
+
+def gen_wf01_level(rng, n_walls, min_base):
+    for _ in range(6000):
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        walls = set(interior[:n_walls])
+        rest = interior[n_walls:]
+        if len(rest) < 3:
+            continue
+        start, exit_cell, source = rest[0], rest[1], rest[2]
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7) or (c, r) in walls:
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                elif (c, r) == source:
+                    row += "F"
+                else:
+                    row += "."
+            rows.append(row)
+        spec = {"rows": rows}
+        plan = wf01_solve_actions(spec)
+        if plan is None or len(plan) < min_base:
+            continue
+        # time pressure must be REAL: dawdling 6 actions at the start
+        # makes the level unsolvable
+        if wf01_solve_actions(spec, t0=6) is not None:
+            continue
+        return spec, len(plan)
+    raise RuntimeError("wf01: no layout")
+
+
+def gen_wf01_pack(rng):
+    levels, baselines = [], []
+    for n_walls, min_base in ((4, 5), (6, 6), (6, 7), (8, 8), (8, 9)):
+        spec, base = gen_wf01_level(rng, n_walls, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
+# ---------------------------------------------------------------- cl01
+CL_LCM = 6
+
+
+def cl01_solve_actions(spec, want_meta=False):
+    rows = spec["rows"]
+    walls, gates = set(), {}
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+            elif ch in ("2", "3"):
+                gates[(c, r)] = int(ch)
+    state0 = (start, 0)
+    q = deque([(state0, [], False)])
+    seen = {state0}
+    while q:
+        ((pos, t), path, used_gate) = q.popleft()
+        if len(path) > 60:
+            continue
+        moves = [(d, a) for d, a in ACTS.items()] + [((0, 0), 5)]
+        for d, a in moves:
+            np_ = (pos[0] + d[0], pos[1] + d[1])
+            ug = used_gate
+            if np_ != pos:
+                if np_ in walls or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                    continue
+                if np_ in gates:
+                    if (t + 1) % gates[np_] != 0:
+                        continue
+                    ug = True
+            if np_ == exit_cell:
+                return (path + [a], ug) if want_meta else path + [a]
+            st = (np_, (t + 1) % CL_LCM)
+            if st not in seen:
+                seen.add(st)
+                q.append((st, path + [a], ug))
+    return (None, False) if want_meta else None
+
+
+def gen_cl01_level(rng, n_gates, n_walls, min_base):
+    for _ in range(6000):
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        walls = set(interior[:n_walls])
+        rest = interior[n_walls:]
+        if len(rest) < 2 + n_gates:
+            continue
+        start, exit_cell = rest[0], rest[1]
+        gate_cells = {cell: rng.choice("23") for cell in rest[2:2 + n_gates]}
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7) or (c, r) in walls:
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                elif (c, r) in gate_cells:
+                    row += gate_cells[(c, r)]
+                else:
+                    row += "."
+            rows.append(row)
+        spec = {"rows": rows}
+        plan, used_gate = cl01_solve_actions(spec, want_meta=True)
+        if plan is None or len(plan) < min_base or not used_gate:
+            continue
+        return spec, len(plan)
+    raise RuntimeError("cl01: no layout")
+
+
+def gen_cl01_pack(rng):
+    levels, baselines = [], []
+    for n_gates, n_walls, min_base in ((1, 8, 5), (2, 8, 6), (2, 10, 7), (3, 10, 8), (3, 12, 9)):
+        spec, base = gen_cl01_level(rng, n_gates, n_walls, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
 SOLVERS = {
     "gv01": gv01_solve_actions,
     "sw01": sw01_solve_actions,
@@ -1084,6 +1288,8 @@ SOLVERS = {
     "cm01": cm01_solve_actions,
     "cv01": cv01_solve_actions,
     "sn01": sn01_solve_actions,
+    "wf01": wf01_solve_actions,
+    "cl01": cl01_solve_actions,
 }
 
 
@@ -1192,6 +1398,22 @@ MECHANICS = {
         "gen": gen_sn01_pack,
         "fmt": fmt_fl01_levels,
         "title": "Snake Trail (generated)",
+    },
+    "wf01": {
+        "src": ROOT / "our_games" / "wf01" / "e7f8a9b0" / "wf01.py",
+        "class_name": "Wf01",
+        "prefix": "hg",
+        "gen": gen_wf01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Wildfire (generated)",
+    },
+    "cl01": {
+        "src": ROOT / "our_games" / "cl01" / "f8a9b0c1" / "cl01.py",
+        "class_name": "Cl01",
+        "prefix": "kg",
+        "gen": gen_cl01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Clockgates (generated)",
     },
 }
 
