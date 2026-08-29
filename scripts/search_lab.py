@@ -267,9 +267,14 @@ def cmd_astar() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["bench", "train", "astar"])
+    ap.add_argument("cmd", choices=["bench", "train", "astar", "harvest"])
     args = ap.parse_args()
-    if args.cmd == "bench":
+    if args.cmd == "harvest":
+        # harvest-only: single top-budget pass over the whole corpus
+        global BUDGETS
+        BUDGETS = (2500,)
+        cmd_bench()
+    elif args.cmd == "bench":
         cmd_bench()
     elif args.cmd == "train":
         cmd_train()

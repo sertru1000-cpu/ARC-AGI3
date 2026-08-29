@@ -265,6 +265,104 @@ def gen_ph01_pack(rng):
     return levels, baselines
 
 
+# ---------------------------------------------------------------- sk01
+def sk01_solve(rows, node_cap=400_000):
+    """Exact optimal move count (agent steps incl. pushes) via BFS over
+    (agent, frozenset(boxes)); None if unsolvable / cap hit."""
+    walls, boxes, targets, start = set(), set(), set(), None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "B":
+                boxes.add((c, r))
+            elif ch == "T":
+                targets.add((c, r))
+            elif ch == "*":
+                boxes.add((c, r))
+                targets.add((c, r))
+    state0 = (start, frozenset(boxes))
+    q = deque([(state0, 0)])
+    seen = {state0}
+    nodes = 0
+    while q:
+        (pos, bx), dist = q.popleft()
+        nodes += 1
+        if nodes > node_cap:
+            return None
+        for dx, dy in DIRS:
+            np_ = (pos[0] + dx, pos[1] + dy)
+            if np_ in walls or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                continue
+            if np_ in bx:
+                nb = (np_[0] + dx, np_[1] + dy)
+                if nb in walls or nb in bx or not (0 <= nb[0] < GRID and 0 <= nb[1] < GRID):
+                    continue
+                nbx = frozenset((nb if cell == np_ else cell) for cell in bx)
+                if targets <= nbx:
+                    return dist + 1
+                st = (np_, nbx)
+            else:
+                st = (np_, bx)
+            if st not in seen:
+                seen.add(st)
+                q.append((st, dist + 1))
+    return None
+
+
+def gen_sk01_level(rng, n_boxes, n_walls, min_base):
+    interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+    for _ in range(4000):
+        cells = list(interior)
+        rng.shuffle(cells)
+        walls = set(cells[:n_walls])
+        free = [c for c in cells[n_walls:]]
+        if len(free) < 2 * n_boxes + 1:
+            continue
+        boxes = free[:n_boxes]
+        targets = free[n_boxes:2 * n_boxes]
+        start = free[2 * n_boxes]
+        # boxes on the border ring push-lock instantly against the outer
+        # wall unless already on target -- keep generated boxes interior
+        if any(c in (1, 6) or r in (1, 6) for c, r in boxes):
+            continue
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7) or (c, r) in walls:
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) in boxes and (c, r) in targets:
+                    row += "*"
+                elif (c, r) in boxes:
+                    row += "B"
+                elif (c, r) in targets:
+                    row += "T"
+                else:
+                    row += "."
+            rows.append(row)
+        base = sk01_solve(rows)
+        if base is None or base < min_base:
+            continue
+        return {"rows": rows}, base
+    raise RuntimeError(f"sk01: no layout at boxes={n_boxes}")
+
+
+def gen_sk01_pack(rng):
+    levels, baselines = [], []
+    for n_boxes, n_walls, min_base in (
+        (1, 2, 6), (1, 4, 10), (2, 3, 12), (2, 5, 16), (3, 4, 18),
+    ):
+        spec, base = gen_sk01_level(rng, n_boxes, n_walls, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
 # ---------------------------------------------------------------- packaging
 def fmt_fl01_levels(levels):
     parts = ["LEVELS = ["]
@@ -306,6 +404,14 @@ MECHANICS = {
         "gen": gen_ph01_pack,
         "fmt": fmt_ph01_levels,
         "title": "Pharmacy (generated)",
+    },
+    "sk01": {
+        "src": ROOT / "our_games" / "sk01" / "c9d0e1f2" / "sk01.py",
+        "class_name": "Sk01",
+        "prefix": "sg",
+        "gen": gen_sk01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Sokoban (generated)",
     },
 }
 
