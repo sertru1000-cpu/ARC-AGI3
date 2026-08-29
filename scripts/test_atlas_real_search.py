@@ -493,6 +493,33 @@ def main() -> None:
     _ok("proactive plan_real: level 1 auto-solved on the first call with zero model turns, "
         "autopilot note injected, next level seeded, miss stays silent")
 
+    # 13. A* wiring (30.08, backlog 19): with a heuristic model injected the
+    #     frontier orders by g + w*h -- the search must still find the exact
+    #     plan; with the cache cleared, ordering falls back to novelty.
+    class _FakeH:
+        def predict(self, X):
+            return [0.0]
+
+    astar_state_path = tmp_dir / "astar_state.json"
+    astar_env = WalkEnv(astar_state_path, goal=3)
+    astar_agent = _make_agent(astar_state_path, astar_env)
+    ta_module._ATLAS_ASTAR_CACHE["loaded"] = True
+    ta_module._ATLAS_ASTAR_CACHE["model"] = _FakeH()
+    try:
+        dispatch = astar_agent._run_python_tool(astar_state_path, {"code": "result = plan_real(max_depth=5)\n"})
+        payload = json.loads(dispatch.content)
+        result = payload.get("result") or {}
+        plan = result.get("plan")
+        if not plan or [str(s.get("action")).upper() for s in plan] != ["UP", "UP", "UP"]:
+            _fail("A*-ordered search still finds the exact shortest plan", str(result))
+        if astar_env.level != 2:
+            _fail("A* search plan executed for real", f"level={astar_env.level}")
+    finally:
+        ta_module._ATLAS_ASTAR_CACHE["loaded"] = False
+        ta_module._ATLAS_ASTAR_CACHE["model"] = None
+    _ok("A* wiring: injected heuristic reorders the frontier without breaking search or execution; "
+        "default-off cache restored")
+
     print("\nAll atlas real-search (try_actions/plan_real) checks passed.")
 
 

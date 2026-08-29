@@ -232,6 +232,52 @@ _ATLAS_HAIL_MARY_REMAINING_S = 600.0
 # so a bandit layer degenerates to random search with extra bookkeeping.
 _ATLAS_ROLLOUT_DEPTH = 24
 _ATLAS_MAX_ROLLOUTS = 300
+# 30.08 (backlog 19, A*): optional learned heuristic for plan_real. When
+# ATLAS_ASTAR_MODEL points at a pickled regressor (features -> estimated
+# remaining actions; trained by scripts/search_lab.py on the testbed
+# corpus: holdout eval solved 25/28 levels at 13k nodes vs BFS 19/25 at
+# 29k), the frontier orders by g + w*h instead of the novelty prior.
+# DEFAULT OFF: env unset (or any load failure) keeps battle behavior
+# byte-identical. Lazy-loaded once per process.
+_ATLAS_ASTAR_MODEL_PATH = (os.environ.get("ATLAS_ASTAR_MODEL", "") or "").strip()
+try:
+    _ATLAS_ASTAR_WEIGHT = float(os.environ.get("ATLAS_ASTAR_WEIGHT", "2.0") or "2.0")
+except ValueError:
+    _ATLAS_ASTAR_WEIGHT = 2.0
+_ATLAS_ASTAR_CACHE: dict[str, Any] = {"loaded": False, "model": None}
+
+
+def _atlas_astar_model() -> Any:
+    """Load-once accessor; None when disabled or unloadable."""
+    if not _ATLAS_ASTAR_CACHE["loaded"]:
+        _ATLAS_ASTAR_CACHE["loaded"] = True
+        if _ATLAS_ASTAR_MODEL_PATH:
+            try:
+                import pickle as _pickle
+                with open(_ATLAS_ASTAR_MODEL_PATH, "rb") as fh:
+                    _ATLAS_ASTAR_CACHE["model"] = _pickle.load(fh)
+                print(f"atlas: A* heuristic loaded from {_ATLAS_ASTAR_MODEL_PATH}", flush=True)
+            except Exception as exc:
+                print(f"atlas: A* heuristic UNAVAILABLE ({exc}) -- falling back to novelty ordering", flush=True)
+    return _ATLAS_ASTAR_CACHE["model"]
+
+
+def _atlas_astar_features(grid: Any, level_idx: int) -> Any:
+    """Feature vector -- MUST stay in lockstep with scripts/search_lab.py."""
+    import numpy as _np
+    g = _np.asarray(grid, dtype=_np.uint8)
+    if g.ndim != 2 or g.size == 0:
+        g = _np.zeros((1, 1), dtype=_np.uint8)
+    hist = _np.bincount(g.ravel(), minlength=16)[:16].astype(_np.float64)
+    total = hist.sum() or 1.0
+    hist /= total
+    nz = g.nonzero()
+    if len(nz[0]):
+        spread = [nz[0].std(), nz[1].std(), nz[0].mean(), nz[1].mean()]
+    else:
+        spread = [0.0, 0.0, 0.0, 0.0]
+    return _np.concatenate([hist, _np.array(spread) / g.shape[0],
+                            [float((hist > 0).sum()), float(level_idx)]])
 # atlas 27.08 (probe/checkpoint integration, found live on the first
 # OFFLINE pod run): probes displaced BOTH real actions and verify_theory,
 # and the checkpoint ladder -- designed before probes existed -- responded
@@ -3003,6 +3049,24 @@ class ToolAgent:
         explored_states: list = [([], baseline_grid)]
         nodes = 0
         budget_hit = False
+        # A* (30.08): with a loaded heuristic the priority becomes
+        # g + w*h(child) -- estimated total plan length -- instead of the
+        # novelty prior. Dedup/caps unchanged, so completeness semantics
+        # ('state_space_exhausted') survive; a bad h only reorders.
+        astar_model = _atlas_astar_model()
+        if astar_model is not None:
+            print("atlas: plan_real ordering = A* (g + %.1f*h)" % _ATLAS_ASTAR_WEIGHT, flush=True)
+
+        def _priority(attempt_len: int, change: int, child_grid: Any) -> float:
+            if astar_model is None:
+                return float(-change)
+            try:
+                h = float(astar_model.predict(
+                    _atlas_astar_features(child_grid, self._atlas_current_level)[None, :]
+                )[0])
+            except Exception:
+                return float(-change)
+            return attempt_len + _ATLAS_ASTAR_WEIGHT * max(h, 0.0)
         while frontier:
             _, _, path, parent_grid = heapq.heappop(frontier)
             for candidate in candidates:
@@ -3035,7 +3099,10 @@ class ToolAgent:
                 if len(attempt) < max_depth:
                     change = self._atlas_grid_diff_count(parent_grid, child_grid)
                     tiebreak += 1
-                    heapq.heappush(frontier, (-change, tiebreak, attempt, child_grid))
+                    heapq.heappush(
+                        frontier,
+                        (_priority(len(attempt), change, child_grid), tiebreak, attempt, child_grid),
+                    )
             if budget_hit:
                 break
 
