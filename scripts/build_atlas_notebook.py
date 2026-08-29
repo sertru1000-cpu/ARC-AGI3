@@ -7,6 +7,7 @@ The bundled source dataset stays untouched. Everything we change is set on
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -202,12 +203,12 @@ if hasattr(_atlas_tool_agent, "_ATLAS_LLM_ZOMBIE_GATE"):
 # understate contention). Same solver config, same real games, just cut
 # short. Phase B (true_submission) is untouched -- atlas_fit_game_cap() below
 # still sizes its cap from ATLAS_SUBMISSION_BUDGET_S alone.
-import os as _os
-# 28.08: env-overridable so one builder serves both calibration shapes:
-#   v24 (default 14400 = 4h/game matched control) and
-#   v25 (ATLAS_CALIBRATION_CAP_S=1500 -> 25 min at one wave = the 30-min
-#   total sanity check the user set for the probes build).
-ATLAS_CALIBRATION_CAP_S = float(_os.environ.get("ATLAS_CALIBRATION_CAP_S", "14400"))
+# 29.08 FIX (caught live by the user via "Diff: +0 -0"): this constant
+# lives INSIDE the generated notebook cell, so reading the env var here
+# meant reading it AT KAGGLE RUNTIME (where it is unset) -- v25 silently
+# ran a 4h Phase A instead of 30 min. The builder now substitutes the
+# BUILD-time env value as a literal into the cell (see build()).
+ATLAS_CALIBRATION_CAP_S = __ATLAS_CALIBRATION_CAP_S__  # value substituted by the BUILDER (env ATLAS_CALIBRATION_CAP_S at build time)
                                    # 28.08 (kernel v24, user): 4h/game --
                                    # Phase A becomes the MATCHED CONTROL
                                    # against the probe-branch decisive run
@@ -365,7 +366,14 @@ def build() -> None:
         _source_of(cells[dataset_cell_idx]).replace(OLD_SOURCE_DATASET, NEW_SOURCE_DATASET, 1),
     )
 
-    cells.insert(hook_idx + 1, _new_cell(ATLAS_CELL))
+    # 29.08: substitute BUILD-time values into the cell (an env read left
+    # inside the cell text executes on KAGGLE, where the env is unset --
+    # that is exactly how v25 silently ran a 4h Phase A instead of 30 min).
+    cap_value = float(os.environ.get("ATLAS_CALIBRATION_CAP_S", "14400"))
+    atlas_cell_text = ATLAS_CELL.replace("__ATLAS_CALIBRATION_CAP_S__", repr(cap_value))
+    assert "__ATLAS_CALIBRATION_CAP_S__" not in atlas_cell_text
+    print(f"builder: ATLAS_CALIBRATION_CAP_S -> {cap_value}")
+    cells.insert(hook_idx + 1, _new_cell(atlas_cell_text))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     OUT_NB.write_text(
