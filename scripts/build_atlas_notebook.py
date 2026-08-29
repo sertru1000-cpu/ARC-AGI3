@@ -75,7 +75,22 @@ ATLAS_CELL = '''# ==============================================================
 
 ATLAS_ANALYZER_TIMEOUT_S = 480.0       # v1 tried 180 (measured: far too short)
 ATLAS_ANALYZER_MAX_OUTPUT_TOKENS = 8000  # v1 had this unbounded (0) -- the real bug
-ATLAS_CONCURRENCY = 110                # 28.08 (user): ONE WAVE of the ~110-game
+ATLAS_CONCURRENCY = 20                 # 29.08 evening (user, option B): BACK to
+                                        # v23's proven waves-of-20. The one-wave
+                                        # 110 config just scored 0.65 on the
+                                        # hidden set with v23's own code (v24,
+                                        # 55860197) vs 0.92 for waves-of-20 --
+                                        # and the same-day testbed showed WHY:
+                                        # 55 concurrent games starve each other
+                                        # of LLM turns (wall time is cheap, LLM
+                                        # turns are the scarce resource). This
+                                        # build = round-6+8 depth code on the
+                                        # config that actually scored 0.92.
+                                        # Final-rescore (110 games -> 80 min/game)
+                                        # config question deliberately deferred.
+                                        # Previous one-wave rationale kept below
+                                        # for history:
+                                        # 28.08 (user): ONE WAVE of the ~110-game
                                         # hidden set (55 public-LB + 55 private,
                                         # structure confirmed 28.08). Rehearsals:
                                         # 55x4h and 110x6h both clean on the pod.
@@ -126,7 +141,11 @@ ATLAS_FALLBACK_GAME_CAP_S = 7920.0     # applied only if the bundle carries none
 # Wall-clock guard for the submission rerun. Unlike the offline run, a rerun
 # gets soft_end_time=None, so the per-game cap is the ONLY thing standing
 # between us and Kaggle killing the notebook at 9 h with no result.
-ATLAS_SUBMISSION_BUDGET_S = 30600.0   # 28.08 (user): 8.5 h, one-wave config --
+ATLAS_SUBMISSION_BUDGET_S = 28800.0   # 29.08 (option B): back to v23's 8h +
+                                       # 1h margin -- the exact budget behind
+                                       # 0.92. Was 30600 (8.5h one-wave, v24's
+                                       # 0.65). Original one-wave note:
+                                       # 28.08 (user): 8.5 h, one-wave config --
                                        # no per-game extensions (draws off), so
                                        # this IS the per-game ceiling too. Rides
                                        # closer to the platform kill than the
@@ -153,7 +172,11 @@ ATLAS_SUBMISSION_BUDGET_S = 30600.0   # 28.08 (user): 8.5 h, one-wave config --
 # the 28.08 rehearsals validated while still bounding any single game to
 # half the 8h budget. History: a v7 regression (0.06) came from removing
 # the ceiling ENTIRELY -- keep it firm and named, never delete it.
-ATLAS_SUBMISSION_GAME_CAP_CEILING_S = 30600.0
+ATLAS_SUBMISSION_GAME_CAP_CEILING_S = 8500.0  # 29.08 (option B): v23's ceiling
+                                       # (was 30600 for one-wave). At 55 games /
+                                       # 3 waves the affordable cap is 9600s ->
+                                       # this ceiling binds at 8500s (~140 min),
+                                       # the regime that scored 0.92.
 ATLAS_MIN_GAME_CAP_S = 1800.0
 
 print("atlas: solver config as it came from the bundle:")
@@ -181,10 +204,12 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # (v23-agent hybrid or the full probes build).
 import inference.framework.solver as _atlas_solver_mod
 if hasattr(_atlas_solver_mod, "_ATLAS_TIME_BANK_DRAWS_ENABLED"):
-    # No per-game extensions at one wave: a draw on top of the 8.5h cap
-    # would blow past Kaggle's 12h kill => no submission file at all.
-    _atlas_solver_mod._ATLAS_TIME_BANK_DRAWS_ENABLED = False
-    print("atlas: patched solver._ATLAS_TIME_BANK_DRAWS_ENABLED = False (one-wave: no extensions)")
+    # 29.08 (option B): draws back ON -- v23's 0.92 regime included the time
+    # bank, and at the 8500s ceiling a maxed-out draw (+100% => ~4.7h) stays
+    # far under Kaggle's 12h kill. (The False patch was one-wave-specific:
+    # a draw on top of an 8.5h cap would have blown the platform limit.)
+    _atlas_solver_mod._ATLAS_TIME_BANK_DRAWS_ENABLED = True
+    print("atlas: solver._ATLAS_TIME_BANK_DRAWS_ENABLED = True (v23 regime: bank draws allowed)")
 if hasattr(_atlas_tool_agent, "_ATLAS_LLM_REQUEST_GATE"):
     import threading as _atlas_threading
     _atlas_tool_agent._ATLAS_LLM_MAX_CONCURRENT = 25
@@ -313,11 +338,11 @@ RUN_CELL_ANCHOR = """        bm.games = _competition_games()
 RUN_CELL_PATCH = """        bm.games = _competition_games()
         bm.n_passes = 1
         bm.game_weights = None
-        # atlas 28.08 (user): single-wave config -- time-bank DRAWS off (no
-        # per-game extensions; every game already holds the whole budget),
-        # stalled-game early exits stay on (they free GPU share).
+        # atlas 29.08 (option B): v23 regime -- time-bank draws ON (waves of
+        # 20; deposits from stalled games get re-drawn by progressing ones,
+        # ceiling 8500s keeps a maxed draw far under the platform kill).
         import os as _atlas_os
-        _atlas_os.environ["ATLAS_TIME_BANK_DRAWS"] = "0"
+        _atlas_os.environ["ATLAS_TIME_BANK_DRAWS"] = "1"
         # atlas: a rerun has no soft deadline, so size the per-game cap to fit.
         atlas_fit_game_cap(len(bm.games))"""
 
