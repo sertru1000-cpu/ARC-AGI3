@@ -10,6 +10,13 @@ Usage:
   python scripts/owng_delta_table.py \
       --a runs/<A>/benchmark.json --b runs/<B>/benchmark.json \
       [--log-a <A.log> --log-b <B.log>]
+
+Two rulers (29.08): benchmark.json's levels_completed is the STRICT
+current-play state (rollbacks/resets zero it -- the 24-conc run read
+all-zero on it while sys_level anchors showed 11 real level-ups). When
+<exp_dir>/artifacts/*_events.jsonl sits next to the benchmark, the table
+also computes OFFICIAL levels = max score over plays, which is what the
+Kaggle metric uses. Official is the headline; strict is context.
 """
 
 from __future__ import annotations
@@ -43,6 +50,39 @@ def load_runs(path: Path) -> dict[str, list[dict]]:
     per_game: dict[str, list[dict]] = defaultdict(list)
     for run in data.get("game_runs", []):
         per_game[str(run.get("game_id"))].append(run)
+    return per_game
+
+
+def official_from_events(events_file: Path) -> tuple[int, int]:
+    """(max levels over plays, number of plays) from an events jsonl.
+    A score drop between consecutive action rows = a new play."""
+    best = prev = 0
+    plays = 1
+    with events_file.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if d.get("type") != "action":
+                continue
+            score = int(d.get("score") or 0)
+            if score < prev:
+                plays += 1
+            best = max(best, score)
+            prev = score
+    return best, plays
+
+
+def official_per_game(benchmark_path: Path) -> dict[str, list[tuple[int, int]]]:
+    """Scan <exp_dir>/artifacts/*_events.jsonl next to benchmark.json."""
+    artifacts = benchmark_path.parent / "artifacts"
+    per_game: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    if not artifacts.is_dir():
+        return per_game
+    for f in sorted(artifacts.glob("*_events.jsonl")):
+        gid = f.name.split("_p")[0]
+        per_game[gid].append(official_from_events(f))
     return per_game
 
 
@@ -97,27 +137,36 @@ def main() -> None:
 
     games_a = load_runs(args.a)
     games_b = load_runs(args.b)
+    off_a = official_per_game(args.a)
+    off_b = official_per_game(args.b)
     all_ids = sorted(set(games_a) | set(games_b))
 
-    print(f"{'game':<16} {'lv best A/B':>12} {'lv mean A/B':>14} "
-          f"{'eff A/B (1=base)':>18} {'min/game A/B':>14}")
+    print(f"{'game':<8} {'OFFICIAL lv A':>16} {'OFFICIAL lv B':>16} "
+          f"{'plays A/B':>10} {'strict A/B':>11} {'min A/B':>9}")
     print("-" * 78)
-    tot_a = tot_b = 0.0
+    tot_a = tot_b = 0
     for gid in all_ids:
         sa = summarize(games_a.get(gid, []))
         sb = summarize(games_b.get(gid, []))
-        tot_a += sa.get("levels_mean", 0.0) if sa else 0.0
-        tot_b += sb.get("levels_mean", 0.0) if sb else 0.0
+        oa = off_a.get(gid, [])
+        ob = off_b.get(gid, [])
+        lv_a = [x[0] for x in oa] or [0]
+        lv_b = [x[0] for x in ob] or [0]
+        pl_a = sum(x[1] for x in oa)
+        pl_b = sum(x[1] for x in ob)
+        tot_a += sum(lv_a)
+        tot_b += sum(lv_b)
         name = gid.split("-")[0]
         n = (sa or sb).get("n_levels", "?")
-        print(f"{name:<16} "
-              f"{sa.get('levels_best', 0)}/{sb.get('levels_best', 0)} of {n:<4} "
-              f"{fmt(sa.get('levels_mean'))}/{fmt(sb.get('levels_mean')):<8} "
-              f"{fmt(sa.get('eff')):>8}/{fmt(sb.get('eff')):<9} "
-              f"{fmt((sa.get('wallclock_mean') or 0)/60, '.0f'):>6}/{fmt((sb.get('wallclock_mean') or 0)/60, '.0f')}")
+        print(f"{name:<8} "
+              f"{'+'.join(map(str, sorted(lv_a, reverse=True))):>12} /{n:<3}"
+              f"{'+'.join(map(str, sorted(lv_b, reverse=True))):>12} /{n:<3}"
+              f"{pl_a:>5}/{pl_b:<5}"
+              f"{fmt(sa.get('levels_mean')):>5}/{fmt(sb.get('levels_mean')):<6}"
+              f"{fmt((sa.get('wallclock_mean') or 0)/60, '.0f'):>4}/{fmt((sb.get('wallclock_mean') or 0)/60, '.0f')}")
     print("-" * 78)
-    print(f"{'TOTAL levels (mean over passes)':<34} A={tot_a:.2f}  B={tot_b:.2f}  "
-          f"delta={tot_b - tot_a:+.2f}")
+    print(f"{'TOTAL OFFICIAL levels (sum over passes)':<42} A={tot_a}  B={tot_b}  "
+          f"delta={tot_b - tot_a:+d}")
 
     ca, cb = census(args.log_a), census(args.log_b)
     if ca or cb:
