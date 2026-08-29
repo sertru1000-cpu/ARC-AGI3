@@ -210,8 +210,13 @@ _ATLAS_SEARCH_WALL_SECONDS = 10.0
 _ATLAS_SEARCH_WALL_MAX_SECONDS = 60.0
 # D2: progressive proactive budget -- level 2+ carries 2x+ score weight and
 # a deeper state space; the level-entry search there gets the big budget.
-_ATLAS_PROACTIVE_L1_BUDGET = {"max_depth": 6, "max_nodes": 250, "wall_seconds": 10}
-_ATLAS_PROACTIVE_DEEP_BUDGET = {"max_depth": 10, "max_nodes": 1000, "wall_seconds": 40}
+# 30.08 (Gemini round 10b Q2): at the measured ~90 nodes/sec the old caps
+# (250/1000) cut the search off after ~3s/~11s of its 10s/40s wall budget.
+# Raised so the node cap and the wall budget bind at roughly the same time;
+# harm threshold per the critic is ~3000 nodes (combinatorial explosion +
+# RAM), so the deep budget stays well under it.
+_ATLAS_PROACTIVE_L1_BUDGET = {"max_depth": 6, "max_nodes": 750, "wall_seconds": 10}
+_ATLAS_PROACTIVE_DEEP_BUDGET = {"max_depth": 10, "max_nodes": 2500, "wall_seconds": 40}
 _ATLAS_HAIL_MARY_BUDGET = {"max_depth": 12, "max_nodes": 5000, "wall_seconds": 60}
 # HailMary trigger: this many seconds (or less) left on the game's wall
 # budget while on level 2+ -> the harness stops waiting for the model and
@@ -272,7 +277,24 @@ _ATLAS_LLM_REQUEST_GATE = (
 # the median level-2 game FOUR real actions). Zombies (level 1, >=N real
 # actions since progress) must additionally hold one of these fewer slots
 # -- deep and fresh games keep priority access to the main gate.
-_ATLAS_ZOMBIE_AFTER_ACTIONS = int(os.environ.get("ATLAS_ZOMBIE_AFTER_ACTIONS", "25") or "25")
+_ATLAS_ZOMBIE_AFTER_ACTIONS = int(os.environ.get("ATLAS_ZOMBIE_AFTER_ACTIONS", "30") or "30")
+# 30.08 (Gemini round 10b Q4, hybrid cull): a plain action counter would
+# kill real solves -- our own CDF over 78 solved L1s puts 24.4% of them in
+# the 21..30-action window. So the EARLY gate (20 actions) applies only to
+# entropy-dead games (the board barely changed over the last 7 real
+# actions: <=2 distinct signatures = wall-banging/looping); games that are
+# still opening new states keep full slots until the unconditional
+# threshold above (30).
+_ATLAS_ZOMBIE_ENTROPY_AFTER = int(os.environ.get("ATLAS_ZOMBIE_ENTROPY_AFTER", "20") or "20")
+_ATLAS_ZOMBIE_ENTROPY_WINDOW = 7
+# 30.08 (Gemini round 10b Q3, draft->clean speedrun): official score = max
+# over plays, so after a slowly-won level a voluntary full reset + replay
+# of loop-compressed recordings can only ever RAISE the score. Fires when
+# the compressed chain saves >=30% of the recorded actions and the game
+# still has wall budget left.
+_ATLAS_DRAFT_SPEEDRUN = (os.environ.get("ATLAS_DRAFT_SPEEDRUN", "1") or "1").strip().lower() not in {"0", "false", "no"}
+_ATLAS_SPEEDRUN_GAIN_RATIO = 0.7
+_ATLAS_SPEEDRUN_MIN_REMAINING_S = 180.0
 _ATLAS_LLM_ZOMBIE_SLOTS = int(os.environ.get("ATLAS_LLM_ZOMBIE_SLOTS", "0") or "0")
 if _ATLAS_LLM_ZOMBIE_SLOTS <= 0 and _ATLAS_LLM_MAX_CONCURRENT > 0:
     _ATLAS_LLM_ZOMBIE_SLOTS = max(1, int(_ATLAS_LLM_MAX_CONCURRENT * 0.4))
@@ -1636,6 +1658,14 @@ class ToolAgent:
         self._atlas_plan_real_auto_note: str | None = None
         self._atlas_level_solutions: dict[int, list[dict[str, Any]]] = {}
         self._atlas_current_level_actions: list[dict[str, Any]] = []
+        # 30.08 draft-speedrun state: per-action board signatures aligned
+        # with _atlas_current_level_actions (for loop compression), the
+        # archived per-level sig lists / entry sigs, and the highest level
+        # count a voluntary speedrun already ran for (one shot per depth).
+        self._atlas_current_level_sigs: list[Any] = []
+        self._atlas_level_sig_lists: dict[int, list[Any]] = {}
+        self._atlas_level_entry_sigs: dict[int, Any] = {}
+        self._atlas_speedrun_done_upto = 0
         self._atlas_auto_replay_note: str | None = None
         self._atlas_in_auto_replay = False
         self._atlas_pending_mechanic_handoff: int | None = None
@@ -1746,6 +1776,10 @@ class ToolAgent:
             self._atlas_plan_real_auto_note = None
             self._atlas_level_solutions = {}
             self._atlas_current_level_actions = []
+            self._atlas_current_level_sigs = []
+            self._atlas_level_sig_lists = {}
+            self._atlas_level_entry_sigs = {}
+            self._atlas_speedrun_done_upto = 0
             self._atlas_auto_replay_note = None
             self._atlas_in_auto_replay = False
             self._atlas_pending_mechanic_handoff = None
@@ -2488,10 +2522,21 @@ class ToolAgent:
                 timeout=request_timeout_seconds if request_timeout_seconds is not None else self._timeout,
             )
 
+        recent_sigs = self._atlas_recent_board_sigs[-_ATLAS_ZOMBIE_ENTROPY_WINDOW:]
+        entropy_dead = (
+            len(recent_sigs) >= _ATLAS_ZOMBIE_ENTROPY_WINDOW
+            and len(set(recent_sigs)) <= 2
+        )
         is_zombie = (
             _ATLAS_LLM_ZOMBIE_GATE is not None
             and self._atlas_current_level == 1
-            and self._atlas_actions_since_level_progress >= _ATLAS_ZOMBIE_AFTER_ACTIONS
+            and (
+                self._atlas_actions_since_level_progress >= _ATLAS_ZOMBIE_AFTER_ACTIONS
+                or (
+                    entropy_dead
+                    and self._atlas_actions_since_level_progress >= _ATLAS_ZOMBIE_ENTROPY_AFTER
+                )
+            )
         )
         if _ATLAS_LLM_REQUEST_GATE is not None and is_zombie:
             with _ATLAS_LLM_ZOMBIE_GATE:
@@ -2668,6 +2713,7 @@ class ToolAgent:
         # keeps a VOLUNTARY rollback from tripping the auto-replay's
         # fell-back-a-level detection (that path is for engine RESETs).
         self._atlas_current_level_actions = []
+        self._atlas_current_level_sigs = []
         self._atlas_actions_since_level_progress = 0
         self._atlas_recent_board_sigs = []
         self._atlas_rollback_lesson = lesson_learned
@@ -3319,6 +3365,7 @@ class ToolAgent:
             return
         if kind == "RESET":
             self._atlas_current_level_actions = []
+            self._atlas_current_level_sigs = []
             return
         entry: dict[str, Any] = {"action": kind}
         if isinstance(spec, dict) and "row" in spec and "col" in spec:
@@ -3378,6 +3425,104 @@ class ToolAgent:
                 flush=True,
             )
 
+    def _atlas_compress_solution(
+        self, actions: list[dict[str, Any]], sigs: list[Any], entry_sig: Any
+    ) -> list[dict[str, Any]]:
+        """Loop-erase a recorded level solution: if the board signature at
+        position i reappears at a later position j, the actions between are
+        a provable no-op cycle in a deterministic engine -- cut them.
+        Falls back to the raw list when sigs are missing/misaligned (e.g.
+        harness-auto-executed levels record actions without per-step sigs).
+        Hidden-state caveat (equal grids, different counters) is covered by
+        the replay's own divergence honesty + score being max over plays."""
+        if not actions or len(actions) != len(sigs) or any(s is None for s in sigs):
+            return list(actions)
+        states: list[Any] = [entry_sig] + list(sigs)
+        last_seen: dict[Any, int] = {}
+        for idx, st in enumerate(states):
+            if st is not None:
+                last_seen[st] = idx
+        keep: list[dict[str, Any]] = []
+        pos = 0
+        n = len(actions)
+        while pos < n:
+            st = states[pos]
+            jump = last_seen.get(st, pos) if st is not None else pos
+            if jump > pos:
+                pos = jump
+                continue
+            keep.append(actions[pos])
+            pos += 1
+        return keep
+
+    def _atlas_maybe_draft_speedrun(self) -> None:
+        """Round 10b Q3 (Gemini): draft -> clean run. RHAE pays quadratically
+        for action efficiency and the official score is the MAX over plays,
+        so after a slowly-won level the harness voluntarily restarts the
+        whole game and replays loop-compressed recordings of every solved
+        level. A worse replay can never lower the score; a better one is a
+        near-free upgrade (engine-only, zero LLM turns). Fires once per
+        solved-depth, only when compression saves >=30% of the actions.
+        NOTE: with ONLY_RESET_LEVELS a single RESET only restarts the
+        current level; the DOUBLE RESET below (second one lands with
+        _action_count == 0) is what triggers the engine's full restart."""
+        if not _ATLAS_DRAFT_SPEEDRUN or self._atlas_in_auto_replay:
+            return
+        if self._step_env_callback is None or self._checkpoint_env_callback is None:
+            return
+        top = self._atlas_current_level
+        solved = top - 1
+        if solved < 1 or self._atlas_speedrun_done_upto >= solved:
+            return
+        raw_total = 0
+        compressed: dict[int, list[dict[str, Any]]] = {}
+        for lv in range(1, solved + 1):
+            solution = self._atlas_level_solutions.get(lv)
+            if not solution:
+                return  # a gap would strand the replay mid-chain
+            raw_total += len(solution)
+            compressed[lv] = self._atlas_compress_solution(
+                solution,
+                self._atlas_level_sig_lists.get(lv, []),
+                self._atlas_level_entry_sigs.get(lv),
+            )
+        comp_total = sum(len(v) for v in compressed.values())
+        if raw_total == 0 or comp_total > _ATLAS_SPEEDRUN_GAIN_RATIO * raw_total:
+            return
+        if self._atlas_time_remaining_callback is not None:
+            try:
+                remaining = self._atlas_time_remaining_callback()
+            except Exception:
+                remaining = None
+            if remaining is not None and remaining < _ATLAS_SPEEDRUN_MIN_REMAINING_S:
+                return
+        self._atlas_speedrun_done_upto = solved
+        print(
+            f"atlas: draft-speedrun firing -- levels 1..{solved} recorded at {raw_total} "
+            f"action(s), loop-compressed to {comp_total}; voluntary full restart + clean replay",
+            flush=True,
+        )
+        try:
+            self._step_env_callback({"actions": [{"action": "RESET"}]})
+            payload = self._step_env_callback({"actions": [{"action": "RESET"}]}) or {}
+        except Exception:
+            return
+        try:
+            landed = int(payload.get("level") or 0)
+        except (TypeError, ValueError):
+            landed = 0
+        if landed > 1:
+            print(
+                f"atlas: draft-speedrun aborted -- double RESET landed on level {landed}, not 1",
+                flush=True,
+            )
+            return
+        self._atlas_level_solutions.update(compressed)
+        self._atlas_current_level = 1
+        self._atlas_current_level_actions = []
+        self._atlas_current_level_sigs = []
+        self._atlas_auto_replay_solved_levels(1, top)
+
     def _atlas_note_action_progress(self, compact_payload: dict[str, Any], board_sig_after: Any) -> None:
         """Trigger A/B bookkeeping for the force-rollback checkpoint, and
         auto-anchor creation on level-up. Called after every REAL executed
@@ -3404,6 +3549,7 @@ class ToolAgent:
             fell_from = self._atlas_current_level
             self._atlas_current_level = max(1, level)
             self._atlas_current_level_actions = []
+            self._atlas_current_level_sigs = []
             if _ATLAS_LEVEL_AUTO_REPLAY and self._step_env_callback is not None:
                 self._atlas_auto_replay_solved_levels(self._atlas_current_level, fell_from)
             return
@@ -3415,6 +3561,15 @@ class ToolAgent:
                 self._atlas_level_solutions[self._atlas_current_level] = list(
                     self._atlas_current_level_actions
                 )
+                # draft-speedrun bookkeeping: archive the sig trail of the
+                # completed level (final action's sig included so lengths
+                # match) and stamp the NEXT level's entry sig.
+                if board_sig_after is not None:
+                    self._atlas_current_level_sigs.append(board_sig_after)
+                self._atlas_level_sig_lists[self._atlas_current_level] = list(
+                    self._atlas_current_level_sigs
+                )
+                self._atlas_level_entry_sigs[self._atlas_current_level + 1] = board_sig_after
                 # D4 (Gemini round 6): mechanics usually escalate, not
                 # change -- schedule a free harness probe of THIS solution
                 # on the next level's board (consumed on the next python
@@ -3422,6 +3577,7 @@ class ToolAgent:
                 if _ATLAS_MECHANIC_HANDOFF:
                     self._atlas_pending_mechanic_handoff = self._atlas_current_level
             self._atlas_current_level_actions = []
+            self._atlas_current_level_sigs = []
             self._atlas_current_level = max(self._atlas_current_level, level)
             snapshot = self._checkpoint_env_callback()
             if snapshot is not None:
@@ -3462,9 +3618,14 @@ class ToolAgent:
             ):
                 self._atlas_pending_auto_plan_real = True
                 self._atlas_pending_auto_plan_real_proactive = True
+            # 30.08 (round 10b Q3): the level was just won -- if the draft
+            # was sloppy and compresses well, voluntarily restart the game
+            # and replay the clean chain (score = max over plays: free win).
+            self._atlas_maybe_draft_speedrun()
             return
         self._atlas_actions_since_level_progress += 1
         if board_sig_after is not None:
+            self._atlas_current_level_sigs.append(board_sig_after)
             self._atlas_recent_board_sigs.append(board_sig_after)
             max_len = _ATLAS_ROLLBACK_LOOP_WINDOW + 1
             if len(self._atlas_recent_board_sigs) > max_len:

@@ -293,6 +293,26 @@ def main() -> None:
     hm_agent._run_python_tool(hm_path, {"code": "result = 2\n"})
     _ok("hail mary: <10 min left on level 2 -> deep search runs once, plan executed (level 3), note injected")
 
+    # 7. Draft-speedrun (30.08, Gemini round 10b Q3): a sloppy L1 win (with
+    #    a provable UP/DOWN loop in the trace) triggers a voluntary full
+    #    restart + loop-compressed clean replay; an optimal draft does not.
+    sp_path = tmp_dir / "speedrun_state.json"
+    sp_env = MultiLevelEnv(sp_path, goals=[2, 9])
+    sp_agent = _make_agent(sp_path, sp_env)
+    for code in ("action('UP')\n", "action('DOWN')\n", "action('UP')\n", "action('UP')\n"):
+        sp_agent._run_python_tool(sp_path, {"code": code})
+    if sp_env.level != 2:
+        _fail("setup: sloppy 4-action draft still wins level 1", f"level={sp_env.level}")
+    if sp_agent._atlas_speedrun_done_upto != 1:
+        _fail("draft-speedrun fired after the sloppy win", f"done_upto={sp_agent._atlas_speedrun_done_upto}")
+    comp = sp_agent._atlas_level_solutions.get(1) or []
+    if len(comp) != 2:
+        _fail("solution loop-compressed 4 -> 2 (UP/DOWN cycle cut)", f"len={len(comp)} {comp}")
+    prompt = sp_agent._build_user_prompt(0, valid_actions=list(MultiLevelEnv.VALID))
+    if "autopilot" not in prompt:
+        _fail("speedrun replay note lands in the prompt", prompt[-500:])
+    _ok("draft-speedrun: sloppy win -> voluntary restart, 4->2 compression, clean replay back to level 2")
+
     print("\nAll atlas level-replay (L2) checks passed.")
 
 

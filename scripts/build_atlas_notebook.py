@@ -75,7 +75,8 @@ ATLAS_CELL = '''# ==============================================================
 
 ATLAS_ANALYZER_TIMEOUT_S = 480.0       # v1 tried 180 (measured: far too short)
 ATLAS_ANALYZER_MAX_OUTPUT_TOKENS = 8000  # v1 had this unbounded (0) -- the real bug
-ATLAS_CONCURRENCY = 20                 # 29.08 evening (user, option B): BACK to
+ATLAS_CONCURRENCY = __ATLAS_CONCURRENCY__  # substituted by the BUILDER (env ATLAS_CONCURRENCY_BUILD, default 20)
+                                        # 29.08 evening (user, option B): BACK to
                                         # v23's proven waves-of-20. The one-wave
                                         # 110 config just scored 0.65 on the
                                         # hidden set with v23's own code (v24,
@@ -398,6 +399,10 @@ def build() -> None:
     atlas_cell_text = ATLAS_CELL.replace("__ATLAS_CALIBRATION_CAP_S__", repr(cap_value))
     assert "__ATLAS_CALIBRATION_CAP_S__" not in atlas_cell_text
     print(f"builder: ATLAS_CALIBRATION_CAP_S -> {cap_value}")
+    conc_value = int(os.environ.get("ATLAS_CONCURRENCY_BUILD", "20"))
+    atlas_cell_text = atlas_cell_text.replace("__ATLAS_CONCURRENCY__", repr(conc_value))
+    assert "__ATLAS_CONCURRENCY__" not in atlas_cell_text
+    print(f"builder: ATLAS_CONCURRENCY -> {conc_value}")
     cells.insert(hook_idx + 1, _new_cell(atlas_cell_text))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
