@@ -178,8 +178,23 @@ class Kq01(ARCBaseGame):
         found = self.current_level.get_sprites_by_name(name)
         return found[0] if found else None
 
+
+    def _atlas_reset_level_state(self):
+        self._collected = 0
+
+    def level_reset(self):
+        super().level_reset()
+        self._atlas_reset_level_state()
+
+    def full_reset(self):
+        super().full_reset()
+        self._atlas_reset_level_state()
+
     def step(self) -> None:
         action = self.action.id
+        if action == GameAction.RESET:
+            self.complete_action()
+            return
         if action == GameAction.ACTION1:
             dx, dy = 0, -CELL
         elif action == GameAction.ACTION2:

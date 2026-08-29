@@ -1,0 +1,17 @@
+{
+  "game_id": "mn01-e5f6a7b8",
+  "title": "Manipulator (atlas testbed original, user-designed)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard",
+    "atlas_own"
+  ],
+  "class_name": "Mn01",
+  "baseline_actions": [
+    15,
+    20,
+    27,
+    23,
+    28
+  ]
+}

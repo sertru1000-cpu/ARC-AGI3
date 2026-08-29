@@ -195,9 +195,26 @@ class Rg01(ARCBaseGame):
             else:
                 sel.set_position(c * CELL, r * CELL)
 
+
+    def _atlas_reset_level_state(self):
+        self._selected = None
+        self._load_pieces()
+        self._sync()
+
+    def level_reset(self):
+        super().level_reset()
+        self._atlas_reset_level_state()
+
+    def full_reset(self):
+        super().full_reset()
+        self._atlas_reset_level_state()
+
     def step(self) -> None:
         spec = LEVELS[self.level_index]
         action = self.action.id
+        if action == GameAction.RESET:
+            self.complete_action()
+            return
         if action == GameAction.ACTION6:
             x = int(self.action.data.get("x", 0)) // 8
             y = int(self.action.data.get("y", 0)) // 8

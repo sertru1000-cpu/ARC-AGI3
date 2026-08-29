@@ -168,9 +168,24 @@ class Bx01(ARCBaseGame):
     def _targets(self):
         return [s for s in self.current_level._sprites if s.name.startswith("target_")]
 
+
+    def _atlas_reset_level_state(self):
+        self._stock_left = N_STOCK[self.level_index]
+
+    def level_reset(self):
+        super().level_reset()
+        self._atlas_reset_level_state()
+
+    def full_reset(self):
+        super().full_reset()
+        self._atlas_reset_level_state()
+
     def step(self) -> None:
         action = self.action.id
         main = self._sprite("main")
+        if action == GameAction.RESET:
+            self.complete_action()
+            return
         if action in (GameAction.ACTION1, GameAction.ACTION2,
                       GameAction.ACTION3, GameAction.ACTION4):
             if main is not None:
