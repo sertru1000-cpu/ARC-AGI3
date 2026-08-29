@@ -1,0 +1,17 @@
+{
+  "game_id": "rg01-d4e5f6a7",
+  "title": "Rube (atlas testbed original, user-designed)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard_click",
+    "atlas_own"
+  ],
+  "class_name": "Rg01",
+  "baseline_actions": [
+    6,
+    12,
+    21,
+    10,
+    18
+  ]
+}
