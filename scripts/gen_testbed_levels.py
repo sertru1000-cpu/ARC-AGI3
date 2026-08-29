@@ -363,6 +363,97 @@ def gen_sk01_pack(rng):
     return levels, baselines
 
 
+# ---------------------------------------------------------------- pt01
+def pt01_solve(rows):
+    """(steps, used_portal) via BFS over agent position with portal edges."""
+    walls, portals, start, exit_cell = set(), {}, None, None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+            elif ch in "123":
+                portals.setdefault(ch, []).append((c, r))
+    hop = {}
+    for cells in portals.values():
+        if len(cells) == 2:
+            hop[cells[0]] = cells[1]
+            hop[cells[1]] = cells[0]
+    q = deque([((start, False), 0)])
+    seen = {(start, False)}
+    while q:
+        ((pos, used), dist) = q.popleft()
+        for dx, dy in DIRS:
+            np_ = (pos[0] + dx, pos[1] + dy)
+            if np_ in walls or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                continue
+            u = used
+            if np_ in hop:
+                np_ = hop[np_]
+                u = True
+            if np_ == exit_cell:
+                return dist + 1, u
+            st = (np_, u)
+            if st not in seen:
+                seen.add(st)
+                q.append((st, dist + 1))
+    return None, False
+
+
+def gen_pt01_level(rng, n_pairs, n_walls, min_base):
+    for _ in range(4000):
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        walls = set(interior[:n_walls])
+        free = interior[n_walls:]
+        need = 2 * n_pairs + 2
+        if len(free) < need:
+            continue
+        cells = free[:need]
+        start, exit_cell = cells[0], cells[1]
+        rows = []
+        portal_cells = {}
+        for k in range(n_pairs):
+            ch = "123"[k]
+            portal_cells[cells[2 + 2 * k]] = ch
+            portal_cells[cells[3 + 2 * k]] = ch
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7) or (c, r) in walls:
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                elif (c, r) in portal_cells:
+                    row += portal_cells[(c, r)]
+                else:
+                    row += "."
+            rows.append(row)
+        base, used_portal = pt01_solve(rows)
+        if base is None or base < min_base:
+            continue
+        if not used_portal:
+            continue  # the optimal path MUST thread a portal (the point)
+        return {"rows": rows}, base
+    raise RuntimeError(f"pt01: no layout at pairs={n_pairs}")
+
+
+def gen_pt01_pack(rng):
+    levels, baselines = [], []
+    for n_pairs, n_walls, min_base in (
+        (1, 4, 4), (1, 8, 6), (2, 8, 6), (2, 10, 8), (3, 10, 8),
+    ):
+        spec, base = gen_pt01_level(rng, n_pairs, n_walls, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
 # ---------------------------------------------------------------- packaging
 def fmt_fl01_levels(levels):
     parts = ["LEVELS = ["]
@@ -412,6 +503,14 @@ MECHANICS = {
         "gen": gen_sk01_pack,
         "fmt": fmt_fl01_levels,
         "title": "Sokoban (generated)",
+    },
+    "pt01": {
+        "src": ROOT / "our_games" / "pt01" / "d0e1f2a3" / "pt01.py",
+        "class_name": "Pt01",
+        "prefix": "tg",
+        "gen": gen_pt01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Portals (generated)",
     },
 }
 
