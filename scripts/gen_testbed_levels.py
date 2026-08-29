@@ -1649,8 +1649,17 @@ def main() -> None:
         source = cfg["src"].read_text(encoding="utf-8")
         assert LEVELS_RE.search(source), f"{mech}: LEVELS block not found"
         for i in range(args.per_game):
-            rng = random.Random(args.seed + hash(mech) % 10_000 + i * 131)
-            levels, baselines = cfg["gen"](rng)
+            levels = baselines = None
+            for attempt in range(8):
+                rng = random.Random(args.seed + hash(mech) % 10_000 + i * 131 + attempt * 777_777)
+                try:
+                    levels, baselines = cfg["gen"](rng)
+                    break
+                except RuntimeError as exc:
+                    print(f"  {mech} pack {i}: retry {attempt + 1} ({exc})")
+            if levels is None:
+                print(f"  {mech} pack {i}: SKIPPED after retries")
+                continue
             body = LEVELS_RE.sub("\n" + cfg["fmt"](levels), source, count=1)
             ver = hashlib.md5(body.encode()).hexdigest()[:8]
             prefix = f"{cfg['prefix']}{i:02d}"
