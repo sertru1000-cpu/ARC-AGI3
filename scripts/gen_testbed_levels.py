@@ -454,6 +454,227 @@ def gen_pt01_pack(rng):
     return levels, baselines
 
 
+# ---------------------------------------------------------------- gv01
+ACTS = {(0, -1): 1, (0, 1): 2, (-1, 0): 3, (1, 0): 4}
+
+
+def gv01_settle(pos, walls, ladders):
+    c, r = pos
+    while True:
+        if (c, r) in ladders:
+            return (c, r)
+        below = (c, r + 1)
+        if below in walls or below in ladders or r + 1 >= GRID:
+            return (c, r)
+        r += 1
+
+
+def gv01_solve_actions(spec):
+    rows = spec["rows"]
+    walls, ladders = set(), set()
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "H":
+                ladders.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+    start = gv01_settle(start, walls, ladders)
+    q = deque([(start, [])])
+    seen = {start}
+    while q:
+        pos, path = q.popleft()
+        c, r = pos
+        for a in (1, 2, 3, 4):
+            nc, nr = c, r
+            if a == 1:
+                if (c, r) in ladders and (c, r - 1) not in walls and r - 1 >= 0:
+                    nr = r - 1
+            elif a == 2:
+                if (c, r + 1) not in walls and r + 1 < GRID:
+                    nr = r + 1
+            elif a == 3:
+                if (c - 1, r) not in walls and c - 1 >= 0:
+                    nc = c - 1
+            else:
+                if (c + 1, r) not in walls and c + 1 < GRID:
+                    nc = c + 1
+            st = gv01_settle((nc, nr), walls, ladders)
+            if st == exit_cell:
+                return path + [a]
+            if st not in seen:
+                seen.add(st)
+                q.append((st, path + [a]))
+    return None
+
+
+def gen_gv01_level(rng, n_platforms, min_base):
+    for _ in range(4000):
+        walls = set()
+        for c in range(GRID):
+            walls.add((c, 0)); walls.add((c, 7))
+        for r in range(GRID):
+            walls.add((0, r)); walls.add((7, r))
+        # random platform segments on interior rows
+        for _p in range(n_platforms):
+            r = rng.randrange(2, 7)
+            c0 = rng.randrange(1, 5)
+            ln = rng.randrange(2, 4)
+            for c in range(c0, min(c0 + ln, 7)):
+                walls.add((c, r))
+        # 1-2 ladders
+        ladders = set()
+        for _l in range(rng.randrange(1, 3)):
+            c = rng.randrange(1, 7)
+            r0 = rng.randrange(2, 6)
+            h = rng.randrange(2, 4)
+            for r in range(r0, min(r0 + h, 7)):
+                if (c, r) not in walls:
+                    ladders.add((c, r))
+        free = [(c, r) for c in range(1, 7) for r in range(1, 7)
+                if (c, r) not in walls and (c, r) not in ladders]
+        if len(free) < 2:
+            continue
+        rng.shuffle(free)
+        start, exit_cell = free[0], free[1]
+        # exit must be a SETTLED cell (reachable resting spot)
+        if gv01_settle(exit_cell, walls, ladders) != exit_cell:
+            continue
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                elif (c, r) in walls:
+                    row += "#"
+                elif (c, r) in ladders:
+                    row += "H"
+                else:
+                    row += "."
+            rows.append(row)
+        spec = {"rows": rows}
+        plan = gv01_solve_actions(spec)
+        if plan is None or len(plan) < min_base:
+            continue
+        if 1 not in plan:
+            continue  # must use a ladder climb (asymmetry is the point)
+        return spec, len(plan)
+    raise RuntimeError("gv01: no layout")
+
+
+def gen_gv01_pack(rng):
+    levels, baselines = [], []
+    for n_platforms, min_base in ((2, 4), (3, 6), (3, 8), (4, 9), (4, 11)):
+        spec, base = gen_gv01_level(rng, n_platforms, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
+# ---------------------------------------------------------------- sw01
+def sw01_solve_actions(spec):
+    rows = spec["rows"]
+    walls, a_walls, b_walls, levers = set(), set(), set(), set()
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "A":
+                a_walls.add((c, r))
+            elif ch == "B":
+                b_walls.add((c, r))
+            elif ch == "L":
+                levers.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+    state0 = (start, 0)
+    q = deque([(state0, [])])
+    seen = {state0}
+    while q:
+        ((pos, mode), path) = q.popleft()
+        solid = walls | (a_walls if mode == 0 else b_walls)
+        if pos in levers:
+            st = (pos, 1 - mode)
+            if st not in seen:
+                seen.add(st)
+                q.append((st, path + [5]))
+        for d, a in ACTS.items():
+            np_ = (pos[0] + d[0], pos[1] + d[1])
+            if np_ in solid or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                continue
+            if np_ == exit_cell:
+                return path + [a]
+            st = (np_, mode)
+            if st not in seen:
+                seen.add(st)
+                q.append((st, path + [a]))
+    return None
+
+
+def gen_sw01_level(rng, n_a, n_b, min_base):
+    for _ in range(4000):
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        a_walls = set(interior[:n_a])
+        b_walls = set(interior[n_a:n_a + n_b])
+        rest = interior[n_a + n_b:]
+        if len(rest) < 3:
+            continue
+        start, exit_cell, lever = rest[0], rest[1], rest[2]
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7):
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                elif (c, r) == lever:
+                    row += "L"
+                elif (c, r) in a_walls:
+                    row += "A"
+                elif (c, r) in b_walls:
+                    row += "B"
+                else:
+                    row += "."
+            rows.append(row)
+        spec = {"rows": rows}
+        plan = sw01_solve_actions(spec)
+        if plan is None or len(plan) < min_base:
+            continue
+        if 5 not in plan:
+            continue  # solution must toggle the world at least once
+        return spec, len(plan)
+    raise RuntimeError("sw01: no layout")
+
+
+def gen_sw01_pack(rng):
+    levels, baselines = [], []
+    for n_a, n_b, min_base in ((4, 0, 5), (5, 2, 7), (6, 3, 8), (6, 4, 10), (7, 5, 11)):
+        spec, base = gen_sw01_level(rng, n_a, n_b, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
+SOLVERS = {
+    "gv01": gv01_solve_actions,
+    "sw01": sw01_solve_actions,
+}
+
+
 # ---------------------------------------------------------------- packaging
 def fmt_fl01_levels(levels):
     parts = ["LEVELS = ["]
@@ -511,6 +732,22 @@ MECHANICS = {
         "gen": gen_pt01_pack,
         "fmt": fmt_fl01_levels,
         "title": "Portals (generated)",
+    },
+    "gv01": {
+        "src": ROOT / "our_games" / "gv01" / "e1f2a3b4" / "gv01.py",
+        "class_name": "Gv01",
+        "prefix": "gg",
+        "gen": gen_gv01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Gravity (generated)",
+    },
+    "sw01": {
+        "src": ROOT / "our_games" / "sw01" / "f2a3b4c5" / "sw01.py",
+        "class_name": "Sw01",
+        "prefix": "wg",
+        "gen": gen_sw01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Switches (generated)",
     },
 }
 
