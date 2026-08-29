@@ -1,0 +1,18 @@
+{
+  "game_id": "kq01-a1b2c3d4",
+  "title": "Keys in Order (atlas testbed original)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard",
+    "atlas_own"
+  ],
+  "class_name": "Kq01",
+  "baseline_actions": [
+    11,
+    23,
+    31,
+    23,
+    23,
+    51
+  ]
+}
