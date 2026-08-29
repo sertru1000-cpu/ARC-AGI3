@@ -1,0 +1,6 @@
+{
+    "game_id": "ph01",
+    "class_name": "Ph01",
+    "title": "Pharmacy",
+    "baseline_actions": [13, 16, 19, 17, 23]
+}
