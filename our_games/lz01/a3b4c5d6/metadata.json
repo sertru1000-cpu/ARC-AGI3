@@ -1,0 +1,12 @@
+{
+    "game_id": "lz01-a3b4c5d6",
+    "class_name": "Lz01",
+    "title": "Laser Rotate",
+    "baseline_actions": [
+        1,
+        1,
+        2,
+        2,
+        3
+    ]
+}

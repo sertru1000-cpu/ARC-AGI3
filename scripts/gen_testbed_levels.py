@@ -669,9 +669,224 @@ def gen_sw01_pack(rng):
     return levels, baselines
 
 
+# ---------------------------------------------------------------- lz01
+def lz01_trace(spec, orient_map):
+    walls = set(spec["walls"])
+    ec, er, (dx, dy) = spec["emitter"]
+    c, r = ec + dx, er + dy
+    lit = []
+    for _ in range(64):
+        if not (0 < c < GRID - 1 and 0 < r < GRID - 1):
+            break
+        if (c, r) in walls:
+            break
+        lit.append((c, r))
+        if (c, r) in orient_map:
+            if orient_map[(c, r)] == 0:
+                dx, dy = -dy, -dx
+            else:
+                dx, dy = dy, dx
+        c, r = c + dx, r + dy
+    return lit
+
+
+def lz01_solve_actions(spec):
+    """Min clicks to light all targets; returns [(6, cx, cy), ...]."""
+    mirrors = [(c, r) for _, c, r in spec["mirrors"]]
+    start = tuple(o for o, _, _ in spec["mirrors"])
+    targets = set(spec["targets"])
+
+    def lit_ok(orients):
+        omap = {mirrors[i]: orients[i] for i in range(len(mirrors))}
+        lit = set(lz01_trace(spec, omap))
+        return targets <= lit
+
+    if lit_ok(start):
+        return []
+    q = deque([(start, [])])
+    seen = {start}
+    while q:
+        orients, path = q.popleft()
+        for i, (c, r) in enumerate(mirrors):
+            no = tuple((1 - o if j == i else o) for j, o in enumerate(orients))
+            if no in seen:
+                continue
+            npath = path + [(6, c, r)]
+            if lit_ok(no):
+                return npath
+            seen.add(no)
+            q.append((no, npath))
+    return None
+
+
+def gen_lz01_level(rng, n_mirrors, n_targets, min_clicks):
+    for _ in range(6000):
+        side = rng.choice(["L", "R", "T", "B"])
+        if side == "L":
+            emitter = (0, rng.randrange(1, 7), (1, 0))
+        elif side == "R":
+            emitter = (7, rng.randrange(1, 7), (-1, 0))
+        elif side == "T":
+            emitter = (rng.randrange(1, 7), 0, (0, 1))
+        else:
+            emitter = (rng.randrange(1, 7), 7, (0, -1))
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        mirror_cells = interior[:n_mirrors]
+        sol_orients = [rng.randrange(2) for _ in mirror_cells]
+        spec0 = {"emitter": emitter, "walls": [],
+                 "mirrors": [(sol_orients[i], c, r) for i, (c, r) in enumerate(mirror_cells)],
+                 "targets": []}
+        omap = {mirror_cells[i]: sol_orients[i] for i in range(n_mirrors)}
+        lit = [cell for cell in lz01_trace(spec0, omap) if cell not in omap]
+        if len(set(lit)) < n_targets:
+            continue
+        targets = rng.sample(sorted(set(lit)), n_targets)
+        # scramble some mirrors away from the solution
+        scr = list(sol_orients)
+        flips = rng.sample(range(n_mirrors), min(n_mirrors, max(1, min_clicks)))
+        for i in flips:
+            scr[i] = 1 - scr[i]
+        spec = {"emitter": emitter, "walls": [],
+                "mirrors": [(scr[i], c, r) for i, (c, r) in enumerate(mirror_cells)],
+                "targets": targets}
+        plan = lz01_solve_actions(spec)
+        if plan is None or len(plan) < min_clicks:
+            continue
+        return spec, len(plan)
+    raise RuntimeError("lz01: no layout")
+
+
+def gen_lz01_pack(rng):
+    levels, baselines = [], []
+    for n_mirrors, n_targets, min_clicks in (
+        (1, 1, 1), (2, 1, 1), (3, 1, 2), (3, 2, 2), (4, 2, 3),
+    ):
+        spec, base = gen_lz01_level(rng, n_mirrors, n_targets, min_clicks)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
+def fmt_lz01_levels(levels):
+    parts = ["LEVELS = ["]
+    for lv in levels:
+        parts.append(f"    dict(emitter={lv['emitter']!r}, walls={lv['walls']!r},")
+        parts.append(f"         mirrors={lv['mirrors']!r},")
+        parts.append(f"         targets={lv['targets']!r}),")
+    parts.append("]")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------- cm01
+CM_RED, CM_BLUE, CM_PURPLE, CM_NONE = 2, 8, 6, 3
+CM_DOORS = {"1": CM_RED, "2": CM_BLUE, "3": CM_PURPLE}
+
+
+def cm01_mix(color, pad):
+    if pad == "r":
+        return CM_PURPLE if color == CM_BLUE else CM_RED
+    return CM_PURPLE if color == CM_RED else CM_BLUE
+
+
+def cm01_solve_actions(spec, want_meta=False):
+    rows = spec["rows"]
+    walls, pads, doors = set(), {}, {}
+    start = exit_cell = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch == "#":
+                walls.add((c, r))
+            elif ch == "P":
+                start = (c, r)
+            elif ch == "E":
+                exit_cell = (c, r)
+            elif ch in ("r", "b"):
+                pads[(c, r)] = ch
+            elif ch in CM_DOORS:
+                doors[(c, r)] = CM_DOORS[ch]
+    state0 = (start, CM_NONE)
+    q = deque([(state0, [], False)])
+    seen = {state0}
+    while q:
+        ((pos, color), path, used_door) = q.popleft()
+        for d, a in ACTS.items():
+            np_ = (pos[0] + d[0], pos[1] + d[1])
+            if np_ in walls or not (0 <= np_[0] < GRID and 0 <= np_[1] < GRID):
+                continue
+            ud = used_door
+            if np_ in doors:
+                if doors[np_] != color:
+                    continue
+                ud = True
+            ncolor = color
+            if np_ in pads:
+                ncolor = cm01_mix(color, pads[np_])
+            if np_ == exit_cell:
+                return (path + [a], ud) if want_meta else path + [a]
+            st = (np_, ncolor)
+            if st not in seen:
+                seen.add(st)
+                q.append((st, path + [a], ud))
+    return (None, False) if want_meta else None
+
+
+def gen_cm01_level(rng, n_doors, use_purple, n_walls, min_base):
+    for _ in range(6000):
+        interior = [(c, r) for c in range(1, 7) for r in range(1, 7)]
+        rng.shuffle(interior)
+        walls = set(interior[:n_walls])
+        rest = interior[n_walls:]
+        if len(rest) < 4 + n_doors:
+            continue
+        start, exit_cell = rest[0], rest[1]
+        pad_cells = {rest[2]: "r", rest[3]: "b"}
+        door_cells = {}
+        kinds = (["3"] if use_purple else []) + ["1", "2", "1", "2"]
+        for k in range(n_doors):
+            door_cells[rest[4 + k]] = kinds[k % len(kinds)]
+        rows = []
+        for r in range(GRID):
+            row = ""
+            for c in range(GRID):
+                if r in (0, 7) or c in (0, 7) or (c, r) in walls:
+                    row += "#"
+                elif (c, r) == start:
+                    row += "P"
+                elif (c, r) == exit_cell:
+                    row += "E"
+                elif (c, r) in pad_cells:
+                    row += pad_cells[(c, r)]
+                elif (c, r) in door_cells:
+                    row += door_cells[(c, r)]
+                else:
+                    row += "."
+            rows.append(row)
+        spec = {"rows": rows}
+        plan, used_door = cm01_solve_actions(spec, want_meta=True)
+        if plan is None or len(plan) < min_base or not used_door:
+            continue
+        return spec, len(plan)
+    raise RuntimeError("cm01: no layout")
+
+
+def gen_cm01_pack(rng):
+    levels, baselines = [], []
+    for n_doors, use_purple, n_walls, min_base in (
+        (2, False, 6, 6), (3, False, 8, 8), (3, True, 8, 8),
+        (4, True, 10, 10), (5, True, 10, 11),
+    ):
+        spec, base = gen_cm01_level(rng, n_doors, use_purple, n_walls, min_base)
+        levels.append(spec)
+        baselines.append(base)
+    return levels, baselines
+
+
 SOLVERS = {
     "gv01": gv01_solve_actions,
     "sw01": sw01_solve_actions,
+    "lz01": lz01_solve_actions,
+    "cm01": cm01_solve_actions,
 }
 
 
@@ -748,6 +963,22 @@ MECHANICS = {
         "gen": gen_sw01_pack,
         "fmt": fmt_fl01_levels,
         "title": "Switches (generated)",
+    },
+    "lz01": {
+        "src": ROOT / "our_games" / "lz01" / "a3b4c5d6" / "lz01.py",
+        "class_name": "Lz01",
+        "prefix": "lg",
+        "gen": gen_lz01_pack,
+        "fmt": fmt_lz01_levels,
+        "title": "Laser Rotate (generated)",
+    },
+    "cm01": {
+        "src": ROOT / "our_games" / "cm01" / "b4c5d6e7" / "cm01.py",
+        "class_name": "Cm01",
+        "prefix": "cg",
+        "gen": gen_cm01_pack,
+        "fmt": fmt_fl01_levels,
+        "title": "Color Algebra (generated)",
     },
 }
 
