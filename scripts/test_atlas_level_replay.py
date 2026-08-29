@@ -123,6 +123,10 @@ class MultiLevelEnv:
             "done": False,
             "stop_reason": stop_reason,
             "valid_actions": list(self.VALID),
+            # round-8 valve: the real probe fast path returns the resulting
+            # grid; the handoff diagnostic is only injected when cells
+            # actually changed vs level entry (and no game_over).
+            "grid": [[self.pos, self.level]],
         }
 
 
@@ -220,6 +224,36 @@ def main() -> None:
         if "[HARNESS DIAGNOSTIC]" not in prompt or "level NOT completed" not in prompt:
             _fail("handoff diagnostic note lands in the prompt", prompt[-600:])
         _ok("mechanic handoff: level-1 solution probed on level 2, escalation reported, game untouched")
+
+        # 4b. Round-8 safety valve: a probe that ends in game_over rolls the
+        #     env back AND injects NO diagnostic (a game_over/stop_reason
+        #     note measurably confused the model on the B8 testbed run).
+        h1b_path = tmp_dir / "handoff1b_state.json"
+        h1b_env = MultiLevelEnv(h1b_path, goals=[2, 9])
+        h1b_agent = _make_agent(h1b_path, h1b_env)
+        h1b_agent._run_python_tool(h1b_path, {"code": "action(['UP', 'UP'])\n"})
+        if h1b_env.level != 2 or h1b_agent._atlas_pending_mechanic_handoff != 1:
+            _fail("setup: level 1 solved, handoff pending (case game_over)", f"level={h1b_env.level}")
+        original_call = MultiLevelEnv.__call__
+
+        def _lethal_call(self, payload):
+            out = original_call(self, payload)
+            if payload.get("probe"):
+                self.game_over = True
+                out["game_over"] = True
+            return out
+
+        MultiLevelEnv.__call__ = _lethal_call
+        try:
+            h1b_agent._run_python_tool(h1b_path, {"code": "result = 1\n"})
+        finally:
+            MultiLevelEnv.__call__ = original_call
+        if h1b_env.level != 2 or h1b_env.pos != 0 or h1b_env.game_over:
+            _fail("game_over probe rolled back cleanly", f"pos={h1b_env.pos} go={h1b_env.game_over}")
+        prompt = h1b_agent._build_user_prompt(0, valid_actions=list(MultiLevelEnv.VALID))
+        if "[HARNESS DIAGNOSTIC]" in prompt and "DANGEROUS" in prompt:
+            _fail("game_over handoff diagnostic is SUPPRESSED", prompt[-600:])
+        _ok("mechanic handoff valve: game_over probe -> rollback, no diagnostic injected")
 
         # 5. Case B: the level-1 solution ALSO solves level 2 -> the harness
         #    executes it for real, zero model turns.

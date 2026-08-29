@@ -136,7 +136,9 @@ ATLAS_EXPLORE_FIRST_CHECKPOINT = (
     "{tried} of them for real so far -- {untried} still untested. Before building or refining a "
     "predict() theory, spend one real action() on each untried control (any single action is "
     "enough) and observe what changed. The fastest way to learn what a lever does is to pull it, "
-    "not to infer it from pixel statistics alone. Once every available control has been tried at "
+    "not to infer it from pixel statistics alone. If movement controls appear to be no-ops, the "
+    "game may require SELECTION first: click an object (MOUSE) to select it, then repeat the "
+    "movement. Once every available control has been tried at "
     "least once, verify_theory()'s statistical rigor is worth the actions it costs; before that, "
     "it is premature."
 )

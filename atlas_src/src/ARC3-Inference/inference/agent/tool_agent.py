@@ -390,6 +390,23 @@ def _atlas_action_effect_summary(history_entries: list[HistoryEntry]) -> list[st
             else:
                 lines.append(f"- {base} ({n}x): no cell ever changed -- likely a no-op here.")
 
+    # 29.08 (Gemini round 8, Q2 select-then-act): when several movement
+    # controls read as no-ops, the game may be selection-gated (testbed
+    # mirrors/Rube: arrows only move the object you clicked first). One
+    # prompt line; discovering this blind cost the model 30+ actions.
+    noop_moves = sum(
+        1
+        for base in per_action
+        if base != "MOUSE"
+        and not any(cell for _, changed in per_action[base] for cell in changed if cell not in hud_cells)
+    )
+    if noop_moves >= 2:
+        lines.append(
+            "- NOTE: several movement controls changed nothing. Some games require SELECTION "
+            "first: click an object (MOUSE) to select it, then repeat the movement -- test "
+            "that pairing before concluding the controls are dead."
+        )
+
     if hud_cells:
         rows = sorted({r for r, _ in hud_cells})
         lines.append(
@@ -3088,6 +3105,21 @@ class ToolAgent:
             f"{prev_level + 1} ({outcome})",
             flush=True,
         )
+        # 29.08 (Gemini round 8, Q5 safety valve): the env is already rolled
+        # back above (finally), but the DIAGNOSTIC used to be injected
+        # unconditionally -- and on catastrophic or empty probes it measurably
+        # confused the model (B8 testbed run: bx01 stalled re-reading a
+        # game_over/stop_reason note). Inject the note ONLY when the probe
+        # produced a meaningful, non-catastrophic signal: some cells changed
+        # and the game did not end. Silent otherwise -- the census print
+        # above still records the firing.
+        if payload.get("game_over") or not cells:
+            print(
+                "atlas: mechanic handoff diagnostic SUPPRESSED "
+                f"(game_over={bool(payload.get('game_over'))}, cells={cells})",
+                flush=True,
+            )
+            return ""
         return (
             f"[HARNESS DIAGNOSTIC] Level {prev_level} was solved with [{seq_display}]. The harness "
             f"automatically tested that exact sequence on level {prev_level + 1} (then rewound): "
