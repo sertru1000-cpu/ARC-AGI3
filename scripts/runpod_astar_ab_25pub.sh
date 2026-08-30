@@ -124,7 +124,7 @@ run_arm() {  # $1=run name, $2=experiment dir
   cd "${ATLAS_SRC}/ARC3-Inference"
   set +e
   "${VENV_DIR}/bin/inference-taaf-run" \
-    --agent inference --model "${SERVED_MODEL_NAME}" \
+    --include-tags official --agent inference --model "${SERVED_MODEL_NAME}" \
     --analyzer-timeout 480 --deployment-target inline \
     --concurrent-jobs 28 --n-passes 1 \
     --max-runtime-minutes 60 --max-experiment-runtime-minutes 80 \
