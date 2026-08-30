@@ -239,11 +239,21 @@ _ATLAS_MAX_ROLLOUTS = 300
 # 29k), the frontier orders by g + w*h instead of the novelty prior.
 # DEFAULT OFF: env unset (or any load failure) keeps battle behavior
 # byte-identical. Lazy-loaded once per process.
+#
+# 30.08 EVENING RECALIBRATION (duck real-frame mining + hostile pool):
+# h(s) does NOT transfer to unseen real games -- on 3193 held-out pairs
+# from duck's own plays its MAE (18.6) is WORSE than predicting the mean
+# (15.7). Worse, a misinformative h with a large weight actively steers
+# the frontier into traps: on the hostile pool the harness took 5 levels
+# with w=2.0 vs 9 with A* off, the whole gap being tr01 (the one-way trap
+# whose short "tempting" route is a dead pocket). So h is demoted from
+# driver to TIEBREAKER: w=0.5 keeps the node savings on familiar geometry
+# (-27% nodes measured) while g (plan length) stays dominant.
 _ATLAS_ASTAR_MODEL_PATH = (os.environ.get("ATLAS_ASTAR_MODEL", "") or "").strip()
 try:
-    _ATLAS_ASTAR_WEIGHT = float(os.environ.get("ATLAS_ASTAR_WEIGHT", "2.0") or "2.0")
+    _ATLAS_ASTAR_WEIGHT = float(os.environ.get("ATLAS_ASTAR_WEIGHT", "0.5") or "0.5")
 except ValueError:
-    _ATLAS_ASTAR_WEIGHT = 2.0
+    _ATLAS_ASTAR_WEIGHT = 0.5
 _ATLAS_ASTAR_CACHE: dict[str, Any] = {"loaded": False, "model": None}
 
 
