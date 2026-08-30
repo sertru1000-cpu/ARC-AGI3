@@ -1,0 +1,907 @@
+<title>Atlas Version History</title>
+<meta name="description" content="Журнал версий кернела sergueimakarov/arc3-atlas — что менялось в каждой версии, что было Phase A, что боевым сабмишеном.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --bg: #f7f5ef;
+    --surface: #ffffff;
+    --surface-2: #f1eee5;
+    --ink: #1b1f23;
+    --ink-muted: #5c6570;
+    --ink-faint: #8b8477;
+    --border: #ddd7c9;
+    --border-soft: #e8e3d6;
+    --accent: #2c6e6b;
+    --accent-ink: #163e3c;
+    --accent-soft: #e2efed;
+    --win-bg: #e6f0e3;
+    --win-ink: #2f6b3a;
+    --regress-bg: #f6e6e1;
+    --regress-ink: #a1442f;
+    --wait-bg: #f7ecd6;
+    --wait-ink: #93690f;
+    --shadow: 0 1px 2px rgba(27,31,35,0.04), 0 8px 20px -12px rgba(27,31,35,0.12);
+
+    --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+    --font-body: "Public Sans", -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15191b;
+      --surface: #1d2225;
+      --surface-2: #23282b;
+      --ink: #ece8e0;
+      --ink-muted: #a3aab1;
+      --ink-faint: #767e85;
+      --border: #313739;
+      --border-soft: #292f31;
+      --accent: #64c2ba;
+      --accent-ink: #a9e0da;
+      --accent-soft: rgba(100,194,186,0.12);
+      --win-bg: rgba(94,168,109,0.16);
+      --win-ink: #8fd19e;
+      --regress-bg: rgba(206,102,80,0.16);
+      --regress-ink: #e28b73;
+      --wait-bg: rgba(214,163,60,0.16);
+      --wait-ink: #e3bd6e;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 28px -16px rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15191b;
+    --surface: #1d2225;
+    --surface-2: #23282b;
+    --ink: #ece8e0;
+    --ink-muted: #a3aab1;
+    --ink-faint: #767e85;
+    --border: #313739;
+    --border-soft: #292f31;
+    --accent: #64c2ba;
+    --accent-ink: #a9e0da;
+    --accent-soft: rgba(100,194,186,0.12);
+    --win-bg: rgba(94,168,109,0.16);
+    --win-ink: #8fd19e;
+    --regress-bg: rgba(206,102,80,0.16);
+    --regress-ink: #e28b73;
+    --wait-bg: rgba(214,163,60,0.16);
+    --wait-ink: #e3bd6e;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 28px -16px rgba(0,0,0,0.6);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+
+  .masthead { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.75rem; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(2.2rem, 5.5vw, 3.1rem);
+    line-height: 0.98;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .subhead { color: var(--ink-muted); font-size: 1.02rem; max-width: 62ch; }
+
+  /* legend */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.4rem;
+    margin: 1.6rem 0 2.6rem;
+    padding: 0.9rem 1.1rem;
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+  }
+  .legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--ink-muted); }
+  .legend-dot { width: 0.6rem; height: 0.6rem; border-radius: 999px; flex: none; }
+
+  /* timeline */
+  .timeline { position: relative; padding-left: 2.1rem; }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 0.5rem;
+    top: 0.6rem;
+    bottom: 0.6rem;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .entry { position: relative; margin-bottom: 1.4rem; }
+  .entry:last-child { margin-bottom: 0; }
+  .node {
+    position: absolute;
+    left: -2.1rem;
+    top: 1.15rem;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 2px solid var(--border);
+  }
+  .entry.submission .node { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .entry.regression .node { border-color: var(--regress-ink); background: var(--regress-ink); box-shadow: 0 0 0 3px var(--regress-bg); }
+  .entry.waiting .node { border-color: var(--wait-ink); background: var(--wait-ink); box-shadow: 0 0 0 3px var(--wait-bg); }
+  .entry.waiting .card { border-left: 3px solid var(--wait-ink); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 1rem 1.2rem 1.1rem;
+    box-shadow: var(--shadow);
+  }
+  .entry.submission .card { border-left: 3px solid var(--accent); }
+  .entry.regression .card { border-left: 3px solid var(--regress-ink); }
+  .entry.pending .card { border-style: dashed; opacity: 0.92; }
+
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.35rem;
+  }
+  .v-label { display: flex; align-items: baseline; gap: 0.6rem; }
+  .v-num { font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; letter-spacing: -0.01em; }
+  .v-date { font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-faint); }
+
+  .badge {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge.submission { background: var(--accent-soft); color: var(--accent-ink); }
+  .badge.phase-a { background: var(--surface-2); color: var(--ink-muted); border: 1px solid var(--border-soft); }
+  .badge.pending { background: var(--surface-2); color: var(--ink-faint); border: 1px dashed var(--border); }
+  .badge.wait { background: var(--wait-bg); color: var(--wait-ink); }
+
+  .score-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.3rem 0 0.6rem; }
+  .score {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    padding: 0.1rem 0.5rem;
+    border-radius: 6px;
+  }
+  .score.win { background: var(--win-bg); color: var(--win-ink); }
+  .score.regress { background: var(--regress-bg); color: var(--regress-ink); }
+  .score.wait { background: var(--wait-bg); color: var(--wait-ink); }
+  .score-note { font-size: 0.82rem; color: var(--ink-muted); }
+
+  .summary { font-size: 0.92rem; color: var(--ink); margin: 0.3rem 0 0.6rem; }
+
+  .changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+  .changes li {
+    font-size: 0.87rem;
+    color: var(--ink-muted);
+    padding-left: 1.05rem;
+    position: relative;
+  }
+  .changes li::before {
+    content: "+";
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .changes li.fix::before { content: "\21ba"; color: var(--regress-ink); }
+  .changes li code { font-family: var(--font-mono); font-size: 0.85em; background: var(--surface-2); padding: 0.04em 0.32em; border-radius: 4px; color: var(--ink); }
+
+  .gap-note {
+    margin: 0.9rem 0 0.9rem 0;
+    padding: 0.55rem 0.9rem;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--ink-faint);
+    background: var(--surface-2);
+    border-radius: 8px;
+    display: inline-block;
+  }
+
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 2.4rem;
+    box-shadow: var(--shadow);
+  }
+  .stat { background: var(--surface); padding: 0.9rem 1rem 1rem; display: flex; flex-direction: column; gap: 0.25rem; }
+  .stat-label { font-size: 0.66rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+  .stat-value { font-family: var(--font-display); font-weight: 700; font-size: 1.7rem; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat-value.win { color: var(--win-ink); }
+  .stat-value.regress { color: var(--regress-ink); }
+  .stat-note { font-size: 0.74rem; color: var(--ink-muted); }
+  @media (max-width: 640px) { .stat-strip { grid-template-columns: repeat(2, 1fr); } }
+
+  footer {
+    margin-top: 2.6rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.8rem;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  footer .mono { font-family: var(--font-mono); }
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <div class="eyebrow">ARC Prize 2026 · kaggle.com/code/sergueimakarov/arc3-atlas</div>
+    <h1>Atlas Version History</h1>
+    <p class="subhead">Каждая версия кернела <code style="font-family:var(--font-mono);background:var(--surface-2);padding:0.1em 0.4em;border-radius:4px;">arc3-atlas</code> — что изменилось и что это дало. Заливка узла на линии = боевой сабмишен (Phase B, тратит суточную квоту); полый узел = только калибровка (Phase A, GPU-квота).</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat">
+      <span class="stat-label">Лучший боевой</span>
+      <span class="stat-value win">1.19</span>
+      <span class="stat-note">версия 3</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Последний боевой</span>
+      <span class="stat-value regress">0.57</span>
+      <span class="stat-note">v30 (30.08): код v26+r8 на конфиге v23 — серия после v23: 0.92 → 0.65 → 0.57</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Боевых потрачено</span>
+      <span class="stat-value">9</span>
+      <span class="stat-note">лучший актуальный — 0.92 (v23); v30 = 0.57</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Текущая</span>
+      <span class="stat-value">40</span>
+      <span class="stat-note">v39 в бой 31.08; v40 меряет темп для 01.09</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:var(--accent);"></span> боевой сабмишен (Phase B)</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--regress-ink);"></span> боевой сабмишен, регресс</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--surface);border:2px solid var(--border);"></span> только Phase A (калибровка)</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--wait-ink);"></span> боевой сабмишен, ждём результата</div>
+  </div>
+
+  <div class="timeline">
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v1</span><span class="v-date">22.08, Phase A</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Первый прогон нашего слоя поверх подложки Duck. Средний балл вырос до <strong>4.99</strong>, но нашлись массовые зависания.</p>
+        <ul class="changes">
+          <li><code>analyzer_timeout</code> 900&rarr;180с, <code>concurrency</code> 28&rarr;14</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">512 запросов не уложились в таймаут, 488 &mdash; на весь лимит целиком (39.6% ресурса впустую). Причина найдена: генерация была совсем не ограничена, не сам таймаут.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v2</span><span class="v-date">22.08 ночь, Phase A</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Чинит настоящую причину зависаний v1, не просто раздвигает таймаут.</p>
+        <ul class="changes">
+          <li class="fix"><code>LOCAL_ANALYZER_MAX_OUTPUT</code> 0&rarr;8000 токенов (реальный баг v1)</li>
+          <li><code>analyzer_timeout</code> &rarr;480с</li>
+          <li>Отдельный короткий калибровочный лимит на Phase A (900с/игру, ~30 мин)</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Подтверждено: 21 зависание, 0 на полном лимите (было 488 из 512).</p>
+      </div>
+    </div>
+
+    <div class="entry submission">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v3</span><span class="v-date">23.08, БОЕВОЙ</span></div>
+          <span class="badge submission">Phase B</span>
+        </div>
+        <div class="score-row">
+          <span class="score win">1.19</span>
+          <span class="score-note">было 0.07 &mdash; первый реальный скачок</span>
+        </div>
+        <ul class="changes">
+          <li>Планировщик <code>plan_with_theory</code>/<code>verify_theory</code> перенесён из нашего харнесса (C1)</li>
+          <li>Спидран после победы перенесён (бесплатный повтор вместо дорогого <code>n_passes</code>)</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">На калибровке оба новых инструмента вызывались моделью <strong>0 раз</strong> &mdash; та же ловушка, что и с C0: упомянуты в промпте, но не принуждены.</p>
+      </div>
+    </div>
+
+    <div class="gap-note">между версиями 3 и 5 — номер кернела не 1:1 с нашими пушами; вероятно, боевой rerun тоже считается версией</div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v5</span><span class="v-date">23.08, Phase A (1ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Чинит «0 вызовов» из версии 3 тем же приёмом, что уже работал у нас для C0.</p>
+        <ul class="changes">
+          <li class="fix">Nudge-механизм: харнесс сам отслеживает и напоминает про планировщик каждый ход, пока не используется</li>
+          <li>A4 — автосводка «действие&rarr;эффект» из истории ходов</li>
+          <li><code>memo</code> &mdash; персистентная память между ходами (у Duck такого не было)</li>
+          <li>Бюджеты: Phase A 900&rarr;1800с/игру, Phase B 27000&rarr;28800с (8ч)</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Подтверждено: 0&rarr;<strong>42</strong> вызова <code>verify_theory</code>, 0&rarr;<strong>11</strong> <code>plan_with_theory</code> (14/25 игр), 12 записей в <code>memo</code>. Средний балл 1.65.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v6</span><span class="v-date">23.08 ночь, Phase A (1ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <ul class="changes">
+          <li>Инварианты (Г) &mdash; зеркальная статистика A4: какие клетки НИКОГДА не меняются</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Подтверждено вживую (sb26: «99% клеток никогда не менялись»). Балл 0.41 (было 1.65) &mdash; разброс между прогонами, не регресс: ни одна игра не дошла до 2 уровней в этот раз.</p>
+      </div>
+    </div>
+
+    <div class="entry regression">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v7</span><span class="v-date">24.08, БОЕВОЙ</span></div>
+          <span class="badge submission">Phase B</span>
+        </div>
+        <div class="score-row">
+          <span class="score regress">0.06</span>
+          <span class="score-note">хуже безхарнессного базлайна (0.07)</span>
+        </div>
+        <ul class="changes">
+          <li>Фикс потолка <code>atlas_fit_game_cap</code> &mdash; убран унаследованный от бандла лимит 7920с</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Регресс.</strong> Прогон занял ~2ч16м вместо 8-9ч. Правка никогда не проверялась иначе как вживую (функция исполняется только в боевой ветке) &mdash; главный подозреваемый.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v8</span><span class="v-date">24.08, Phase A (30м)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <ul class="changes">
+          <li class="fix">Откат потолка к формуле версии 3 (единственной с доказанным боевым результатом)</li>
+          <li>Калибровка сокращена 1800&rarr;900с/игру &mdash; быстрая проверка на здоровье</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Подтверждено чистым: 43 вызова nudge-инструментов, 0 ошибок.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v9</span><span class="v-date">24.08</span></div>
+          <span class="badge pending">отменена</span>
+        </div>
+        <ul class="changes">
+          <li><code>res['note']</code> &mdash; предупреждение о composed-rollout риске в многошаговых планах</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Застряла в очереди надолго без объяснения &mdash; отменена пользователем через веб-интерфейс, перезапущена как версия 10.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v10</span><span class="v-date">24.08, Phase A (30м)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">То же содержимое, что версия 9 (просто перезапуск после отмены).</p>
+        <p class="score-note" style="margin-top:0.5rem;">Подтверждено вживую: <code>note</code> реально появляется в транскриптах (ls20, sc25, sp80). Но также подтверждено: модель ни разу не последовала совету &mdash; данные есть, поведение не меняется.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v11</span><span class="v-date">24.08, Phase A (30м)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Отвечает на «модель не следует note» — от реакции постфактум к настоящему предотвращению.</p>
+        <ul class="changes">
+          <li>Предупреждение о комбинаторном росте на LEVEL-UP (сущности множатся, цепочки зависимостей длиннее)</li>
+          <li>Принуждение к <code>note</code>: одноразовое напоминание на следующий ход после инцидента</li>
+          <li><code>execute_plan()</code> &mdash; исполняет план по шагу, сверяя факт с прогнозом, останавливается сам при расхождении</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Подтверждено вживую: <strong>6</strong> реальных вызовов <code>execute_plan</code>, 3 из 5 исполнений остановились сами при расхождении с прогнозом (в т.ч. <code>ls20</code> — та самая игра, что раньше вслепую жгла все 7 шагов плана). 0 ошибок.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v12</span><span class="v-date">24.08, Phase A (4.4ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Первый чистый замер на РЕАЛЬНОМ боевом лимите 7920с/игру — стал возможен благодаря Colab Pro, привязанному к Kaggle (квота 30ч&rarr;45ч/нед, $10/мес).</p>
+        <ul class="changes">
+          <li>Без изменений в коде &mdash; только калибровочный лимит Phase A поднят с 900с до 7920с/игру</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>11/25 игр (44%)</strong> дошли хотя бы до 1 уровня (было почти 0 на 900-1800с), 3 игры &mdash; до 2 уровней, средний балл <strong>1.92</strong> (рекорд Phase A). Но <code>won: 0</code> &mdash; всё ещё ни одной полной победы, все 25/25 <code>gave_up</code>. Время помогает, но не единственное узкое место.</p>
+        <p class="score-note" style="margin-top:0.3rem;">Глубокий разбор транскриптов нашёл 2 отдельных бага: вырожденный случай инвариантов (<code>re86</code> — bbox 100% доски, подсказка бесполезна) и куда более серьёзный ПОЛНЫЙ паралич из-за <code>ATLAS_THEORY_CHECKPOINT</code> (<code>r11l</code>: 1 действие за 4.4ч — модель прочла напоминание про <code>verify_theory</code> как жёсткий запрет действовать без пиксель-в-пиксель теории, которую для этой механики построить невозможно).</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v13</span><span class="v-date">24.08</span></div>
+          <span class="badge pending">отменена</span>
+        </div>
+        <ul class="changes">
+          <li>Потолок 7920&rarr;8500с (явная именованная константа <code>ATLAS_SUBMISSION_GAME_CAP_CEILING_S</code>, не неявный дефолт бандла, как в регрессе версии 7)</li>
+          <li class="fix">Вырожденный случай инвариантов: подсказка подавляется, если bbox изменений &gt;80% доски</li>
+          <li>Калибровка Phase A сокращена 7920&rarr;600с (20 мин) &mdash; быстрая проверка после содержательных правок, не повторный 4.4-часовой прогон</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Отменена пользователем на середине Phase A &mdash; специально, чтобы включить фикс паралича (версия 14) до боевой попытки, а не сабмитить без него.</p>
+      </div>
+    </div>
+
+    <div class="entry submission">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v14</span><span class="v-date">24.08&ndash;25.08, БОЕВОЙ</span></div>
+          <span class="badge submission">Phase B</span>
+        </div>
+        <div class="score-row">
+          <span class="score win">1.09</span>
+          <span class="score-note">третий боевой за сессию, ref 55758947</span>
+        </div>
+        <p class="summary">Версия 13 + фикс полного паралича, найденного на <code>r11l</code>.</p>
+        <ul class="changes">
+          <li class="fix"><code>ATLAS_THEORY_CHECKPOINT</code> отключён (<code>PLAN_CHECKPOINT</code> оставлен как есть) &mdash; при непроверенной теории харнесс больше не формулирует это как жёсткий запрет действовать дальше</li>
+          <li>Остальные константы без изменений (потолок 8500с, фикс инвариантов из версии 13)</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Phase A (20 мин, разобрано 25.08): <strong>0 крашей</strong> (единственный "Exception" в логе &mdash; исходный код teardown-ячейки, просто напечатанный, не реальная ошибка). <code>verify_theory</code>/<code>plan_with_theory</code>/<code>execute_plan</code>: 0 вызовов за 20 минут &mdash; фикс паралича этим прогоном не проверен ни в плюс, ни в минус (проверено позже, на v15&ndash;v17).</p>
+        <p class="score-note" style="margin-top:0.3rem;"><strong>Боевой результат: 1.09</strong> &mdash; второй лучший за сессию после версии 3 (1.19), без <code>extract=</code>/усиленного чекпоинта (те фиксы пришли позже, после сборки этого kernel-а). Подтверждает: инварианты + <code>execute_plan</code> + отключённый paralysis-баг сами по себе дают реальный прирост над версией 7 (0.06).</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num" style="font-size:1.2rem;">src</span><span class="v-date">24.08, датасет</span></div>
+          <span class="badge phase-a">в версии 15</span>
+        </div>
+        <p class="summary">Отказ от пиксель-в-пиксель как единственного варианта &mdash; ответ на разбор реальных побед Gemini (<code>lp85</code>/<code>ft09</code>, старый харнесс) и её же критику вживую (пользователь спросил gemini-3.7-flash напрямую).</p>
+        <ul class="changes">
+          <li><code>extract(grid) -&gt; state</code> в <code>verify_theory</code>/<code>plan_with_theory</code>/<code>execute_plan</code> &mdash; опционально сравнивать/искать в маленьком дискретном состоянии вместо сырой доски</li>
+          <li class="fix">Словари сравниваются как SUBSET (только реально предсказанные ключи), не целиком &mdash; тот же баг пиксель-в-пиксель, но уровнем выше; пустой словарь никогда не засчитывается как совпадение</li>
+          <li><code>plan_with_theory(force=True)</code> &mdash; обход гейта <code>min_accuracy</code>, когда мешает шум, а не сама теория</li>
+          <li><code>execute_plan(goal=...)</code> &mdash; проверяется ДО abort по расхождению (<code>stop_reason='goal_reached'</code>)</li>
+          <li><code>verify_theory(transitions=...)</code> &mdash; тест на самостоятельно отобранном списке переходов, не всей истории</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><code>arc3-atlas-src</code> запушен на Kaggle 24.08&ndash;25.08. Всё покрыто тестами (<code>test_atlas_extract_theory.py</code>, <code>test_atlas_gemini_critique.py</code>), полный набор регрессии зелёный, все дефолты обратно совместимы. Попал в kernel версии 15 (следующая карточка).</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v15</span><span class="v-date">25.08, Phase A (~1ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Первый прогон с <code>extract=</code> в кернеле &mdash; не депт-тест и не проверка на краши, а измерение органического adoption rate.</p>
+        <ul class="changes">
+          <li>Калибровка Phase A 600&rarr;1800с/игру (30 мин, ~1ч на весь прогон при concurrency=14) &mdash; 600с не хватало игре на повторные вызовы <code>verify_theory</code></li>
+          <li>Код не менялся &mdash; тот же <code>arc3-atlas-src</code>, что и в записи выше, впервые собран в реальный kernel</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Цель: посчитать в транскриптах, сколько раз модель САМА вызвала <code>verify_theory</code>/<code>plan_with_theory</code> с <code>extract=</code>, без нуджа. <strong>Результат (разобрано 25.08): 0 из 612 реальных python-вызовов</strong> &mdash; ни <code>verify_theory</code>, ни <code>plan_with_theory</code>, ни <code>execute_plan</code>, ни <code>extract=</code> ни разу. Причина оказалась структурной, не в бюджете: отключение <code>THEORY_CHECKPOINT</code> (фикс паралича на версии 12) убрало единственный нудж к ПЕРВОМУ вызову <code>verify_theory</code>, а <code>PLAN_CHECKPOINT</code> сам сработать не может без него &mdash; откат к проблеме версии 3. Балл при этом всё равно вырос до <strong>2.09</strong> (рекорд Phase A), <code>r11l</code> дошла до уровня 1 вместо полного паралича.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v16</span><span class="v-date">25.08, Phase A (~1ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Возврат <code>THEORY_CHECKPOINT</code>, но безопасно &mdash; ответ на находку версии 15.</p>
+        <ul class="changes">
+          <li class="fix"><code>ATLAS_THEORY_CHECKPOINT</code> включён обратно, переформулирован &mdash; убрана фраза «Do not skip this turn -- probing without a theory wastes actions», из-за которой модель на <code>r11l</code> прочла его как жёсткий запрет действовать. Явно разрешено играть без теории, упомянут <code>force=True</code></li>
+          <li class="fix">Новый структурный backstop, не зависящий от формулировки: счётчик ходов без реального <code>action()</code> &mdash; после 8 подряд харнесс подменяет ОБА чекпоинта (theory/plan) на безусловное «выполни хоть что-то сейчас» (<code>ATLAS_FORCE_ACT_OVERRIDE</code>)</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Те же условия, что версия 15 (1800с/игру, ~1ч) &mdash; прямое сравнение. <strong>Результат (разобрано 25.08): безопасность решена, adoption &mdash; всё ещё нет.</strong> Чекпоинт реально стрелял <strong>360 раз</strong> за 25 игр (~65% ходов), <code>force-act override</code> сработал <strong>23 раза</strong> в 13 из 25 игр &mdash; паралич <code>r11l</code>-типа не повторился НИ РАЗУ. Но модель ни разу не вызвала ни один из инструментов в своём коде: <strong>0 из 662</strong> реальных python-вызовов. Проверка вживую на <code>r11l</code>: чекпоинт был в промпте, модель его не упоминает даже в рассуждении. Причина, вероятно &mdash; переформулировка была слишком мягкой («это не обязательно»), дала прямое разрешение игнорировать. Балл 1.02 (было 2.09) &mdash; вероятно шум, не причинно связан.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v17</span><span class="v-date">25.08, Phase A (~1ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+          <span class="badge" style="background:var(--win-bg);color:var(--win-ink);">adoption восстановлен</span>
+        </div>
+        <p class="summary">Формулировка усилена обратно &mdash; ответ на находку версии 16. Закрывает цепочку фиксов, начатую отключением <code>THEORY_CHECKPOINT</code> 24.08.</p>
+        <ul class="changes">
+          <li class="fix">Убрано «this is a suggestion, not a requirement» &mdash; текст снова императивный («THIS turn, write predict(...)»), но БЕЗ старой фразы про «wastes actions», вызвавшей оригинальный паралич на <code>r11l</code></li>
+          <li>Логика: раз <code>force-act</code> backstop доказанно работает независимо от текста (23 срабатывания на версии 16, 0 паралича), формулировку можно снова делать настойчивой &mdash; безопасность больше не держится на том, как модель её поймёт</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Результат (разобрано 25.08): сработало.</strong> <strong>49</strong> реальных вызовов <code>verify_theory</code>/<code>plan_with_theory</code>/<code>execute_plan</code> (было 0 на v15/v16), <strong>36</strong> вызовов <code>extract=</code> в их числе, <strong>13 из 25</strong> игр использовали хотя бы один инструмент. Безопасность не пострадала: <code>force-act</code> сработал 21 раз в 11 играх, паралич <code>r11l</code>-типа не повторился (минимум действий за игру &mdash; 2). Побочный эффект: <code>ft09</code> дошла до уровня 2 (балл 14.29, лучший результат этой игры за v14&ndash;v17) &mdash; игра, где использовались все четыре инструмента вместе.</p>
+        <p class="score-note" style="margin-top:0.3rem;">Средний балл 1.22 (между 2.09 на v15 и 1.02 на v16) &mdash; часть бюджета уходит на теорию вместо наблюдения, окупается не в каждой игре; на 25 играх неотличимо от шума без более широкой выборки.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v18</span><span class="v-date">25.08, Phase A (~4ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Динамический банк времени между играми &mdash; идея пользователя: RHAE взвешивает поздние уровни сильнее, значит минута на прогрессирующей игре стоит больше очков, чем та же минута на застрявшей.</p>
+        <ul class="changes">
+          <li>Планировщик (<code>framework/solver.py</code>) оказался НЕ фиксированными волнами, а <code>ThreadPoolExecutor</code>+<code>Semaphore(concurrency)</code> &mdash; но лимит времени у всех игр общий и статичный</li>
+          <li class="fix">Застрявшая игра (6 действий подряд без изменения доски/уровня И &ge;40% лимита без прогресса) завершает себя сама, возвращает остаток в общий банк</li>
+          <li>Игра, прошедшая НОВЫЙ уровень, добирает из банка &mdash; не больше 50% своего лимита за раз, не больше 100% сверху суммарно (защита от монополизации)</li>
+          <li>Флаг <code>ATLAS_TIME_BANK_ENABLED</code> для быстрого отключения; калибровка 1800&rarr;7200с/игру (2ч) специально для этого замера &mdash; депозиту и добору нужно больше времени, чтобы вообще успеть сработать</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Протестировано локально до пуша (<code>test_atlas_time_bank.py</code>, 17/17: чистые функции, учёт банка, полная проводка через фейковую игру), полный набор регрессии зелёный.</p>
+        <p class="score-note" style="margin-top:0.3rem;"><strong>Результат (разобрано 25.08): балл вырос до 2.57 (рекорд Phase A), но банк ни разу не сработал</strong> &mdash; 0 депозитов, 0 доборов за все 4 часа. Причина: порог требовал буквально 6 действий с НУЛЕВЫМ изменением доски, а реальные застрявшие игры (<code>cd82</code>: 55 действий, <code>wa30</code>: 95, <code>tr87</code>: 91 &mdash; все 0 уровней) активно, но безуспешно играют, доска меняется постоянно. Рост балла &mdash; почти наверняка чистый эффект бюджета (2ч/игру), не банка. Фикс &mdash; следующая карточка (v19).</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v19</span><span class="v-date">25.08, Phase A (1ч30м)</span></div>
+          <span class="badge phase-a">калибровка</span>
+          <span class="badge" style="background:var(--win-bg);color:var(--win-ink);">все 3 механизма работают</span>
+        </div>
+        <p class="summary">Первая совместная сборка: чекпоинт версии 17 (уже провалидирован 3 раза) + исправленный банк времени + новый retry-storm backstop &mdash; все три впервые вместе.</p>
+        <ul class="changes">
+          <li class="fix">Депозит банка: убрано требование «доска буквально не менялась», оставлено «0 уровней за &ge;50% лимита» (было 40%) &mdash; v18 показал, что старый триггер никогда не срабатывает на реальной, активной-но-безуспешной игре</li>
+          <li class="fix">Мелкий баг: стартовый уровень игры больше не считается «новым прогрессом» для добора времени</li>
+          <li><code>_atlas_retry_storm_decision</code> &mdash; 5 провалов запроса к анализатору подряд отправляют остаток времени игры в банк вместо бесконечного повтора (найдено на логах версии 17: <code>cn04</code>/<code>lp85</code>/<code>re86</code> теряли по 15&ndash;30 минут в цикле повторов)</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Пользователь спросил про риск объединения трёх изменений сразу &mdash; уточнение: реально новых для живого теста только два (чекпоинт уже провалидирован), у обоих свои узнаваемые строки в логе. Калибровка 30 минут/игру (специально дольше типичных 20, чтобы депозит успел сработать). Протестировано локально до пуша (<code>test_atlas_time_bank.py</code>, 21/21), полный набор регрессии зелёный.</p>
+        <p class="score-note" style="margin-top:0.3rem;"><strong>Результат (разобрано 25.08): всё сработало, ничего не сломалось.</strong> Чекпоинт: 329/39/31 (theory/plan/force-act) &mdash; стабильно, как в v17. Банк: <strong>20 депозитов</strong> (застрявшие игры вернули по 700&ndash;900с), <strong>8 доборов</strong> (прогрессирующие добрали по 900с; одна игра, <code>vc33</code>, добрала дважды &mdash; ровно уперлась в потолок &times;2, как и задумано). Retry-storm: 0 срабатываний (шторма не было в этот раз). Длительность выросла до 1ч30м &mdash; ожидаемо, доборы держат слоты дольше. Балл 1.81 (между 1.22 на v17 и 2.57 на v18, сравнение смазано разными активными механизмами и бюджетом). <strong>Готова к боевому клику.</strong></p>
+      </div>
+    </div>
+
+    <div class="entry submission">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v20</span><span class="v-date">27.08, БОЕВОЙ</span></div>
+          <span class="badge submission">Phase B</span>
+        </div>
+        <div class="score-row">
+          <span class="score regress">0.82</span>
+          <span class="score-note">ниже плато 1.09&ndash;1.19, но НЕ подтверждённый регресс</span>
+        </div>
+        <p class="summary">Версия 19 + reasoning-фиксы (memo-чекпоинт, переформулированный force-act), <code>concurrency=10</code> без изменений &mdash; первая попытка проверить, ломает ли reasoning-фикс (а не инфра-тюнинг) плато 1.09&ndash;1.19.</p>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Результат озадачивает.</strong> Тот же код в тот же день на RunPod A100 (<code>concurrency=20</code>) дал <strong>1.43</strong> с живым внедрением reasoning-фиксов (0%&rarr;~30&ndash;35%). Гипотеза «<code>concurrency=10</code> хуже» проверена и ОПРОВЕРГНУТА математикой волн: на 25 играх <code>concurrency=10</code> даёт БОЛЬШЕ времени на игру (3 волны &times; ~8500с), чем RunPod-овский <code>concurrency=20</code> (2 волны &times; ~5400с) &mdash; обратное тому, что нужно для этого объяснения. Через git-историю (не только доки) подтверждено, что <code>concurrency=10</code> реально стояла в этом сабмишене.</p>
+        <p class="score-note" style="margin-top:0.3rem;"><strong>Причина не найдена</strong> &mdash; Kaggle не даёт заглянуть внутрь боевого прогона так, как в Phase A/RunPod-тесте. Зафиксировано как ещё одна точка в уже известном большом разбросе RHAE (0.06, 1.09, 1.14, 1.19, 1.43-только-RunPod, 0.82), а не форсировано в объяснение, которое не проходит проверку математикой.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v21</span><span class="v-date">27.08, Phase A (30 мин)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary">Четыре новые механики разом (три идеи Gemini-обзора стратегии + explore-first) &mdash; впервые на РЕАЛЬНОМ Kaggle backend (RTX Pro 6000, не только RunPod A100), <code>concurrency=20</code> впервые в реальном kernel-е.</p>
+        <ul class="changes">
+          <li><code>save_checkpoint</code>/<code>rollback</code> &mdash; откат к чекпоинту с диагнозом «что не сработало и почему» в <code>lesson_learned</code>, вместо того чтобы тащить испорченный контекст дальше</li>
+          <li>Rollback-ультиматум: после N ходов без прогресса по уровню &mdash; явное принуждение к <code>rollback</code>; если модель тянет слишком долго, харнесс делает откат сам, но уже с обезличенной пометкой вместо диагноза модели</li>
+          <li><code>extract=</code>-подсказка: если попиксельная теория не сходится, явно предложить компактное состояние вместо неё</li>
+          <li>Explore-first: до построения теории попробовать каждый вид доступного управления хотя бы раз с ВИДИМЫМ эффектом на доске (не просто «был вызван» &mdash; клик в пустоту не засчитывается) &mdash; сбрасывается на каждом level-up, не только на первом уровне</li>
+          <li>Context sanitizer &mdash; подчищает контекст после серии сработавших чекпоинтов, чтобы не разрастался бесконтрольно</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">25 игр, ~12.5 мин/игру. Средний балл <strong>0.41</strong> (короткий крэш-тест, не замер глубины) &mdash; 0 крашей, <code>concurrency=20</code> на реальном backend прошла чисто. Explore-first сработал <strong>129 раз</strong> против <strong>50</strong> у theory-чекпоинта &mdash; в коротком окне почти всё время уходит на исследование управления, до теории 13 из 25 игр вообще не успели дойти.</p>
+        <p class="score-note" style="margin-top:0.3rem;">Единственная игра с полной цепочкой (explore&rarr;theory&rarr;verify_theory&rarr;extract=&rarr;rollback-ультиматум&rarr;реальный rollback): <code>wa30</code> &mdash; модель подчинилась ультиматуму с ПЕРВОГО показа, содержательный <code>lesson_learned</code> про врагов/стены/SPACE. Первое живое подтверждение, что rollback-механизм работает так, как задуман. На <code>r11l</code> тем временем theory-чекпоинт показался 5 раз, <code>verify_theory</code> не вызван ни разу &mdash; несмотря на то что модель вслух вывела верное правило схождения (см. следующую карточку).</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v22</span><span class="v-date">27.08, Phase A (25 мин)</span></div>
+          <span class="badge phase-a">калибровка</span>
+          <span class="badge" style="background:var(--win-bg);color:var(--win-ink);">бэкстоп сработал</span>
+        </div>
+        <p class="summary">Жёсткий бэкстоп для конверсии theory-чекпоинта в реальный вызов &mdash; отвечает на находку версии 21. Диагностировано с Gemini как внешним критиком: <code>rollback()</code> &mdash; низкое трение (готовая функция, уже известный аргумент), <code>verify_theory()</code> &mdash; высокое (модель должна с нуля написать код, кодирующий правило, которое пока держит только в прозе).</p>
+        <ul class="changes">
+          <li class="fix"><code>ATLAS_THEORY_FORCE_OVERRIDE</code> &mdash; после 8 python-вызовов с нулём вызовов <code>verify_theory</code> харнесс заменяет мягкий ник на императив: явно называет 0%-точность хорошим результатом, не запрещает <code>action()</code> в тот же ход (ничто не мешает вызвать оба в одном python-снипете), запрещает рационализацию «сначала проверю ещё раз в уме». Гейт на ПОПЫТКУ, а не на точность &mdash; не может повторить ловушку версии 12 (недостижимый порог 0.6 accuracy)</li>
+          <li><code>ATLAS_CONCURRENCY=20</code> оставлена в силе и для боевого прогона &mdash; версия 21 прошла на ней чисто на реальном backend</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Протестировано локально до пуша (<code>test_atlas_theory_force.py</code>, 3/3 &mdash; включая ключевое свойство безопасности: один вызов <code>verify_theory</code> любой точности гасит бэкстоп навсегда), полный набор из 14 тестов зелёный. Пуш датасета с первой попытки пропустил папку <code>src/</code> целиком (забытый флаг <code>--dir-mode zip</code>) &mdash; поймано и исправлено до пуша kernel-а, не после.</p>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Результат (разобрано 27.08): 0 крашей, бэкстоп сработал именно так, как задуман.</strong> Сработал 8 раз в 7 играх (включая <code>r11l</code> &mdash; тот самый повторный случай). В 3 из 7 игр, где модель успела ответить до конца калибровочного окна (<code>s5i5</code>, <code>tn36</code>, <code>wa30</code>), она подчинилась НЕМЕДЛЕННО, первым же следующим вызовом &mdash; настоящий <code>verify_theory()</code>, не отписка. В остальных 4 (включая <code>r11l</code>) игра оборвалась таймаутом запроса к анализатору РОВНО на следующем ходу после срабатывания &mdash; инфраструктурный обрыв 25-минутного окна, не отказ модели: 0/0 из тех случаев, где у модели реально была возможность ответить, проигнорировали бэкстоп.</p>
+        <p class="score-note" style="margin-top:0.3rem;">Средний балл 0.00 (25/25 игр, короче окна версии 21 на 5 минут) &mdash; ожидаемый эффект короткого крэш-теста, не регресс: то же самое «последний запрос обрывается по таймауту в конце окна» видно в КАЖДОЙ из 25 игр, включая те, что не касаются нового чекпоинта вовсе.</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v23</span><span class="v-date">27.08 ~20:11 MSK, Phase A (30 мин) &rarr; БОЕВОЙ 28.08</span></div>
+          <span class="badge submission">Phase B</span>
+        </div>
+        <div class="score-row">
+          <span class="score win">0.92</span>
+          <span class="score-note">лучший с 26.08; стенд предсказывал ~0.96 &mdash; налог скрытого набора мал</span>
+        </div>
+        <p class="summary">Сборка planforce+rollbackfix (<code>7265cbd</code>) &mdash; та, которой пользователь решил сабмититься. Два фикса по следам живых данных v22 и диагноза Gemini; snapshot-пробы (<code>try_actions</code>/<code>plan_real</code>) СОЗНАТЕЛЬНО не вошли &mdash; остаются RunPod-экспериментом.</p>
+        <ul class="changes">
+          <li><code>ATLAS_PLAN_FORCE_OVERRIDE</code> &mdash; жёсткий бэкстоп для <code>plan_with_theory</code>: при подтверждённой теории (&ge;0.6) и 6 вызовах без единого plan-вызова &mdash; императив. Гейт на попытку: <code>plan=None</code> тоже засчитывается, недостижимым стать не может</li>
+          <li class="fix">Фикс дыры <code>wa30</code>: <code>verify_theory</code> сразу после <code>rollback</code> тестирует 0 переходов и больше НЕ гасит theory-force; окно принуждения сбрасывается после отката (модель успевает заработать реальные переходы)</li>
+          <li>Phase B без изменений: <code>concurrency=20</code> (решение стоит), потолки не тронуты. Phase A: 30 мин общий бюджет (750с/игру, 2 волны &mdash; математика v21)</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">RunPod A100-валидация ДО пуша: на сопоставимом окне ~40 мин &mdash; <strong>mean 0.83 и 5/25 игр с уровнем против 0.11 и 1/25</strong> у предыдущей сборки (theoryforce); к 57-й минуте &mdash; 0.96 и 7/25 (ar25, cn04, ft09, lp85, ls20, sp80, vc33). Оговорка о разбросе RHAE стандартная. Датасет собран точно из <code>7265cbd</code> (сверено размерами файлов на Kaggle).</p>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Phase A (разобрано 27.08): чисто, к бою готова.</strong> 25м01с ровно в 30-минутный бюджет, 0 крашей, третий чистый прогон concurrency=20 на реальном backend. Все чекпоинты живы (explore-first 112, theory 22, theory-force 23, rollback-ult 5). <strong>Plan-force сработал впервые вживую (tn36) &mdash; модель ПОДЧИНИЛАСЬ</strong>: реальный <code>plan_with_theory</code> в пределах трёх следующих вызовов. Theory-force: 10 игр, 4 подчинились реальным <code>verify_theory</code>, остальные 6 оборвались таймаутом анализатора на краю окна (тот же инфра-паттерн, что v22, не отказ модели). Балл 0.11 (1 уровень, ar25) &mdash; короткое окно, не замер глубины. Полные данные: <code>runs/kaggle_v23_calibration/</code>.</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v24</span><span class="v-date">29.08 ~04:00 MSK (автопуш), Phase A = 4 часа &rarr; БОЕВОЙ</span></div>
+          <span class="badge submission" style="background:var(--regress-bg);color:var(--regress-ink);">Phase B, регресс</span>
+        </div>
+        <div class="score-row">
+          <span class="score regress">0.65</span>
+          <span class="score-note">тот же код, что 0.92 у v23 &mdash; одноволновый конфиг 110&times;8.5ч отнял ~0.27: 55 одновременных игр душат друг друга по LLM-ходам (подтверждено тестбедом в тот же день). Скоринг шёл ~15 ч (вердикт вечером 29.08)</span>
+        </div>
+        <p class="summary"><strong>Матчированный контроль v23 + новая конфигурация Фазы B.</strong> Датасет-гибрид запушен 28.08 23:05 МСК: агентские файлы байт-в-байт <code>7265cbd</code> (v23, без проб), framework из main (ручка <code>ATLAS_TIME_BANK_DRAWS</code> &mdash; без неё продление тайм-банка при потолке 8.5ч увело бы игру за 12-часовой лимит Kaggle = 0 баллов, класс аварии v7). Phase A: 25 публичных, 4 ч/игру, одна волна &mdash; зеркало решающего прогона проб на родном RTX Pro 6000 (~4.7 ч из 45-часовой квоты). Phase B «на всякий случай»: concurrency 110 (одна волна всего скрытого набора 55+55), бюджет 8.5 ч/игру, продлений нет, ранний выход застрявших остаётся. Результат Phase A &mdash; днём в пятницу; сабмит по решению пользователя.</p>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Phase A (разобрано 29.08): 15 официальных уровней в 13 играх, RHAE-среднее 2.18</strong> (официальная линейка по events: max по плеям). Это матч-база для сравнения с v27 (раунд 6). Побочный инцидент: кнопка «Submit to Competition» на странице кернела создала лишнюю Version 26 (~9-10 ч GPU-квоты) &mdash; отменена пользователем, сабмит выжил; правило «сабмитить только со страницы соревнования» записано в память.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v25</span><span class="v-date">29.08 утро, Phase A (план 30 мин &rarr; фактически 4 ч)</span></div>
+          <span class="badge phase-a">калибровка, отменена</span>
+        </div>
+        <p class="summary">Прогон точного кода репетиций (60f76d5, раунды 3&ndash;5): цель &mdash; 30-минутная Phase A. Вскрыл баг сборщика: <code>ATLAS_CALIBRATION_CAP_S</code> читался из env <em>внутри ячейки ноутбука</em>, где env Kaggle пуст &mdash; кап не применился, прогон пошёл на дефолтные 4 часа. Пользователь поймал по «Diff +0&minus;0». Отменён, квота сэкономлена.</p>
+        <ul class="changes">
+          <li class="fix">Сборщик: значение подставляется в ТЕКСТ ячейки при сборке (плейсхолдер <code>__ATLAS_CALIBRATION_CAP_S__</code>), а не читается из env на Kaggle (ab3dbb2)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v27</span><span class="v-date">29.08, Phase A = 4 часа (матч против v24)</span></div>
+          <span class="badge phase-a">калибровка</span>
+          <span class="badge" style="background:var(--win-bg);color:var(--win-ink);">глубина &times;3.5</span>
+        </div>
+        <p class="summary"><strong>Сборка раунда 6 (код v26): рычаги глубины впервые на Kaggle.</strong> Проактивный plan_real с бюджетами, mechanic handoff, hail mary, zombie-щадящий LLM-гейт, авто-реплей уровней.</p>
+        <div class="score-row">
+          <span class="score win">3.86</span>
+          <span class="score-note">RHAE-среднее против 2.18 у v24-контроля (+77%) на идентичных условиях</span>
+        </div>
+        <ul class="changes">
+          <li>Официальных уровней 18 против 15; уровней ВЫШЕ первого 7 против 2; lp85 &mdash; 5 уровней одним плеем (41.7 очка, лучшая игра всех прогонов)</li>
+          <li>Перепись за 4 ч: 18 handoff, 11 hail-mary, 7 найденных планов (3 авто-исполнены), hard gate 7</li>
+          <li>Цена глубины: игр с прогрессом 11 против 13 &mdash; бюджет перетёк из широты в глубину, по официальной формуле размен сильно выгоден</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">В тот же день на поде &mdash; дельта на 8 собственных играх (протокол Gemini р.7): при 24 конкурентных раунд 6 даёт +22% RHAE, при 8 &mdash; проигрывает (автоматика окупается только при дефиците LLM-темпа; Фаза B = дефицит). Данные: <code>runs/runpod_owng_delta_29_08</code>, <code>runs/kaggle_v26_phaseA</code>.</p>
+      </div>
+    </div>
+
+    <div class="gap-note">Version 26 &mdash; отменённый случайный реран сабмишена v24 (кнопка на странице кернела); Version 28 &mdash; номер съеден при пересозданиях. Нумерация Kaggle &ne; наши сборки.</div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v29</span><span class="v-date">29.08 пуш, прогон 32м17с</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary"><strong>Первый прогон кода v26 + раунд 8</strong> (клапан handoff: диагностика не инжектится при game_over/пустой пробе; промпт-подсказка select-then-act) в одноволновом конфиге. Phase A 25м28с &mdash; 30-минутный кап отработал (урок v25 закрыт). Клапан жив уже в коротком окне: 1 подавленная диагностика.</p>
+        <p class="score-note" style="margin-top:0.5rem;">Главное открытие прогона: <code>run_as_submission=False</code> &mdash; собственный прогон версии делает ТОЛЬКО Фазу A + placeholder-сабмишен (~32 мин квоты), полный Фаза B-прогон случается лишь в скоринговом реране. Вечерняя модель «прогон версии стоит ~10 ч» &mdash; ошибка, отменена. Как кандидат на сабмит устарела в тот же вечер: вердикт v24 (0.65) дискредитировал одноволновый конфиг &rarr; см. v30.</p>
+      </div>
+    </div>
+
+    <div class="entry regression">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v30</span><span class="v-date">сабмит 30.08 → вердикт 0.57</span></div>
+          <span class="badge submission">боевой: 0.57</span>
+        </div>
+        <p class="summary"><strong>Вариант B: код глубины на проверенном конфиге.</strong> Тот же датасет (v26 + раунд 8), но Phase B вернулась к параметрам, давшим 0.92 у v23: concurrency 20 (волны), бюджет 28800с, потолок на игру 8500с (~140 мин/игру на 55 скрытых), добор тайм-банка снова ВКЛ (при потолке 8500с безопасен &mdash; выключение было специфично для одной волны). Phase A 30 мин. Коммит 2589abf.</p>
+        <p class="score-note" style="margin-top:0.5rem;">Логика: не смешивать код-эксперимент с конфиг-риском (v24 показал цену смешивания). Вопрос конфига финального пересчёта (110 игр &rarr; 80 мин/игру при concurrency 20) сознательно отложен на потом. Утром 30.08 пользователь сабмитит эту версию со страницы соревнования.</p>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Вердикт 30.08: 0.57 — худший в серии после v23.</strong> Код v26+r8 на конфиге, давшем v23 её 0.92: серия после v23 монотонно вниз (0.92 → 0.65 → 0.57). Либо прирост кода вреден на скрытом сете и kernel-CPU, либо дисперсия одиночных сабмитов огромна (FOYSAL: max 2.23 на 99 сабмитах стока). Лестница волн закрыта; ставка завтрашнего слота — v36 (под: её код ×2 над кодом v30).</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v31</span><span class="v-date">30.08 ночь, Phase A = 4 часа (матч-серия)</span></div>
+          <span class="badge phase-a">диагностика</span>
+        </div>
+        <p class="summary"><strong>Пакет раундов 10/10b на матчированной 4-часовой линейке</strong> (код-freeze снят владельцем: «делай сейчас все доработки»). Новое в коде (022941a): draft-speedrun &mdash; после неопрятно выигранного уровня добровольный полный рестарт + реплей петле-сжатых записей (счёт = max по плеям &rarr; провал реплея безвреден); гибридный zombie-cull по энтропии состояний (жёсткий порог-20 отклонён нашей же CDF: 24.4% решений L1 лежит в окне 21&ndash;30 действий); узловые лимиты поиска 250&rarr;750 / 1000&rarr;2500 (при 90 узл/сек старые обрубали поиск за треть бюджета).</p>
+        <p class="score-note" style="margin-top:0.5rem;">Третья точка матч-серии 4ч/25 публичных/conc 110: v24-контроль (код v23) RHAE-сред. 2.18 &rarr; V27 (раунд 6) 3.86 &rarr; V31 = ? Результат утром 30.08.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v31&ndash;v32</span><span class="v-date">30.08 ночь</span></div>
+          <span class="badge phase-a">отменены</span>
+        </div>
+        <p class="summary">Обе версии оказались запущены одновременно (вторая &mdash; фантом после пуша датасета); пользователь отменил обе, диагностика переехала в v33.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v33</span><span class="v-date">30.08, Phase A 4ч, волны по 20</span></div>
+          <span class="badge phase-a">калибровка · разобрана</span>
+        </div>
+        <p class="summary"><strong>Пакет 10b на конфиге волн: RHAE 2.84 при половинном времени</strong> (2ч/игру против 4ч у V27 &rarr; клапан времени работает). Драфт-спидран: 0 срабатываний &mdash; первый звонок (позже вскрылось: механизм в принципе мёртв до WIN, см. v37).</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v34&ndash;v35</span><span class="v-date">30.08</span></div>
+          <span class="badge phase-a">лестница-2, вытеснены</span>
+        </div>
+        <p class="summary">Точка 2 лестницы волн (замороженный a2e08c3, conc 28): v34 отменена по ошибке, v35 &mdash; идентичный перезалив. Вытеснены решением владельца: вместо чистого конфиг-замера в бой идёт «всё лучшее сразу» (v36).</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v36</span><span class="v-date">30.08 ~04:30 пуш, Phase A 2.2ч/игру идёт</span></div>
+          <span class="badge wait">кандидат на сабмит 31.08</span>
+        </div>
+        <p class="summary"><strong>Все доработки + A* ВКЛ.</strong> Код main (раунды 6+8+10b), h_model.pkl в датасете, A*-патч атрибутом модуля (env-at-import ловушка); conc 28, потолок 7920с (2.2ч) с добором, бюджет 28800с. Phase A зеркалит боевой режим.</p>
+        <p class="score-note" style="margin-top:0.5rem;">Обоснование &times;2: подовая дельта 19.5б на 20 ручных играх &mdash; код v36 <strong>42 уровня / 16 из 20 / RHAE 22.71</strong> против 23 / 9 / 11.08 у кода v30 (A* поднял 4 игры с нуля до 4/5). Завтра &mdash; в Фазу B со страницы соревнования.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v37</span><span class="v-date">30.08 ~09:20 пуш, Phase A 30 мин</span></div>
+          <span class="badge pending">кандидат на слот 01.09</span>
+        </div>
+        <p class="summary"><strong>Фиксы ночного mock-LLM стресса.</strong> Драфт-спидран OFF по умолчанию (вердикт: мёртв до WIN &mdash; при ONLY_RESET_LEVELS движок до победы всегда делает level_reset, «двойной RESET &rarr; полный рестарт» недостижим; каждое срабатывание = 2 мусорных действия + аборт); zombie-cull прозрел: заблокированные noop-guard'ом ходы теперь считаются в застой и кормят энтропийные сигнатуры (spam-стресс: 0 &rarr; 10/12 срабатываний гейта); диагностика entropy-dead/zombie-gate в логах.</p>
+        <ul class="changes">
+          <li class="fix">cull: <code>stalled_turns</code> = реальные действия + блокировки no-op (слепота к wall-banging играм)</li>
+          <li class="fix">датасет-слим: из бандла удалён локальный .venv-мусор &mdash; 77 файлов/2МБ вместо 6719/336МБ</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Фаза A УПАЛА (ERROR, 7-я секунда): «Could not find TAAF bundle dataset».</strong> Слим ни при чём — пуш датасета оборвался после первого файла (в версии остался один benchmark_initial.pkl); проверялся только статус «ready», не список файлов. Правило кровью: после пуша — <code>kaggle datasets files</code>, вывод пуша не обрезать.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v38</span><span class="v-date">30.08 ~15:00 МСК пуш</span></div>
+          <span class="badge pending">кандидат на сабмит 31.08</span>
+        </div>
+        <p class="summary"><strong>Код и конфиг v37 на починенном датасете</strong> (перезалив полный, проверен списком файлов: маркер + src/ + h_model.pkl). Решение владельца: завтрашний сабмит — код v37, т.е. эта версия после зелёной 30-мин Фазы A.</p>
+        <p class="score-note" style="margin-top:0.5rem;">Фаза A зелёная (12:04&ndash;12:54 UTC): слим-датасет работает, «A* heuristic loaded» в логе, спидран молчит, 4 уровня на 3 играх за 30 мин. Выхлоп скачан до следующего пуша.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v39</span><span class="v-date">30.08 ~15:40 МСК пуш</span></div>
+          <span class="badge pending">кандидат на сабмит 31.08</span>
+        </div>
+        <p class="summary"><strong>Приказ владельца: код v38 в Фазу B с конфигом «эффекта 4 часов».</strong> conc 28 &rarr; 2 волны по 55 скрытым; потолок 14400с (4ч) &times; 2 = ровно бюджет 28800с; добор ВЫКЛ (новая ручка сборщика); тайм-банк ВКЛ ради раннего снятия: 0 уровней после 50% потолка &rarr; игра снимается на 2ч и перестаёт конкурировать за LLM &mdash; выжившие получают темп. Датасет не трогался &rarr; код байт-в-байт v38 (без L1-спринта), фантомов нет.</p>
+        <p class="score-note" style="margin-top:0.5rem;">Фаза A зелёная: добор подтверждён ВЫКЛ (0 draws), раннее снятие сработало 25 раз, A* загружен, 0 трейсбеков. Уровней 0 &mdash; неинформативно by design. <strong>Фаза B = 55 игр</strong> (подтверждено владельцем) &rarr; conc 28 даёт ровно 2 волны &times; 4ч: эксперимент со временем состоится. Сабмит 31.08.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v40</span><span class="v-date">30.08 ~19:25 МСК пуш</span></div>
+          <span class="badge pending">кандидат на 01.09</span>
+        </div>
+        <p class="summary"><strong>Конфиг v39 + три ночные правки.</strong> L1-спринт: проактивный поиск на первом уровне откладывается, пока нет признаков застревания &mdash; ставка на темп (у стокового Duck 130 действий на партию против наших ~30). Вес A* понижен 2.0&rarr;0.5; в датасет положена смешанная h-модель вместо синтетической.</p>
+        <ul class="changes">
+          <li class="fix">A* понижен из «водителя» в «разрешителя ничьих»: на враждебном полигоне при w=2.0 он отнимал 4 уровня на игре-ловушке (5 против 9), при w=0.5 &mdash; паритет с выключенным</li>
+          <li class="fix">h(s) не переносится на незнакомые игры: MAE 18.6 против 15.7 у наивного среднего на реальных партиях Duck</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Её Фаза A &mdash; <strong>замер темпа, не силы</strong>: матч-пара к v39 (165 действий на 25 игр). Больше действий = спринт работает и версия идёт в бой 01.09; иначе спринт выключается.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    <span>Источники: <span class="mono">docs/plan_top10_by_3009.md</span>, память сессии, <span class="mono">kaggle competitions submissions</span>.</span>
+    <span>обновлено 30.08.2026</span>
+  </footer>
+
+</div>
+
