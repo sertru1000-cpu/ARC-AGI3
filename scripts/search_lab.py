@@ -37,8 +37,12 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "runs" / "search_lab"
 GAME_DIRS = [ROOT / "our_games", ROOT / "our_games_gen"]
-SKIP_PREFIXES = ("mr01", "rg01")          # MOUSE-gated mechanics
-HOLDOUT = ("fg04", "fg05", "pg04", "pg05", "fl01", "ph01")  # never in training
+# MOUSE-gated mechanics (search drives actions 1-5 only): manual mr01/rg01,
+# click-only lz01/pi01 and their generated packs (lg/qg prefixes)
+SKIP_PREFIXES = ("mr01", "rg01", "lz01", "pi01", "lg", "qg")
+HOLDOUT = ("fg04", "fg05", "pg04", "pg05", "fl01", "ph01",
+           "sk01", "pt01", "gv01", "sw01", "cm01", "cv01", "sn01", "wf01", "cl01", "fw01")
+# ^ every MANUAL game holds out; training pairs come from generated packs only
 BUDGETS = (250, 750, 1500, 2500)
 PER_LEVEL_WALL_S = 45.0
 MAX_ACTION_ID = 5
