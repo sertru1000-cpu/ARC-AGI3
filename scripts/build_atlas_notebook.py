@@ -173,7 +173,8 @@ ATLAS_SUBMISSION_BUDGET_S = 28800.0   # 29.08 (option B): back to v23's 8h +
 # the 28.08 rehearsals validated while still bounding any single game to
 # half the 8h budget. History: a v7 regression (0.06) came from removing
 # the ceiling ENTIRELY -- keep it firm and named, never delete it.
-ATLAS_SUBMISSION_GAME_CAP_CEILING_S = 8500.0  # 29.08 (option B): v23's ceiling
+ATLAS_SUBMISSION_GAME_CAP_CEILING_S = __ATLAS_GAME_CAP_CEILING__  # substituted by the BUILDER (env ATLAS_GAME_CAP_CEILING_BUILD, default 8500)
+                                       # 29.08 (option B): v23's ceiling
                                        # (was 30600 for one-wave). At 55 games /
                                        # 3 waves the affordable cap is 9600s ->
                                        # this ceiling binds at 8500s (~140 min),
@@ -403,6 +404,10 @@ def build() -> None:
     atlas_cell_text = atlas_cell_text.replace("__ATLAS_CONCURRENCY__", repr(conc_value))
     assert "__ATLAS_CONCURRENCY__" not in atlas_cell_text
     print(f"builder: ATLAS_CONCURRENCY -> {conc_value}")
+    ceil_value = float(os.environ.get("ATLAS_GAME_CAP_CEILING_BUILD", "8500"))
+    atlas_cell_text = atlas_cell_text.replace("__ATLAS_GAME_CAP_CEILING__", repr(ceil_value))
+    assert "__ATLAS_GAME_CAP_CEILING__" not in atlas_cell_text
+    print(f"builder: ATLAS_SUBMISSION_GAME_CAP_CEILING_S -> {ceil_value}")
     cells.insert(hook_idx + 1, _new_cell(atlas_cell_text))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
