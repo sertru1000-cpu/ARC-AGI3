@@ -1,0 +1,12 @@
+{
+    "game_id": "hc01-c1d2e3f4",
+    "class_name": "Hc01",
+    "title": "Hidden Combo (hostile pool)",
+    "baseline_actions": [
+        20,
+        28,
+        22,
+        24,
+        26
+    ]
+}

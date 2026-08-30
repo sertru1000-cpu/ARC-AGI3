@@ -1,0 +1,12 @@
+{
+    "game_id": "ch01-d2e3f4a5",
+    "class_name": "Ch01",
+    "title": "Chaser (hostile pool)",
+    "baseline_actions": [
+        5,
+        11,
+        5,
+        21,
+        10
+    ]
+}

@@ -55,7 +55,24 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--port", type=int, default=8399)
     p.add_argument("--run-name", default="")
+    p.add_argument("--cpus", type=int, default=0,
+                   help="Pin the process (and children) to the first N logical CPUs "
+                        "via the Windows affinity mask -- emulates the ~4-vCPU Kaggle kernel. 0 = no limit.")
+    p.add_argument("--l1-nodes", type=int, default=0,
+                   help="Override proactive L1 search max_nodes (0 = keep battle value).")
+    p.add_argument("--deep-nodes", type=int, default=0,
+                   help="Override deep/proactive L2+ search max_nodes (0 = keep battle value).")
     return p.parse_args()
+
+
+def _limit_cpus(n: int) -> None:
+    import ctypes
+    mask = (1 << n) - 1
+    handle = ctypes.windll.kernel32.GetCurrentProcess()
+    if not ctypes.windll.kernel32.SetProcessAffinityMask(handle, mask):
+        raise OSError("SetProcessAffinityMask failed")
+    print(f"CPU affinity limited to {n} logical core(s) (mask={mask:#x}); "
+          "child processes inherit it", flush=True)
 
 
 def _sample_games(env_dir: Path, n: int, seed: int) -> list[str]:
@@ -194,6 +211,17 @@ def main() -> None:
     sys.path.insert(0, str(ROOT / "atlas_src" / "src" / "ARC3-Inference"))
     from mock_llm_server import STATS, serve_in_thread  # noqa: E402  (scripts/ on path via __file__)
     from inference.framework import run as harness_run  # noqa: E402
+
+    if args.cpus > 0:
+        _limit_cpus(args.cpus)
+    if args.l1_nodes > 0 or args.deep_nodes > 0:
+        from inference.agent import tool_agent as _ta  # noqa: E402
+        if args.l1_nodes > 0:
+            _ta._ATLAS_PROACTIVE_L1_BUDGET = dict(_ta._ATLAS_PROACTIVE_L1_BUDGET, max_nodes=args.l1_nodes)
+        if args.deep_nodes > 0:
+            _ta._ATLAS_PROACTIVE_DEEP_BUDGET = dict(_ta._ATLAS_PROACTIVE_DEEP_BUDGET, max_nodes=args.deep_nodes)
+        print(f"search budgets overridden: L1={_ta._ATLAS_PROACTIVE_L1_BUDGET} "
+              f"DEEP={_ta._ATLAS_PROACTIVE_DEEP_BUDGET}", flush=True)
 
     env_dir = Path(args.env_dir)
     games = ([g.strip() for g in args.games.split(",") if g.strip()]

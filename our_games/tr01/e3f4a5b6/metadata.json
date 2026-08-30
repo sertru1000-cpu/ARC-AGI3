@@ -1,0 +1,12 @@
+{
+    "game_id": "tr01-e3f4a5b6",
+    "class_name": "Tr01",
+    "title": "One-Way Trap (hostile pool)",
+    "baseline_actions": [
+        10,
+        10,
+        10,
+        9,
+        5
+    ]
+}
