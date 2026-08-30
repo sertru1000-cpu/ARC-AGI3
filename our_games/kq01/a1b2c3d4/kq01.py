@@ -253,7 +253,7 @@ class Kq01(ARCBaseGame):
             return
         # rebuild by resetting the level's key/hint sprites from the clean copy
         clean = self._clean_levels[self.level_index]
-        current_names = {s.name for s in self.current_level.sprites}
+        current_names = {s.name for s in self.current_level._sprites}
         for spr in clean._sprites:
             if spr.name.startswith("key_") and spr.name not in current_names:
                 self.current_level.add_sprite(spr.clone())
