@@ -338,7 +338,14 @@ _ATLAS_ZOMBIE_ENTROPY_WINDOW = 7
 # of loop-compressed recordings can only ever RAISE the score. Fires when
 # the compressed chain saves >=30% of the recorded actions and the game
 # still has wall budget left.
-_ATLAS_DRAFT_SPEEDRUN = (os.environ.get("ATLAS_DRAFT_SPEEDRUN", "1") or "1").strip().lower() not in {"0", "false", "no"}
+# 30.08 EVENING VERDICT (mock-LLM stress, backlog 19.3): DEAD BEFORE WIN.
+# taaf sets ONLY_RESET_LEVELS=true process-wide, and arcengine's
+# handle_reset() then ALWAYS level-resets until GameState.WIN -- the
+# "double RESET -> full restart" branch this mechanism relies on is
+# unreachable mid-game. Every firing costs 2 junk RESET actions and
+# aborts on the landed-level guard. Default flipped to OFF; the post-win
+# speedrun (_atlas_speedrun_after_win) is unaffected and stays on.
+_ATLAS_DRAFT_SPEEDRUN = (os.environ.get("ATLAS_DRAFT_SPEEDRUN", "0") or "0").strip().lower() not in {"0", "false", "no"}
 _ATLAS_SPEEDRUN_GAIN_RATIO = 0.7
 _ATLAS_SPEEDRUN_MIN_REMAINING_S = 180.0
 _ATLAS_LLM_ZOMBIE_SLOTS = int(os.environ.get("ATLAS_LLM_ZOMBIE_SLOTS", "0") or "0")
@@ -1666,6 +1673,7 @@ class ToolAgent:
         self._atlas_checkpoint_available = False  # set True on first successful save this session
         # Trigger A (soft stall): real actions since the last level-up.
         self._atlas_actions_since_level_progress = 0
+        self._atlas_blocked_noops_since_progress = 0
         self._atlas_current_level = 1
         # Trigger B (hard loop): rolling window of board signatures after
         # each real action, to catch "back to a state seen a couple of
@@ -1806,6 +1814,7 @@ class ToolAgent:
             self._atlas_checkpoint_counter = 0
             self._atlas_checkpoint_available = False
             self._atlas_actions_since_level_progress = 0
+            self._atlas_blocked_noops_since_progress = 0
             self._atlas_current_level = 1
             self._atlas_recent_board_sigs = []
             self._atlas_rollback_lesson = None
@@ -2573,15 +2582,18 @@ class ToolAgent:
             len(recent_sigs) >= _ATLAS_ZOMBIE_ENTROPY_WINDOW
             and len(set(recent_sigs)) <= 2
         )
+        # 30.08 (backlog 19.3): blocked known-noops burn LLM turns without
+        # moving _atlas_actions_since_level_progress -- count them too, or
+        # wall-banging games stay invisible to the cull forever.
+        stalled_turns = self._atlas_actions_since_level_progress + getattr(
+            self, "_atlas_blocked_noops_since_progress", 0
+        )
         is_zombie = (
             _ATLAS_LLM_ZOMBIE_GATE is not None
             and self._atlas_current_level == 1
             and (
-                self._atlas_actions_since_level_progress >= _ATLAS_ZOMBIE_AFTER_ACTIONS
-                or (
-                    entropy_dead
-                    and self._atlas_actions_since_level_progress >= _ATLAS_ZOMBIE_ENTROPY_AFTER
-                )
+                stalled_turns >= _ATLAS_ZOMBIE_AFTER_ACTIONS
+                or (entropy_dead and stalled_turns >= _ATLAS_ZOMBIE_ENTROPY_AFTER)
             )
         )
         # 30.08 (backlog 19.3, mock-LLM stress): first-transition diagnostics --
@@ -2591,15 +2603,13 @@ class ToolAgent:
             self._atlas_entropy_dead_logged = True
             print(
                 "atlas: entropy-dead detected "
-                f"(level={self._atlas_current_level}, "
-                f"actions_since_progress={self._atlas_actions_since_level_progress})",
+                f"(level={self._atlas_current_level}, stalled_turns={stalled_turns})",
                 flush=True,
             )
         if is_zombie and not getattr(self, "_atlas_zombie_logged", False):
             self._atlas_zombie_logged = True
             print(
-                "atlas: zombie gate engaged "
-                f"(actions_since_progress={self._atlas_actions_since_level_progress}, "
+                f"atlas: zombie gate engaged (stalled_turns={stalled_turns}, "
                 f"entropy_dead={entropy_dead})",
                 flush=True,
             )
@@ -2780,6 +2790,7 @@ class ToolAgent:
         self._atlas_current_level_actions = []
         self._atlas_current_level_sigs = []
         self._atlas_actions_since_level_progress = 0
+        self._atlas_blocked_noops_since_progress = 0
         self._atlas_recent_board_sigs = []
         self._atlas_rollback_lesson = lesson_learned
         self._atlas_rollback_target_checkpoint = None
@@ -3680,6 +3691,7 @@ class ToolAgent:
                 self._atlas_last_checkpoint_id = checkpoint_id
                 print(f"atlas: auto-anchor created ({checkpoint_id})", flush=True)
             self._atlas_actions_since_level_progress = 0
+            self._atlas_blocked_noops_since_progress = 0
             self._atlas_recent_board_sigs = []
             self._atlas_rollback_target_checkpoint = None
             self._atlas_rollback_trigger_reason = None
@@ -4025,6 +4037,20 @@ class ToolAgent:
                             "blocked before execution, no action budget spent."
                         ),
                     }
+                    # 30.08 (backlog 19.3, mock-LLM stress finding): a blocked
+                    # known-noop burns an LLM turn but used to leave the
+                    # zombie-cull counters untouched -- wall-banging games
+                    # were invisible to the cull (spam stress: 345 turns/game,
+                    # zero cull engagements). A blocked noop IS entropy-death
+                    # evidence: count it and feed the unchanged board sig.
+                    self._atlas_blocked_noops_since_progress = (
+                        getattr(self, "_atlas_blocked_noops_since_progress", 0) + 1
+                    )
+                    if noop_guard_board_sig is not None:
+                        self._atlas_recent_board_sigs.append(noop_guard_board_sig)
+                        _sig_cap = _ATLAS_ROLLBACK_LOOP_WINDOW + 1
+                        if len(self._atlas_recent_board_sigs) > _sig_cap:
+                            self._atlas_recent_board_sigs = self._atlas_recent_board_sigs[-_sig_cap:]
                     self._last_action_result = dict(compact_payload)
                     return {
                         "action_result": compact_payload,
@@ -4089,6 +4115,16 @@ class ToolAgent:
                     and self._noop_guard.is_known_noop(noop_guard_level, noop_guard_board_sig, action_sig)
                 ):
                     blocked_actions.append(action_sig)
+                    # 30.08 (backlog 19.3): blocked noop counts toward the
+                    # cull -- see the single-action branch above.
+                    self._atlas_blocked_noops_since_progress = (
+                        getattr(self, "_atlas_blocked_noops_since_progress", 0) + 1
+                    )
+                    if noop_guard_board_sig is not None:
+                        self._atlas_recent_board_sigs.append(noop_guard_board_sig)
+                        _sig_cap = _ATLAS_ROLLBACK_LOOP_WINDOW + 1
+                        if len(self._atlas_recent_board_sigs) > _sig_cap:
+                            self._atlas_recent_board_sigs = self._atlas_recent_board_sigs[-_sig_cap:]
                     continue
                 raw_payload = self._step_env_callback({"actions": [action]})
                 if not isinstance(raw_payload, dict):

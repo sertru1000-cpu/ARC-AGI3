@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "atlas_src" / "src" / "tufa-arc-agi-framework" / "src"))
 sys.path.insert(0, str(ROOT / "atlas_src" / "src" / "ARC3-Inference"))
 
+from inference.agent import tool_agent  # noqa: E402
 from inference.agent.tool_agent import ToolAgent  # noqa: E402
 from inference.agent.runtime_state import Frame, write_runtime_state  # noqa: E402
 
@@ -296,11 +297,17 @@ def main() -> None:
     # 7. Draft-speedrun (30.08, Gemini round 10b Q3): a sloppy L1 win (with
     #    a provable UP/DOWN loop in the trace) triggers a voluntary full
     #    restart + loop-compressed clean replay; an optimal draft does not.
+    #    30.08 evening: default flipped OFF (dead before WIN under
+    #    ONLY_RESET_LEVELS -- mock-LLM stress finding); the mechanism is
+    #    still tested here in isolation, forced ON for this scenario only.
+    _saved_draft_speedrun = tool_agent._ATLAS_DRAFT_SPEEDRUN
+    tool_agent._ATLAS_DRAFT_SPEEDRUN = True
     sp_path = tmp_dir / "speedrun_state.json"
     sp_env = MultiLevelEnv(sp_path, goals=[2, 9])
     sp_agent = _make_agent(sp_path, sp_env)
     for code in ("action('UP')\n", "action('DOWN')\n", "action('UP')\n", "action('UP')\n"):
         sp_agent._run_python_tool(sp_path, {"code": code})
+    tool_agent._ATLAS_DRAFT_SPEEDRUN = _saved_draft_speedrun
     if sp_env.level != 2:
         _fail("setup: sloppy 4-action draft still wins level 1", f"level={sp_env.level}")
     if sp_agent._atlas_speedrun_done_upto != 1:
