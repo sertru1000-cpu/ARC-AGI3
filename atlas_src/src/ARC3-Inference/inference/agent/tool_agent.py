@@ -2584,6 +2584,25 @@ class ToolAgent:
                 )
             )
         )
+        # 30.08 (backlog 19.3, mock-LLM stress): first-transition diagnostics --
+        # without these the cull is invisible in every run log (Kaggle included),
+        # so its false/missed firings cannot be counted offline.
+        if entropy_dead and not getattr(self, "_atlas_entropy_dead_logged", False):
+            self._atlas_entropy_dead_logged = True
+            print(
+                "atlas: entropy-dead detected "
+                f"(level={self._atlas_current_level}, "
+                f"actions_since_progress={self._atlas_actions_since_level_progress})",
+                flush=True,
+            )
+        if is_zombie and not getattr(self, "_atlas_zombie_logged", False):
+            self._atlas_zombie_logged = True
+            print(
+                "atlas: zombie gate engaged "
+                f"(actions_since_progress={self._atlas_actions_since_level_progress}, "
+                f"entropy_dead={entropy_dead})",
+                flush=True,
+            )
         if _ATLAS_LLM_REQUEST_GATE is not None and is_zombie:
             with _ATLAS_LLM_ZOMBIE_GATE:
                 with _ATLAS_LLM_REQUEST_GATE:
