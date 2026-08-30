@@ -333,6 +333,19 @@ _ATLAS_ZOMBIE_AFTER_ACTIONS = int(os.environ.get("ATLAS_ZOMBIE_AFTER_ACTIONS", "
 # threshold above (30).
 _ATLAS_ZOMBIE_ENTROPY_AFTER = int(os.environ.get("ATLAS_ZOMBIE_ENTROPY_AFTER", "20") or "20")
 _ATLAS_ZOMBIE_ENTROPY_WINDOW = 7
+# 30.08 evening (Gemini round 13 Q1 + duck example-run survival curve):
+# L1 "stock sprint" -- the PROACTIVE deep search is deferred on level 1
+# until the model has had a fast, stock-tempo crack at it. Empirics from
+# duck's 500 real plays: stock alone clears 50% of L1s, median successful
+# L1 = 26 actions, and P(clears L1 | 14 actions without it) is still 43%
+# -- so an early sprint costs nothing while quadrupling turn tempo (their
+# 130 actions/game vs our ~30). Escalation: the search un-defers once the
+# game shows stall evidence (2+ noop-guard blocks) or the sprint window
+# (12 stalled turns) runs out. Level 2+ proactive search is untouched
+# (higher RHAE weight, mechanics already opened). Model-requested and
+# nag-escalation runs are never deferred.
+_ATLAS_L1_STOCK_SPRINT = (os.environ.get("ATLAS_L1_STOCK_SPRINT", "1") or "1").strip().lower() not in {"0", "false", "no"}
+_ATLAS_L1_SPRINT_ACTIONS = int(os.environ.get("ATLAS_L1_SPRINT_ACTIONS", "12") or "12")
 # 30.08 (Gemini round 10b Q3, draft->clean speedrun): official score = max
 # over plays, so after a slowly-won level a voluntary full reset + replay
 # of loop-compressed recordings can only ever RAISE the score. Fires when
@@ -3913,12 +3926,32 @@ class ToolAgent:
             if handoff_note:
                 self._atlas_mechanic_handoff_note = handoff_note
         if self._atlas_pending_auto_plan_real:
-            self._atlas_pending_auto_plan_real = False
-            was_proactive = self._atlas_pending_auto_plan_real_proactive
-            self._atlas_pending_auto_plan_real_proactive = False
-            auto_note = self._atlas_auto_plan_real(state_path, proactive=was_proactive)
-            if auto_note:
-                self._atlas_plan_real_auto_note = auto_note
+            # L1 stock sprint (round 13 Q1): defer the PROACTIVE search on
+            # level 1 while the model still has a fast stock-tempo window
+            # and no stall evidence; the pending flag survives, so the
+            # search fires naturally on the first call past the window.
+            _sprint_blocked = getattr(self, "_atlas_blocked_noops_since_progress", 0)
+            if (
+                _ATLAS_L1_STOCK_SPRINT
+                and self._atlas_pending_auto_plan_real_proactive
+                and self._atlas_current_level == 1
+                and (self._atlas_actions_since_level_progress + _sprint_blocked) < _ATLAS_L1_SPRINT_ACTIONS
+                and _sprint_blocked < 2
+            ):
+                if not getattr(self, "_atlas_l1_sprint_logged", False):
+                    self._atlas_l1_sprint_logged = True
+                    print(
+                        "atlas: L1 stock sprint -- proactive search deferred "
+                        f"(window={_ATLAS_L1_SPRINT_ACTIONS} stalled turns)",
+                        flush=True,
+                    )
+            else:
+                self._atlas_pending_auto_plan_real = False
+                was_proactive = self._atlas_pending_auto_plan_real_proactive
+                self._atlas_pending_auto_plan_real_proactive = False
+                auto_note = self._atlas_auto_plan_real(state_path, proactive=was_proactive)
+                if auto_note:
+                    self._atlas_plan_real_auto_note = auto_note
         # (d) Hail Mary: near-death on level 2+ -> one last-gasp deep search.
         try:
             self._atlas_maybe_hail_mary(state_path)

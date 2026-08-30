@@ -468,6 +468,10 @@ def main() -> None:
     #     level's search; a proactive miss on the new level stays silent.
     import inference.agent.tool_agent as ta_module
     ta_module._ATLAS_PLAN_REAL_PROACTIVE = True
+    # 30.08: the L1 stock sprint (scenario 14) would defer this scenario's
+    # first-call search -- isolate the proactive machinery from the gate.
+    _saved_sprint = ta_module._ATLAS_L1_STOCK_SPRINT
+    ta_module._ATLAS_L1_STOCK_SPRINT = False
     try:
         pro_state_path = tmp_dir / "proactive_state.json"
         pro_env = WalkEnv(pro_state_path, goal=2)
@@ -490,8 +494,35 @@ def main() -> None:
             _fail("proactive search never leaves the real game dead", "game_over")
     finally:
         ta_module._ATLAS_PLAN_REAL_PROACTIVE = False
+        ta_module._ATLAS_L1_STOCK_SPRINT = _saved_sprint
     _ok("proactive plan_real: level 1 auto-solved on the first call with zero model turns, "
         "autopilot note injected, next level seeded, miss stays silent")
+
+    # 14. Gemini round 13 Q1 + duck survival curve (30.08): the L1 STOCK
+    #     SPRINT defers the proactive search on level 1 -- the first python
+    #     call must NOT auto-solve, the pending flag must survive, and the
+    #     search must fire once the stall evidence (blocked noops >= 2)
+    #     arrives, still solving the level.
+    ta_module._ATLAS_PLAN_REAL_PROACTIVE = True
+    ta_module._ATLAS_L1_STOCK_SPRINT = True
+    try:
+        sp_state_path = tmp_dir / "sprint_state.json"
+        sp_env = WalkEnv(sp_state_path, goal=2)
+        sp_agent = _make_agent(sp_state_path, sp_env)
+        sp_agent._run_python_tool(sp_state_path, {"code": "result = 1\n"})
+        if sp_env.level != 1:
+            _fail("L1 sprint defers the proactive search on the first call", f"level={sp_env.level}")
+        if not sp_agent._atlas_pending_auto_plan_real:
+            _fail("deferral keeps the pending flag alive", "flag consumed")
+        sp_agent._atlas_blocked_noops_since_progress = 2  # stall evidence -> escalation
+        sp_agent._run_python_tool(sp_state_path, {"code": "result = 2\n"})
+        if sp_env.level != 2:
+            _fail("stall evidence un-defers the search and it solves L1", f"level={sp_env.level}")
+    finally:
+        ta_module._ATLAS_PLAN_REAL_PROACTIVE = False
+        ta_module._ATLAS_L1_STOCK_SPRINT = _saved_sprint
+    _ok("L1 stock sprint: proactive search deferred on level 1, pending survives, "
+        "escalates on 2 blocked noops and still solves the level")
 
     # 13. A* wiring (30.08, backlog 19): with a heuristic model injected the
     #     frontier orders by g + w*h -- the search must still find the exact
