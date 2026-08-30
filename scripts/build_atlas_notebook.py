@@ -206,12 +206,14 @@ print(f"atlas: patched tool_agent._LOCAL_ANALYZER_MAX_OUTPUT = {ATLAS_ANALYZER_M
 # (v23-agent hybrid or the full probes build).
 import inference.framework.solver as _atlas_solver_mod
 if hasattr(_atlas_solver_mod, "_ATLAS_TIME_BANK_DRAWS_ENABLED"):
-    # 29.08 (option B): draws back ON -- v23's 0.92 regime included the time
-    # bank, and at the 8500s ceiling a maxed-out draw (+100% => ~4.7h) stays
-    # far under Kaggle's 12h kill. (The False patch was one-wave-specific:
-    # a draw on top of an 8.5h cap would have blown the platform limit.)
-    _atlas_solver_mod._ATLAS_TIME_BANK_DRAWS_ENABLED = True
-    print("atlas: solver._ATLAS_TIME_BANK_DRAWS_ENABLED = True (v23 regime: bank draws allowed)")
+    # 30.08: build-time substituted (env ATLAS_DRAWS_BUILD, default "1").
+    # Draws ON = v23 regime (waves-of-20, 8500s ceiling). Draws OFF (user's
+    # 30.08 V39 call): 14400s ceiling x 2 waves exactly fills the 28800s
+    # budget -- a draw on top would blow it; the time-bank stays ENABLED so
+    # the stall EARLY EXIT (0 levels past 50% of cap -> end, deposit time,
+    # stop competing for the LLM) keeps working.
+    _atlas_solver_mod._ATLAS_TIME_BANK_DRAWS_ENABLED = bool(__ATLAS_DRAWS__)
+    print(f"atlas: solver._ATLAS_TIME_BANK_DRAWS_ENABLED = {bool(__ATLAS_DRAWS__)} (build-time)")
 if hasattr(_atlas_tool_agent, "_ATLAS_LLM_REQUEST_GATE"):
     import threading as _atlas_threading
     _atlas_tool_agent._ATLAS_LLM_MAX_CONCURRENT = 25
@@ -360,7 +362,7 @@ RUN_CELL_PATCH = """        bm.games = _competition_games()
         # 20; deposits from stalled games get re-drawn by progressing ones,
         # ceiling 8500s keeps a maxed draw far under the platform kill).
         import os as _atlas_os
-        _atlas_os.environ["ATLAS_TIME_BANK_DRAWS"] = "1"
+        _atlas_os.environ["ATLAS_TIME_BANK_DRAWS"] = "1" if __ATLAS_DRAWS__ else "0"
         # atlas: a rerun has no soft deadline, so size the per-game cap to fit.
         atlas_fit_game_cap(len(bm.games))"""
 
@@ -419,6 +421,10 @@ def build() -> None:
     conc_value = int(os.environ.get("ATLAS_CONCURRENCY_BUILD", "20"))
     atlas_cell_text = atlas_cell_text.replace("__ATLAS_CONCURRENCY__", repr(conc_value))
     assert "__ATLAS_CONCURRENCY__" not in atlas_cell_text
+    draws_value = (os.environ.get("ATLAS_DRAWS_BUILD", "1") or "1").strip().lower() not in {"0", "false", "no"}
+    atlas_cell_text = atlas_cell_text.replace("__ATLAS_DRAWS__", repr(draws_value))
+    assert "__ATLAS_DRAWS__" not in atlas_cell_text
+    print(f"builder: ATLAS_TIME_BANK_DRAWS -> {draws_value}")
     print(f"builder: ATLAS_CONCURRENCY -> {conc_value}")
     ceil_value = float(os.environ.get("ATLAS_GAME_CAP_CEILING_BUILD", "8500"))
     atlas_cell_text = atlas_cell_text.replace("__ATLAS_GAME_CAP_CEILING__", repr(ceil_value))
