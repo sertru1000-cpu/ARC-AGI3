@@ -224,6 +224,22 @@ if hasattr(_atlas_tool_agent, "_ATLAS_LLM_ZOMBIE_GATE"):
     _atlas_tool_agent._ATLAS_LLM_ZOMBIE_GATE = _atlas_threading.Semaphore(10)
     print("atlas: patched tool_agent zombie gate = 10 (level-1 no-progress cull)")
 
+# 30.08: A* heuristic for plan_real (pod A/B on the 25 publics: 5 levels /
+# RHAE 0.69 with it vs 1 / 0.11 without, matched 1h arms). The path env is
+# read at IMPORT time (the same too-late trap as everything above), so the
+# module attribute is patched directly; the loader stays lazy + fail-safe
+# (any load error falls back to novelty ordering). sklearn ships in the
+# Kaggle image; h_model.pkl rides in the source dataset.
+import glob as _atlas_glob
+_astar_hits = sorted(_atlas_glob.glob("/kaggle/input/*/h_model.pkl")) or sorted(
+    _atlas_glob.glob("/kaggle/input/**/h_model.pkl", recursive=True))
+if _astar_hits and hasattr(_atlas_tool_agent, "_ATLAS_ASTAR_MODEL_PATH"):
+    _atlas_tool_agent._ATLAS_ASTAR_MODEL_PATH = _astar_hits[0]
+    _atlas_tool_agent._ATLAS_ASTAR_CACHE = {"loaded": False, "model": None}
+    print(f"atlas: A* heuristic path patched -> {_astar_hits[0]}")
+else:
+    print("atlas: A* heuristic pkl not found in inputs -- novelty ordering stays")
+
 # Phase A ONLY: shrink the per-game cap for a quick calibration check of the
 # timeout/max-output change above, on the real 25-game set (no fabricated
 # repeats -- repeats of one game would raise vLLM's prefix-cache hit rate and
