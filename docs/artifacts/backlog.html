@@ -1,0 +1,579 @@
+<title>ARC-AGI-3 Backlog</title>
+<meta name="description" content="Статус доработок харнесса atlas для ARC Prize 2026 — боевые версии, активные и закрытые треки, правила кровью.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --bg: #f7f5ef;
+    --surface: #ffffff;
+    --surface-2: #f1eee5;
+    --ink: #1b1f23;
+    --ink-muted: #5c6570;
+    --ink-faint: #8b8477;
+    --border: #ddd7c9;
+    --border-soft: #e8e3d6;
+    --accent: #2c6e6b;
+    --accent-ink: #163e3c;
+    --accent-soft: #e2efed;
+    --status-done-bg: #e6f0e3;
+    --status-done-ink: #2f6b3a;
+    --status-progress-bg: #f7ecd6;
+    --status-progress-ink: #93690f;
+    --status-blocked-bg: #f6e6e1;
+    --status-blocked-ink: #a1442f;
+    --status-todo-bg: #ece8dd;
+    --status-todo-ink: #6b6555;
+    --status-super-bg: #eeece5;
+    --status-super-ink: #9a9384;
+    --shadow: 0 1px 2px rgba(27,31,35,0.04), 0 8px 20px -12px rgba(27,31,35,0.12);
+
+    --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+    --font-body: "Public Sans", -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15191b;
+      --surface: #1d2225;
+      --surface-2: #23282b;
+      --ink: #ece8e0;
+      --ink-muted: #a3aab1;
+      --ink-faint: #767e85;
+      --border: #313739;
+      --border-soft: #292f31;
+      --accent: #64c2ba;
+      --accent-ink: #a9e0da;
+      --accent-soft: rgba(100,194,186,0.12);
+      --status-done-bg: rgba(94,168,109,0.16);
+      --status-done-ink: #8fd19e;
+      --status-progress-bg: rgba(214,163,60,0.16);
+      --status-progress-ink: #e3bd6e;
+      --status-blocked-bg: rgba(206,102,80,0.16);
+      --status-blocked-ink: #e28b73;
+      --status-todo-bg: rgba(255,255,255,0.06);
+      --status-todo-ink: #a8a396;
+      --status-super-bg: rgba(255,255,255,0.04);
+      --status-super-ink: #7c7768;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 28px -16px rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15191b;
+    --surface: #1d2225;
+    --surface-2: #23282b;
+    --ink: #ece8e0;
+    --ink-muted: #a3aab1;
+    --ink-faint: #767e85;
+    --border: #313739;
+    --border-soft: #292f31;
+    --accent: #64c2ba;
+    --accent-ink: #a9e0da;
+    --accent-soft: rgba(100,194,186,0.12);
+    --status-done-bg: rgba(94,168,109,0.16);
+    --status-done-ink: #8fd19e;
+    --status-progress-bg: rgba(214,163,60,0.16);
+    --status-progress-ink: #e3bd6e;
+    --status-blocked-bg: rgba(206,102,80,0.16);
+    --status-blocked-ink: #e28b73;
+    --status-todo-bg: rgba(255,255,255,0.06);
+    --status-todo-ink: #a8a396;
+    --status-super-bg: rgba(255,255,255,0.04);
+    --status-super-ink: #7c7768;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 28px -16px rgba(0,0,0,0.6);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+  }
+
+  /* ---- masthead ---- */
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 2.25rem;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(2.4rem, 6vw, 3.4rem);
+    line-height: 0.96;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  .subhead {
+    color: var(--ink-muted);
+    font-size: 1.02rem;
+    max-width: 62ch;
+  }
+
+  /* ---- scoreboard ---- */
+  .scoreboard {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 2rem 0 2.75rem;
+    box-shadow: var(--shadow);
+  }
+  .stat {
+    background: var(--surface);
+    padding: 1.1rem 1.15rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .stat-label {
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+  }
+  .stat-value {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 2.1rem;
+    line-height: 1;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-value.accent { color: var(--accent-ink); }
+  .stat-value.alarm { color: var(--status-blocked-ink); }
+  .stat-note {
+    font-size: 0.78rem;
+    color: var(--ink-muted);
+  }
+  @media (max-width: 700px) {
+    .scoreboard { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* ---- alert ---- */
+  .alert {
+    background: var(--status-blocked-bg);
+    border: 1px solid var(--status-blocked-ink);
+    border-radius: 10px;
+    padding: 1.1rem 1.25rem;
+    margin-bottom: 2.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .alert h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.3rem;
+    margin: 0;
+    color: var(--status-blocked-ink);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .alert p { margin: 0; font-size: 0.92rem; color: var(--ink-muted); }
+  .alert code { font-family: var(--font-mono); font-size: 0.85em; color: var(--ink); }
+
+  /* ---- phase sections ---- */
+  .phase {
+    margin-bottom: 2.75rem;
+  }
+  .phase-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.85rem;
+    margin-bottom: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .phase-num {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.6rem;
+    color: var(--phase-color, var(--accent));
+  }
+  .phase-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.45rem;
+    letter-spacing: -0.005em;
+  }
+  .phase-gate {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border-soft);
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+  }
+  .phase-gate.hit {
+    color: var(--status-done-ink);
+    background: var(--status-done-bg);
+    border-color: transparent;
+  }
+  .phase-status-line {
+    color: var(--ink-muted);
+    font-size: 0.94rem;
+    margin: 0 0 1.1rem;
+    max-width: 68ch;
+  }
+
+  .items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .item {
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    border-left: 3px solid var(--item-color, var(--border));
+    border-radius: 8px;
+    padding: 0.85rem 1rem 0.9rem;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.15rem 0.85rem;
+    align-items: start;
+  }
+  .chip {
+    grid-row: 1 / 3;
+    align-self: start;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.22rem 0.5rem;
+    border-radius: 5px;
+    white-space: nowrap;
+    margin-top: 0.15rem;
+  }
+  .chip.done { background: var(--status-done-bg); color: var(--status-done-ink); }
+  .chip.progress { background: var(--status-progress-bg); color: var(--status-progress-ink); }
+  .chip.blocked { background: var(--status-blocked-bg); color: var(--status-blocked-ink); }
+  .chip.todo { background: var(--status-todo-bg); color: var(--status-todo-ink); }
+  .chip.rejected { background: var(--status-super-bg); color: var(--status-super-ink); text-decoration: line-through; text-decoration-thickness: 1px; }
+
+  .item-title {
+    font-weight: 600;
+    font-size: 0.97rem;
+    color: var(--ink);
+  }
+  .item-desc {
+    font-size: 0.89rem;
+    color: var(--ink-muted);
+    grid-column: 2;
+  }
+  .item-desc code {
+    font-family: var(--font-mono);
+    font-size: 0.83em;
+    background: var(--surface-2);
+    padding: 0.05em 0.35em;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+
+  /* ---- rules list ---- */
+  .rules {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .rule {
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    border-left: 3px solid var(--status-blocked-ink);
+    border-radius: 8px;
+    padding: 0.6rem 0.9rem;
+    font-size: 0.89rem;
+    color: var(--ink-muted);
+  }
+  .rule strong { color: var(--ink); }
+  .rule code { font-family: var(--font-mono); font-size: 0.85em; color: var(--ink); }
+  .rule.fresh { border-left-color: var(--accent); }
+
+  /* ---- legacy / superseded ---- */
+  .legacy {
+    margin-top: 3.5rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--border);
+  }
+  .legacy .phase-title { font-size: 1.15rem; color: var(--ink-muted); }
+  .legacy .items { gap: 0.4rem; }
+  .legacy .item {
+    padding: 0.6rem 0.9rem;
+    opacity: 0.85;
+  }
+  .legacy .item-title { font-size: 0.88rem; color: var(--ink-muted); }
+  .legacy .item-desc { font-size: 0.82rem; }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  footer .mono { font-family: var(--font-mono); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .item { transition: border-color 0.15s ease; }
+  }
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <div class="eyebrow">ARC Prize 2026 · ARC-AGI-3 · sergueimakarov</div>
+    <h1>Backlog &amp; progress</h1>
+    <p class="subhead">Ревизия 31.08.2026, 06:10 МСК. Цель — топ-10 к 30.09. Действует портфель v2 (Gemini р.12): ферма максимума, CODE FREEZE 21.09. Полный текст: <code style="font-family:var(--font-mono);font-size:0.85em">docs/plan_top10_by_3009.md</code>.</p>
+  </div>
+
+  <div class="scoreboard">
+    <div class="stat">
+      <span class="stat-label">Лучший боевой</span>
+      <span class="stat-value accent">0.92</span>
+      <span class="stat-note">v23 · серия 1.19 / 0.06 / 1.09 / 1.14 / 0.82 / 0.92 / 0.65 / 0.57</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Порог топ-10</span>
+      <span class="stat-value">2.94</span>
+      <span class="stat-note">разрыв ×3.2 · топ-1 = 5.99</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Сабмит 31.08</span>
+      <span class="stat-value" style="color:var(--status-progress-ink)">V39</span>
+      <span class="stat-note">первая попытка упала (system error), переотправлен 06:16 МСК — pending</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Слотов до 30.09</span>
+      <span class="stat-value">~30</span>
+      <span class="stat-note">ферма: слот не сгорает никогда</span>
+    </div>
+  </div>
+
+  <div class="alert">
+    <h2>Сабмит 31.08: упал и переотправлен</h2>
+    <p><strong>Первая попытка</strong> — ref <code>55904757</code>, 05:04 МСК, статус <code>error</code>,
+    балла нет. Текст Kaggle дословно: «A system error. Please try resubmitting to resolve the error
+    and contact Kaggle Support if it persists» — платформенный отказ, не падение нашего кода
+    (наше падение читалось бы как «Notebook Threw Exception»).</p>
+    <p><strong>Переотправлено</strong> — ref <code>55905933</code>, 06:16 МСК, статус <code>pending</code>.
+    Версия та же (<code>scriptVersionId=346081723</code>), то есть упал именно V39 и дело не в выборе
+    версии. Суточный слот ошибка НЕ сожгла: вторая отправка прошла в тот же день.</p>
+    <p>Наша сторона проверена и чиста: датасет <code>arc3-atlas-src</code> в статусе ready, файлы от
+    30.08 19:22, <code>h_model.pkl</code> = 268 600 байт (смешанная модель) — это не повтор аварии V37;
+    новой версии кернела не появилось, значит сабмит сделан со страницы соревнования.</p>
+    <p>Связанный незакрытый вопрос — <strong>датасет прикреплён к кернелу без номера версии</strong>
+    (<code>"dataset_sources": ["sergueimakarov/arc3-atlas-src"]</code>, тогда как модель — с версией).
+    Эту аварию он не объясняет, но означает, что старые версии кернела могут быть невоспроизводимы.</p>
+  </div>
+
+  <!-- БОЕВЫЕ ВЕРСИИ -->
+  <section class="phase" style="--phase-color:var(--status-progress-ink)">
+    <div class="phase-head">
+      <span class="phase-num">01</span>
+      <span class="phase-title">Боевые версии</span>
+      <span class="phase-gate">лидерборд = максимум по всем сабмитам</span>
+    </div>
+    <div class="items">
+      <div class="item" style="--item-color:var(--status-blocked-ink)">
+        <span class="chip progress">скорится</span>
+        <span class="item-title">31.08 — V39 в Фазе B (переотправлен после отказа)</span>
+        <span class="item-desc">Первая попытка (55904757, 05:04 МСК) отвалилась с платформенной ошибкой Kaggle; переотправлена та же версия — 55905933, 06:16 МСК, скорится. Вердикт ожидается вечером 31.08: заметно выше прежних → время рычаг; полоса 0.5–1.0 → весь вес переходит на темп.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-done-ink)">
+        <span class="chip done">вердикт 0.57</span>
+        <span class="item-title">V30 — код v26+раунд-8 на конфиге v23</span>
+        <span class="item-desc">Худший в серии после v23: 0.92 → 0.65 → 0.57 монотонно вниз. Либо прирост кода вреден на скрытом сете, либо дисперсия одиночного сабмита велика (у стокового Duck один прогон гуляет 1.00–2.38, σ 0.45).</span>
+      </div>
+      <div class="item" style="--item-color:var(--accent)">
+        <span class="chip progress">готова</span>
+        <span class="item-title">V39 — код V38 + конфиг «4 часа»</span>
+        <span class="item-desc">conc 28 → 2 волны по 55 скрытым играм, потолок 14400с × 2 = ровно бюджет 28800с, добор ВЫКЛ, раннее снятие ВКЛ. Фаза A зелёная: 0 draws, снятие сработало 25 раз, A* загружен, 0 трейсбеков. Меряет один вопрос: время — рычаг или нет.</span>
+      </div>
+      <div class="item" style="--item-color:var(--accent)">
+        <span class="chip done">темп подтверждён</span>
+        <span class="item-title">V40 — V39 + L1-спринт + A* 0.5 + смешанная h-модель</span>
+        <span class="item-desc">Фаза A разобрана 31.08: <strong>действий 122 → 180 (+48%)</strong> при том же токеновом бюджете, токенов на действие −40%, игр с уровнем 0 → 3. Спринт сработал на 23 из 25 игр; handoff-проба и hail-mary впервые получили работу. Риск «спринт съест первые уровни» не реализовался.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-super-ink)">
+        <span class="chip rejected">вытеснены</span>
+        <span class="item-title">V36 / V37 / V38 — предыдущие кандидаты</span>
+        <span class="item-desc">V37 упала на оборванном пуше датасета (1 файл из 77 при статусе «ready»); V38 — тот же код на починенном датасете, Фаза A зелёная; V36 — «всё лучшее сразу» с потолком 2.2ч. Все вытеснены конфигом V39.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- АКТИВНЫЕ ТРЕКИ -->
+  <section class="phase" style="--phase-color:var(--accent)">
+    <div class="phase-head">
+      <span class="phase-num">02</span>
+      <span class="phase-title">Активные треки</span>
+      <span class="phase-gate">портфель v2 до 30.09</span>
+    </div>
+    <div class="items">
+      <div class="item" style="--item-color:var(--status-blocked-ink)">
+        <span class="chip todo">открыт</span>
+        <span class="item-title">28 · Пиннится ли версия датасета при реране</span>
+        <span class="item-desc">Всплыло при разборе отказа 31.08. В метаданных кернела датасет указан без версии, модель — с версией. Если реран разрешает датасет в последнюю версию, старые версии кернела невоспроизводимы, и «конфиг изолированно» перестаёт быть чистым экспериментом.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip todo">V41-кандидат</span>
+        <span class="item-title">27 · Динамическое перепланирование бюджета</span>
+        <span class="item-desc">Потолок пересчитывается от абсолютного дедлайна при каждом завершении игры и поднимается только вверх; сессии читают его живьём, выжившие продлеваются сами. ~полдня. Аргумент измерен: <strong>23 из 25 игр</strong> снимаются на половине потолка в любом окне (25 мин, 50 мин, 2.2ч), а при выключенном доборе возвращённое время исчезает.</span>
+      </div>
+      <div class="item" style="--item-color:var(--accent)">
+        <span class="chip progress">действует</span>
+        <span class="item-title">21 · Портфель v2 (Gemini раунд 12)</span>
+        <span class="item-desc">Ферма максимума подтверждена разведкой (FOYSAL 2.23 за 99 сабмитов на стоковом Duck) и своим расчётом: ожидаемый максимум за 31 сабмит ≈ 2.36 — <strong>ферма стока порога не достаёт</strong>, нужен код, поднимающий медиану. Ф2 06–13.09: черри-пик workspace из Polyphony (НЕ ребейз). Ф3 14–20.09: Optuna. Ф4: CODE FREEZE 21.09.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-done-ink)">
+        <span class="chip progress">4/5 готово</span>
+        <span class="item-title">19 · Корпус уровней: 5 применений</span>
+        <span class="item-desc">Бенч бюджетов ✅ (33/46/57/65 уровней при 250/750/1500/2500 узлов), A*-эвристика ✅ (и затем переоценена, см. закрытые), mock-LLM стресс ✅, регрессионный смок ✅. Осталось: Optuna по фабрике.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-progress-ink)">
+        <span class="chip progress">в работе</span>
+        <span class="item-title">18 · Обучение харнеса на синтетике</span>
+        <span class="item-desc">Протокол обучения h(s) переписан 30.08 вечером: пропуск mouse-gated префиксов, в отложенный набор уходят все 24 ручные игры, обучение только на генерированных паках. <strong>Новой модели по нему ещё не собрано</strong> — в бою смешанная модель от 18:52.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip todo">нужен замер</span>
+        <span class="item-title">23 · Очередь раунда 13: конкурентность 28 → 18</span>
+        <span class="item-desc">Совет критика по итогам диагноза «деградация 0.92→0.57 = падение темпа ходов в 4-5 раз»: меньше конкурентность → больше vCPU на воркер (1.7 → 2.6). L1-спринт из той же очереди уже исполнен и подтверждён.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-blocked-ink)">
+        <span class="chip blocked">заблокирован</span>
+        <span class="item-title">22 · 35B/MoE против 27B</span>
+        <span class="item-desc">Зеркала Qwen3.5/3.6-MoE несовместимы с vllm 0.19 (<code>Qwen3_5MoeConfig</code>); под прерван по правилу «no debugging on the meter». Сначала БЕСПЛАТНАЯ проверка <code>config.json</code> кандидатов (Qwen3-30B-A3B, <code>qwen3_moe</code> — поддержан), потом 1ч пода.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip todo">до финала</span>
+        <span class="item-title">16a · KV-гейт эксперимент (под)</span>
+        <span class="item-desc">Семафор 15–18 одновременных + условие <code>vllm:num_requests_swapped == 0</code> — открывает широкие волны для 110 скрытых игр финала без KV-трэша.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ЗАКРЫТЫЕ ТРЕКИ -->
+  <section class="phase" style="--phase-color:var(--status-done-ink)">
+    <div class="phase-head">
+      <span class="phase-num">03</span>
+      <span class="phase-title">Закрытые треки</span>
+      <span class="phase-gate hit">неделя 25–31.08</span>
+    </div>
+    <div class="items">
+      <div class="item" style="--item-color:var(--status-blocked-ink)">
+        <span class="chip blocked">опровергнут</span>
+        <span class="item-title">A* как рычаг силы</span>
+        <span class="item-desc">Эвристика не переносится: на 3193 парах из невиданных реальных игр Duck её MAE 18.6 против 15.7 у наивного среднего. На враждебном полигоне вес 2.0 <strong>отнимал</strong> уровни (5 против 9) — жадная оценка тянет в тупиковый карман. Демотирована до разрешителя ничьих (вес 0.5). Подовая дельта «×2» — с высокой вероятностью переобучение на свой тестбед.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-blocked-ink)">
+        <span class="chip rejected">мёртв</span>
+        <span class="item-title">Драфт-спидран и энтропийный cull</span>
+        <span class="item-desc">Спидран до победы недостижим при <code>ONLY_RESET_LEVELS</code> — движок всегда делает level_reset (на поде: 1 срабатывание → 1 аборт). Энтропийный признак мёртв на реальных играх: в 500 партиях Duck <strong>0% петель</strong> (45% блуждание, 50% прогресс, 5% спираль смерти). Работает только порог 30 действий, ужесточать нельзя — после 30 пустых действий шанс взять уровень ещё 31%.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-done-ink)">
+        <span class="chip done">закрыта</span>
+        <span class="item-title">16 · Лестница волн (score vs concurrency)</span>
+        <span class="item-desc">Точка 1 = V30 (0.57), точка 2 вытеснена. Кривая осталась недокартированной, но обе крайности известны: одна волна 110 = 0.65, волны по 20 = 0.92 и 0.57 на разном коде.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-done-ink)">
+        <span class="chip done">подтверждён</span>
+        <span class="item-title">13 · Фокус глубины (раунд 6)</span>
+        <span class="item-desc">V27 против v24-контроля на матч-условиях: глубина 2→7, RHAE +77%. Ключ: автоматика окупается ТОЛЬКО при дефиците LLM-темпа (24-conc: +22%; 8-conc: разворот 4.60 против 0.08). Фаза B = дефицит → в плюс.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-done-ink)">
+        <span class="chip done">готово</span>
+        <span class="item-title">14/20 · Свои игры → 24 игры, включая враждебный полигон</span>
+        <span class="item-desc">20 механик (сокобан, порталы, гравитация, лазеры, конвейеры, трубы, пожар, туман…) плюс 4 враждебных: скрытая комбинация, псевдослучайный преследователь, односторонняя ловушка, визуальный шум. Фабрика: 113 паков. <strong>Новый стандарт</strong>: каждая правка поиска сдаёт два экзамена — помогает на дружелюбных И не вредит на враждебных. Именно он за час поймал вред A*.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-blocked-ink)">
+        <span class="chip blocked">опровергнута</span>
+        <span class="item-title">15 · Конфиг-гипотеза «одна волна 110×8.5ч»</span>
+        <span class="item-desc">v24 = 0.65 против 0.92 на том же коде — глубокая очередь теряет ~0.27 на KV-трэше при 55 одновременных играх.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-done-ink)">
+        <span class="chip done">исполнена</span>
+        <span class="item-title">17 · Очередь раунда 10b</span>
+        <span class="item-desc">Драфт-спидран, гибридный cull, лимиты поиска 750/2500 узлов (при 90 узлов/сек старые обрубали поиск за треть бюджета).</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-super-ink)">
+        <span class="chip rejected">отклонён</span>
+        <span class="item-title">12 · Кернел-зонд размера скрытого сета</span>
+        <span class="item-desc">Число игр Фазы B подтверждено владельцем: <strong>55</strong>. Зонд не нужен — конфиг рассчитан, при conc 28 это ровно 2 волны по 4 часа.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-super-ink)">
+        <span class="chip rejected">закрыт</span>
+        <span class="item-title">Б · Дообучение LLM до 30.09</span>
+        <span class="item-desc">Gemini р.10: SFT не успевает до дедлайна. План данных «на после» готов: поиск-учитель на тестбеде, курсы уровней.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ПРАВИЛА -->
+  <section class="phase">
+    <div class="phase-head">
+      <span class="phase-title" style="font-size:1.15rem">Ключевые правила (кровью)</span>
+    </div>
+    <div class="rules">
+      <div class="rule"><strong>Сабмит — только со страницы соревнования.</strong> Кнопка на странице кернела рождает квотный реран.</div>
+      <div class="rule"><strong>Пуш датасета → фантомный авто-реран</strong> последней версии кернела — проверять список версий и отменять.</div>
+      <div class="rule"><strong>После пуша датасета — <code>kaggle datasets files</code>.</strong> V37 упала потому, что пуш оборвался на 1 файле из 77, а статус показывал «ready».</div>
+      <div class="rule"><strong>Выхлоп версии качать ДО пуша следующей.</strong> CLI отдаёт только последнюю версию.</div>
+      <div class="rule fresh"><strong>Перед каждым пушем в Kaggle — обновлять страницу функционала версий.</strong> Правило владельца от 31.08: что именно едет в бой, должно быть записано до пуша, а не после.</div>
+      <div class="rule"><strong>Скоринговый реран ест нашу GPU-квоту</strong> (~9–15ч); собственный прогон версии — лишь ~32 мин (Фаза A + placeholder).</div>
+      <div class="rule"><strong>Никакой отладки на оплаченном поде.</strong> Совместимость артефактов проверяется бесплатно (config.json через transformers) до аренды.</div>
+      <div class="rule"><strong>Подовые абсолюты не сравнивать с Kaggle</strong> — только дельты A/B; знаменатели 25 против 55, плюс налог скрытых игр.</div>
+      <div class="rule"><strong>Слот сабмита не сгорает никогда</strong> — лидерборд считает максимум по всем попыткам (ферма).</div>
+    </div>
+  </section>
+
+  <!-- LEGACY -->
+  <section class="phase legacy">
+    <div class="phase-head">
+      <span class="phase-title">Архив — снимок 24.08 и бэклог собственного харнесса</span>
+    </div>
+    <p class="phase-status-line">Вопросы снимка 24.08 закрыты: «почему 0 побед даже на 7920с» → ответ дал фокус глубины (раунд 6) и дефицит LLM-темпа; «сколько скрытых игр» → 55 семи-приватных на публичном ЛБ, 55 полностью приватных в финале; регресс версии 7 (0.06) породил правило «сухой прогон перед боевым кодом». Собственный харнесс вытеснен подложкой Duck 25.08 (базлайн 3.02 на наших замерах).</p>
+    <div class="items">
+      <div class="item"><span class="chip done">done</span><span class="item-title">Переход на подложку Duck (форк atlas_src)</span><span class="item-desc">Гейт ≥1.0 к 25.08 закрыт день в день; дальше серия боевых 1.09–1.19 и работа над глубиной.</span></div>
+      <div class="item"><span class="chip done">done</span><span class="item-title">Переносы из своего харнесса: nudge, A4, memo, инструментация</span><span class="item-desc">Все подтверждены вживую ещё на версиях 5–6; давно в базовом коде.</span></div>
+      <div class="item"><span class="chip rejected">закрыто</span><span class="item-title">Дистилляция студента / tool-loop (архив 20.08)</span><span class="item-desc">Студент проигрывал своей базе; дорогие ходы не окупались. Направления закрыты до конца соревнования.</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Источники: <span class="mono">docs/plan_top10_by_3009.md</span>, <span class="mono">runs/*</span>, <span class="mono">kaggle competitions submissions</span>, Gemini раунды 4–13.</span>
+    <span>обновлено 31.08.2026, 06:10 МСК</span>
+  </footer>
+
+</div>

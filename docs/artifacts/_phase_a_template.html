@@ -1,0 +1,332 @@
+<title>Фаза A: V40 против V39</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#F2EFE8; --surface:#FBF9F4; --surface-2:#F5F1E9;
+  --ink:#232019; --ink-2:#544D42; --ink-3:#7C7466;
+  --rule:#DFD8C9; --rule-strong:#C9C0AD;
+  --accent:#00706A; --accent-soft:#DBEAE7;
+  --s39:#B4763A; --s40:#00968C;
+  --good:#3F7A34; --bad:#A03B2E;
+  --shadow:0 1px 2px rgba(35,32,25,.06), 0 10px 26px -20px rgba(35,32,25,.5);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+    --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+    --rule:#332F27; --rule-strong:#474137;
+    --accent:#3DBFB2; --accent-soft:#123430;
+    --s39:#C08343; --s40:#0F9C90;
+    --good:#6FA85F; --bad:#D2705E;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+  --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+  --rule:#332F27; --rule-strong:#474137;
+  --accent:#3DBFB2; --accent-soft:#123430;
+  --s39:#C08343; --s40:#0F9C90;
+  --good:#6FA85F; --bad:#D2705E;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink); margin:0;
+  font-family:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:15px; line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1060px; margin:0 auto; padding:44px 24px 72px; display:flex; flex-direction:column; gap:38px}
+h1,h2,h3{margin:0; text-wrap:balance; font-family:"Big Shoulders Display",Impact,"Arial Narrow",sans-serif}
+h1{font-size:clamp(42px,7.5vw,74px); font-weight:800; line-height:.92; text-transform:uppercase; letter-spacing:.005em}
+h2{font-size:27px; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+h3{font-size:19px; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+p{margin:0}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; letter-spacing:.15em;
+  text-transform:uppercase; color:var(--ink-3)}
+.masthead{border-bottom:2px solid var(--ink); padding-bottom:24px; display:flex; flex-direction:column; gap:10px}
+.standfirst{font-size:17px; color:var(--ink-2); max-width:64ch; margin-top:10px}
+.runmeta{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; color:var(--ink-3);
+  display:flex; flex-wrap:wrap; gap:4px 22px; margin-top:14px}
+
+.verdict{background:var(--surface); border:1px solid var(--rule); border-left:5px solid var(--accent);
+  border-radius:3px; padding:22px 26px; display:flex; flex-direction:column; gap:10px; box-shadow:var(--shadow)}
+.verdict .rule{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; color:var(--ink-3);
+  text-transform:uppercase; letter-spacing:.14em}
+.verdict .outcome{font-size:18.5px; color:var(--ink); max-width:72ch}
+.verdict b{color:var(--accent); font-weight:600}
+
+.kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(186px,1fr)); gap:1px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:3px; overflow:hidden}
+.kpi{background:var(--surface); padding:18px 20px 20px; display:flex; flex-direction:column; gap:6px}
+.k-label{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-3)}
+.k-pair{font-family:"Big Shoulders Display",Impact,sans-serif; font-weight:800; line-height:1;
+  font-variant-numeric:tabular-nums; display:flex; align-items:baseline; gap:7px; margin-top:2px}
+.k-from{color:var(--ink-3); font-size:27px}
+.k-arrow{color:var(--ink-3); font-size:19px}
+.k-to{color:var(--ink); font-size:40px}
+.k-delta{font-size:13px; font-weight:600}
+.k-delta.up{color:var(--good)} .k-delta.down{color:var(--bad)} .k-delta.neutral{color:var(--ink-3)}
+.k-note{font-size:12.5px; color:var(--ink-3); line-height:1.45}
+
+.section-head{display:flex; align-items:baseline; justify-content:space-between; gap:18px;
+  flex-wrap:wrap; border-bottom:1px solid var(--rule-strong); padding-bottom:9px; margin-bottom:20px}
+.section-head p{font-size:13px; color:var(--ink-3); max-width:56ch}
+
+.legend{display:flex; gap:20px; font-size:13px; color:var(--ink-2); margin-bottom:18px; flex-wrap:wrap}
+.legend span{display:inline-flex; align-items:center; gap:8px}
+.swatch{width:13px; height:13px; border-radius:3px; display:inline-block; flex:none}
+.sw39{background:var(--s39)} .sw40{background:var(--s40)}
+.swlvl{background:var(--accent-soft); border:1px solid var(--accent)}
+
+.chart{display:flex; flex-direction:column; gap:10px; padding-right:38px}
+.grow{display:grid; grid-template-columns:104px 1fr; gap:16px; align-items:center}
+.gname{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px; color:var(--ink-2);
+  display:flex; align-items:center; gap:6px}
+.gbars{display:flex; flex-direction:column; gap:2px; min-width:0}
+.bar{height:11px; border-radius:0 4px 4px 0; position:relative; min-width:2px; transition:filter .12s}
+.bar:hover{filter:brightness(1.14)}
+.b39{background:var(--s39)} .b40{background:var(--s40)}
+.bval{position:absolute; left:calc(100% + 7px); top:50%; transform:translateY(-50%);
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px; color:var(--ink-3);
+  font-variant-numeric:tabular-nums}
+.lvlchip,.newchip{font-family:"Public Sans",sans-serif; font-size:9.5px; letter-spacing:.09em;
+  text-transform:uppercase; background:var(--accent-soft); color:var(--accent);
+  padding:2px 6px; border-radius:2px; font-weight:600}
+.newchip{margin-left:8px}
+
+.tablewrap{overflow-x:auto; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+caption{text-align:left; font-size:12.5px; color:var(--ink-3); padding:13px 16px 3px}
+th,td{padding:8px 15px; text-align:right; border-bottom:1px solid var(--rule);
+  font-variant-numeric:tabular-nums; white-space:nowrap}
+thead th{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--ink-3); border-bottom:1.5px solid var(--rule-strong)}
+tbody th[scope=row]{text-align:left; font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-weight:500; color:var(--ink)}
+.census-table tbody th[scope=row]{font-family:"Public Sans",sans-serif; white-space:normal; min-width:270px}
+tbody tr:hover{background:var(--surface-2)}
+td.up{color:var(--good); font-weight:600} td.down{color:var(--bad); font-weight:600}
+td.same{color:var(--ink-3)}
+tfoot th,tfoot td{border-top:1.5px solid var(--rule-strong); border-bottom:none;
+  font-weight:700; padding-top:11px; padding-bottom:12px}
+.yes{color:var(--accent); font-weight:700}
+.dagger{color:var(--ink-3); cursor:help; margin-left:2px}
+
+.notes{display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:18px}
+.note{background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+  padding:20px 22px; display:flex; flex-direction:column; gap:9px}
+.note p{font-size:13.5px; color:var(--ink-2)}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px;
+  background:var(--surface-2); padding:1px 5px; border-radius:2px; color:var(--ink-2)}
+footer{border-top:1px solid var(--rule); padding-top:20px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; color:var(--ink-3);
+  display:flex; flex-direction:column; gap:6px}
+
+#tip{position:fixed; pointer-events:none; opacity:0; transform:translate(-50%,-140%);
+  background:var(--ink); color:var(--ground); font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:11.5px; padding:5px 9px; border-radius:3px; white-space:nowrap;
+  transition:opacity .1s; z-index:9}
+.bar:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+@media (prefers-reduced-motion:reduce){*{transition:none !important}}
+@media (max-width:620px){
+  .grow{grid-template-columns:82px 1fr; gap:10px}
+  .chart{padding-right:30px}
+  .bval{font-size:10px}
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Kaggle · sergueimakarov/arc3-atlas · калибровочная Фаза A · 30.08.2026</p>
+  <h1>Фаза&nbsp;A: V40 против V39</h1>
+  <p class="standfirst">Замер темпа, а не силы. Оба прогона: 25 публичных игр, конкурентность 28,
+  потолок 1500&nbsp;с на игру, добор времени выключен, окно ~25 минут. Между сборками — только
+  три правки кода V40: L1-спринт, вес A* 2.0&nbsp;→&nbsp;0.5 и смешанная h-модель.</p>
+  <div class="runmeta">
+    <span>V39 · 15:29–15:54 UTC · 25 м 33 с</span>
+    <span>V40 · 19:30–19:55 UTC · 25 м 14 с</span>
+    <span>оба: conc 28 · cap 1500 s · draws OFF · A* loaded · 0 tracebacks</span>
+  </div>
+</header>
+
+<section class="verdict">
+  <p class="rule">Правило решения, записанное до прогона</p>
+  <p class="outcome">«Темп не вырос — спринт выключается, в бой идёт V39.»
+  <b>Темп вырос на 48% при том же токеновом бюджете</b>, уровни не просели, а поднялись с нуля до трёх.
+  Спринт остаётся включённым; V40 — обоснованный кандидат на слот 01.09.</p>
+</section>
+
+<section>
+  <div class="section-head">
+    <h2>Счёт</h2>
+    <p>Основные цифры — сопоставимый учёт: строки <code>[finished]</code> в логе, один и тот же метод для обоих прогонов.</p>
+  </div>
+  <div class="kpis">
+    <div class="kpi">
+      <span class="k-label">Действий за окно</span>
+      <span class="k-pair"><span class="k-from">122</span><span class="k-arrow">→</span><span class="k-to">180</span></span>
+      <span class="k-delta up">+48%</span>
+      <span class="k-note">с поправкой на откаты — 208 (+70%)</span>
+    </div>
+    <div class="kpi">
+      <span class="k-label">Токенов на действие</span>
+      <span class="k-pair"><span class="k-from">2461</span><span class="k-arrow">→</span><span class="k-to">1485</span></span>
+      <span class="k-delta up">−40%</span>
+      <span class="k-note">с поправкой — 1387 (−44%)</span>
+    </div>
+    <div class="kpi">
+      <span class="k-label">Игр с уровнем</span>
+      <span class="k-pair"><span class="k-from">0</span><span class="k-arrow">→</span><span class="k-to">3</span></span>
+      <span class="k-delta up">ar25 · re86 · lp85</span>
+      <span class="k-note">средний RHAE 0.00 → 0.33</span>
+    </div>
+    <div class="kpi">
+      <span class="k-label">Токенов сгенерировано</span>
+      <span class="k-pair"><span class="k-from">300k</span><span class="k-arrow">→</span><span class="k-to">289k</span></span>
+      <span class="k-delta neutral">−4%</span>
+      <span class="k-note">196 против 191 ток/с — сервер работал одинаково</span>
+    </div>
+    <div class="kpi">
+      <span class="k-label">Игр без единого действия</span>
+      <span class="k-pair"><span class="k-from">1</span><span class="k-arrow">→</span><span class="k-to">0</span></span>
+      <span class="k-delta up">sc25 ожил</span>
+      <span class="k-note">медиана действий на игру 4 → 7</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <h2>Действия по играм</h2>
+    <p>Отсортировано по V40. Значения — с поправкой на откаты: максимум из двух учётов.</p>
+  </div>
+  <div class="legend">
+    <span><i class="swatch sw39"></i>V39 — база</span>
+    <span><i class="swatch sw40"></i>V40 — спринт + A* 0.5</span>
+    <span><i class="swatch swlvl"></i>метка «уровень» — игра взяла первый уровень</span>
+  </div>
+  <div class="chart">
+<!--BARS-->  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <h2>Числа по играм</h2>
+    <p>† — счётчики сессии отмотал <code>rollback()</code>, взято значение периодического снимка.</p>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <caption>25 публичных игр · действия и токены за окно ~25 минут</caption>
+      <thead><tr>
+        <th scope="col">игра</th><th scope="col">действ. V39</th><th scope="col">действ. V40</th>
+        <th scope="col">Δ</th><th scope="col">ток. V39</th><th scope="col">ток. V40</th>
+        <th scope="col">ур. V39</th><th scope="col">ур. V40</th>
+      </tr></thead>
+      <tbody>
+<!--TABLE-->      </tbody>
+      <tfoot><tr>
+        <th scope="row">итого</th><td><!--TOT39A--></td><td><!--TOT40A--></td>
+        <td class="up"><!--TOTDA--></td><td><!--TOT39T--></td><td><!--TOT40T--></td>
+        <td>0</td><td class="yes">3</td>
+      </tr></tfoot>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <h2>Перепись механик</h2>
+    <p>Сколько раз сработал каждый механизм харнеса. Здесь видно, что спринт живой,
+    а глубокая автоматика впервые получила работу.</p>
+  </div>
+  <div class="tablewrap">
+    <table class="census-table">
+      <caption>Подсчёт по маркерам <code>atlas:</code> в логе прогона</caption>
+      <thead><tr>
+        <th scope="col">механизм</th><th scope="col">V39</th><th scope="col">V40</th><th scope="col">Δ</th>
+      </tr></thead>
+      <tbody>
+<!--CENSUS-->      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="section-head"><h2>Как читать эти числа</h2></div>
+  <div class="notes">
+    <div class="note">
+      <h3>Два учёта спорят между собой</h3>
+      <p>Официальная сводка <code>summary.txt</code> показывает 125 действий и один уровень — она занижает:
+      её снимок пересобирается периодически и не успел за финишем ar25 и re86.
+      Строка <code>[finished]</code>, наоборот, читает текущее состояние сессии, а <code>rollback()</code>
+      отматывает движок вместе со счётчиками — у dc22 в ней <code>actions=0</code> при 11 реальных действиях,
+      у lp85 <code>level=0</code>, хотя поле <code>per-level</code> показывает действия на втором уровне.
+      Честная цифра — максимум из двух; расходятся 4 игры.</p>
+    </div>
+    <div class="note">
+      <h3>База была записана неверно</h3>
+      <p>В передаче сессии у V39 значилось 165 действий. Реальная цифра — 122: проверено двумя
+      независимыми способами (поле <code>actions=</code> и сумма поля <code>per-level=</code>)
+      в двух файлах, четыре сочетания из четырёх сходятся. От 165 прирост читался бы как +9%,
+      то есть «спринт не работает, выключаем».</p>
+    </div>
+    <div class="note">
+      <h3>Три правки поехали вместе</h3>
+      <p>V40 несёт L1-спринт, понижение веса A* и смешанную h-модель одним пакетом — разделить
+      их вклад этот прогон не может. Но риск, ради которого замер и делался («спринт отложит поиск,
+      а поиск берёт 40-50% первых уровней»), не реализовался: уровней стало больше, а не меньше.</p>
+    </div>
+    <div class="note">
+      <h3>Одна точка на конфиг</h3>
+      <p>При σ 0.45 у стокового Duck «три уровня против нуля» — сигнал, а не доказательство.
+      Системна здесь метрика темпа: она мерит пропускную способность, а не удачу.</p>
+    </div>
+    <div class="note">
+      <h3>Cull проверить не вышло</h3>
+      <p>Порог зомби-гейта — 30 действий без прогресса, а медианная игра в 25-минутке делает 7.
+      Ни <code>zombie_gate</code>, ни <code>entropy_dead</code> не напечатались ни разу.
+      Открытый хвост остаётся до боевого или подового лога.</p>
+    </div>
+    <div class="note">
+      <h3>Побочно: аргумент за бэклог-27</h3>
+      <p>23 из 25 игр сняли себя на отметке 50% потолка и вернули по 720-750 с. В V36 при потолке
+      7920 с — те же 23 из 25, по ~3955 с каждая: доля не зависит от длины окна. Разница в том,
+      что в V36 добор был включён и две выжившие игры съели возвращённое (прогон растянулся до
+      1.5 потолка), а в боевом конфиге V39/V40 добор выключен — и это время просто исчезает.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>источники: runs/kaggle_v39/kernel_stdout.txt · runs/kaggle_v40/kernel_stdout.txt · summary.txt обоих прогонов</span>
+  <span>выхлоп V40 снят 30.08 в 22:56 МСК, до любых последующих пушей</span>
+</footer>
+
+</div>
+<div id="tip" role="status" aria-live="polite"></div>
+<script>
+(function () {
+  var tip = document.getElementById('tip');
+  document.querySelectorAll('.bar[data-tip]').forEach(function (el) {
+    el.setAttribute('tabindex', '0');
+    function show(e) {
+      var r = el.getBoundingClientRect();
+      tip.textContent = el.getAttribute('data-tip');
+      tip.style.left = ((e && e.clientX) ? e.clientX : r.right) + 'px';
+      tip.style.top = r.top + 'px';
+      tip.style.opacity = '1';
+    }
+    function hide() { tip.style.opacity = '0'; }
+    el.addEventListener('mousemove', show);
+    el.addEventListener('mouseleave', hide);
+    el.addEventListener('focus', show);
+    el.addEventListener('blur', hide);
+  });
+})();
+</script>

@@ -12,6 +12,10 @@ Scope: this project only (ARC-AGI-3 / Kaggle ARC Prize 2026, the `atlas_src` sub
 
 **This skill does not authorize a push.** Pushing still requires the user's separate, per-artifact consent ([[feedback-kaggle-push-consent]] in memory — never push on your own initiative). This skill only covers what happens right after a push the user already approved: keeping the two living documents in sync so the user never has to remind you.
 
+## Before the push (rule added 31.08)
+
+Update the **«Функционал atlas по версиям»** page FIRST — https://claude.ai/code/artifact/58711f96-6b1b-4cfc-a22f-1afd0ff64db3, source `docs/artifacts/atlas_functional_v39_v40.html`. New row in the version map (what appeared, date, state), refreshed «current battle version» section, refreshed «сверх» section (what stays in the repo and is NOT shipping). Numbers from `git diff <last push>..HEAD -- atlas_src/` and the builder, never from memory. See memory `feedback-functional-page-before-push`.
+
 ## Do this immediately after every push, same turn
 
 1. **Update `docs/plan_top10_by_3009.md`.**

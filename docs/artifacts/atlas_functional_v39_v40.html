@@ -1,0 +1,454 @@
+<title>Функционал atlas по версиям</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#F2EFE8; --surface:#FBF9F4; --surface-2:#F5F1E9;
+  --ink:#232019; --ink-2:#544D42; --ink-3:#7C7466;
+  --rule:#DFD8C9; --rule-strong:#C9C0AD;
+  --accent:#00706A; --accent-soft:#DBEAE7;
+  --amber:#B4763A; --amber-soft:#F0E4D3;
+  --bad:#A03B2E; --bad-soft:#F2DFDB;
+  --shadow:0 1px 2px rgba(35,32,25,.06), 0 10px 26px -20px rgba(35,32,25,.5);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+    --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+    --rule:#332F27; --rule-strong:#474137;
+    --accent:#3DBFB2; --accent-soft:#123430;
+    --amber:#C08343; --amber-soft:#3A2C1A;
+    --bad:#D2705E; --bad-soft:#3A1F1A;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+  --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+  --rule:#332F27; --rule-strong:#474137;
+  --accent:#3DBFB2; --accent-soft:#123430;
+  --amber:#C08343; --amber-soft:#3A2C1A;
+  --bad:#D2705E; --bad-soft:#3A1F1A;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink); margin:0;
+  font-family:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:15px; line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1020px; margin:0 auto; padding:44px 24px 72px; display:flex; flex-direction:column; gap:40px}
+h1,h2,h3,h4{margin:0; text-wrap:balance; font-family:"Big Shoulders Display",Impact,"Arial Narrow",sans-serif}
+h1{font-size:clamp(40px,7vw,70px); font-weight:800; line-height:.92; text-transform:uppercase}
+h2{font-size:27px; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+h3{font-size:20px; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+h4{font-size:16px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-2)}
+p{margin:0}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; letter-spacing:.15em;
+  text-transform:uppercase; color:var(--ink-3)}
+.masthead{border-bottom:2px solid var(--ink); padding-bottom:24px; display:flex; flex-direction:column; gap:10px}
+.standfirst{font-size:17px; color:var(--ink-2); max-width:64ch; margin-top:10px}
+
+.layers{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:3px; overflow:hidden}
+.layer{background:var(--surface); padding:18px 20px; display:flex; flex-direction:column; gap:7px}
+.layer .lname{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px;
+  letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3)}
+.layer .lwhat{font-size:15px; color:var(--ink); font-weight:500}
+.layer .lnote{font-size:13px; color:var(--ink-3)}
+
+.vhead{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+  border-bottom:1px solid var(--rule-strong); padding-bottom:10px; margin-bottom:20px}
+.vhead h2{flex:none}
+.vhead p{font-size:13px; color:var(--ink-3)}
+
+.chip{font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; font-weight:600;
+  padding:3px 8px; border-radius:2px; white-space:nowrap; flex:none}
+.chip.live{background:var(--accent-soft); color:var(--accent)}
+.chip.newv{background:var(--accent); color:var(--surface)}
+.chip.off{background:var(--surface-2); color:var(--ink-3); border:1px solid var(--rule-strong)}
+.chip.todo{background:var(--amber-soft); color:var(--amber)}
+.chip.dead{background:var(--bad-soft); color:var(--bad)}
+
+.cfg{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px}
+.cfg code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
+  background:var(--surface); border:1px solid var(--rule); border-radius:2px;
+  padding:5px 9px; color:var(--ink-2)}
+.cfg code b{color:var(--ink); font-weight:600}
+
+.group{background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+  padding:20px 22px; display:flex; flex-direction:column; gap:12px; margin-bottom:16px}
+.group > p.gnote{font-size:13px; color:var(--ink-3); max-width:70ch}
+ul.feat{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px}
+ul.feat li{display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:baseline;
+  font-size:14px; color:var(--ink-2); padding-left:14px; position:relative}
+ul.feat li::before{content:""; position:absolute; left:0; top:.6em; width:5px; height:5px;
+  border-radius:50%; background:var(--rule-strong)}
+ul.feat b{color:var(--ink); font-weight:600}
+ul.feat .num{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
+  color:var(--ink-3); white-space:nowrap; font-variant-numeric:tabular-nums;
+  grid-column:2; padding-top:1px}
+ul.feat li > span.body{grid-column:1 / -1}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px;
+  background:var(--surface-2); padding:1px 5px; border-radius:2px; color:var(--ink-2)}
+
+.delta{background:var(--surface); border:1px solid var(--rule); border-left:5px solid var(--accent);
+  border-radius:3px; padding:20px 24px; display:flex; flex-direction:column; gap:14px; box-shadow:var(--shadow)}
+.delta ol{margin:0; padding-left:22px; display:flex; flex-direction:column; gap:12px; font-size:14.5px; color:var(--ink-2)}
+.delta ol b{color:var(--ink)}
+.deltafoot{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; color:var(--ink-3)}
+
+.risk{background:var(--bad-soft); border:1px solid var(--bad); border-radius:3px;
+  padding:20px 24px; display:flex; flex-direction:column; gap:9px}
+.risk h3{color:var(--bad)}
+.risk p{font-size:14px; color:var(--ink-2)}
+
+footer{border-top:1px solid var(--rule); padding-top:20px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; color:var(--ink-3);
+  display:flex; flex-direction:column; gap:6px}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+@media (prefers-reduced-motion:reduce){*{transition:none !important}}
+
+.tablewrap{overflow-x:auto; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+table.vmap{border-collapse:collapse; width:100%; font-size:13.5px}
+table.vmap caption{text-align:left; font-size:12.5px; color:var(--ink-3); padding:13px 16px 3px}
+table.vmap th,table.vmap td{padding:9px 15px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+table.vmap thead th{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3);
+  border-bottom:1.5px solid var(--rule-strong); white-space:nowrap}
+table.vmap tbody th[scope=row]{font-family:"IBM Plex Mono",ui-monospace,monospace; font-weight:600;
+  color:var(--ink); white-space:nowrap}
+table.vmap .vdate{font-family:"IBM Plex Mono",ui-monospace,monospace; color:var(--ink-3); white-space:nowrap}
+table.vmap .vwhat{color:var(--ink-2); min-width:320px}
+table.vmap .vstate{color:var(--ink-3); font-size:12.5px; min-width:110px}
+table.vmap tbody tr:hover{background:var(--surface-2)}
+table.vmap tbody tr:last-child th,table.vmap tbody tr:last-child td{border-bottom:none}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Kaggle · arc3-atlas · инвентарь функционала · 31.08.2026</p>
+  <h1>Функционал atlas по версиям</h1>
+  <p class="standfirst">Когда какой механизм появился, что именно едет в бой сейчас, что лежит
+  в коде выключенным и что спроектировано, но не построено. Собрано чтением кода и git-истории,
+  не по памяти. <b>Страница обновляется перед каждым пушем в Kaggle</b> — правило владельца от 31.08.</p>
+  <p class="standfirst" style="margin-top:8px">Состояние на 31.08 06:20 МСК: в Фазе B скорится
+  <b>V39</b> (сабмит 55905933; первая попытка отвалилась платформенной ошибкой Kaggle и была
+  переотправлена), <b>V40</b> — кандидат на следующий слот, темп подтверждён.</p>
+</header>
+
+<section>
+  <div class="layers">
+    <div class="layer">
+      <span class="lname">слой 1 · датасет</span>
+      <span class="lwhat">arc3-atlas-src — весь код агента</span>
+      <span class="lnote">Форк харнеса Duck плюс наши правки. Монтируется в ноутбук на лету.
+      Именно этим V40 отличается от V39.</span>
+    </div>
+    <div class="layer">
+      <span class="lname">слой 2 · кернел</span>
+      <span class="lwhat">notebooks_atlas — конфиг прогона</span>
+      <span class="lnote">Бюджеты, конкурентность, потолки, патчи модульных атрибутов.
+      У V39 и V40 этот слой байт-в-байт одинаков (проверено диффом).</span>
+    </div>
+    <div class="layer">
+      <span class="lname">как читать</span>
+      <span class="lwhat">V39 = код от 11:55, V40 = код от 19:22</span>
+      <span class="lnote">V39 собран как «код V38 без ночных правок + конфиг 4 часа».
+      V40 — тот же конфиг плюс три правки, дифф в 59 строк одного файла.</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="vhead">
+    <h2>Карта функционала</h2>
+    <p>В какой версии каждый механизм появился и что с ним стало. Боевые баллы отмечены в правой колонке.</p>
+  </div>
+  <div class="tablewrap">
+    <table class="vmap">
+      <caption>Кернел <code>arc3-atlas</code> · нумерация Kaggle не 1:1 с нашими сборками (реран и отменённые версии тоже съедают номера)</caption>
+      <thead><tr>
+        <th scope="col">версия</th><th scope="col">дата</th>
+        <th scope="col">что появилось</th><th scope="col">состояние</th>
+      </tr></thead>
+      <tbody>
+        <tr><th scope="row">v1</th><td class="vdate">22.08</td><td class="vwhat">Наш слой конфига поверх подложки Duck: таймаут анализатора, конкурентность</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v2</th><td class="vdate">22.08</td><td class="vwhat">Потолок генерации 8000 токенов — настоящая причина зависаний v1; таймаут 480 с</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v3</th><td class="vdate">23.08</td><td class="vwhat">Планировщик из своего харнеса: <code>verify_theory</code> + <code>plan_with_theory</code>. Спидран после победы</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v5</th><td class="vdate">23.08</td><td class="vwhat">Nudge-механизм (чекпоинты theory/plan), сводка «действие→эффект», <code>memo</code></td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v6</th><td class="vdate">23.08</td><td class="vwhat">Инварианты: какие клетки не менялись никогда</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v7</th><td class="vdate">24.08</td><td class="vwhat">Снят потолок на игру — регресс 0.06, откачено на v8</td><td class="vstate">откачено</td></tr>
+        <tr><th scope="row">v10</th><td class="vdate">24.08</td><td class="vwhat"><code>res['note']</code> — предупреждение о риске многошагового плана</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v11</th><td class="vdate">24.08</td><td class="vwhat"><code>execute_plan</code> (пошаговая сверка с прогнозом), принуждение к note, предупреждение о комбинаторном росте на level-up</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v13</th><td class="vdate">24.08</td><td class="vwhat">Именованный потолок игры вместо унаследованного из бандла; подавление вырожденных инвариантов</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v14</th><td class="vdate">25.08</td><td class="vwhat">Theory-чекпоинт отключён — фикс полного паралича на r11l</td><td class="vstate">заменено</td></tr>
+        <tr><th scope="row">v15</th><td class="vdate">25.08</td><td class="vwhat"><code>extract(grid)</code> — сравнение в компактном состоянии вместо пиксель-в-пиксель; subset-сравнение словарей; <code>force=True</code>; <code>goal=</code></td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v16</th><td class="vdate">25.08</td><td class="vwhat">Theory-чекпоинт возвращён безопасно + <b>force-act</b> backstop (8 ходов без действия)</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v17</th><td class="vdate">25.08</td><td class="vwhat">Формулировка усилена — adoption восстановлен: 0 → 49 реальных вызовов инструментов</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v18</th><td class="vdate">25.08</td><td class="vwhat">Тайм-банк: депозит от застрявших игр, добор для прогрессирующих</td><td class="vstate">живо, добор выключен</td></tr>
+        <tr><th scope="row">v19</th><td class="vdate">25.08</td><td class="vwhat">Триггер депозита исправлен (0 уровней за 50% потолка) + retry-storm backstop</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v20</th><td class="vdate">27.08</td><td class="vwhat">Memo-чекпоинт, переформулированный force-act</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v21</th><td class="vdate">27.08</td><td class="vwhat">Якоря и <code>rollback</code> с ультиматумом, подсказка extract, <b>explore-first</b>, санитайзер контекста</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v22</th><td class="vdate">27.08</td><td class="vwhat"><b>theory-force</b> — принуждение к первому вызову verify_theory</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v23</th><td class="vdate">28.08</td><td class="vwhat"><b>plan-force</b> + фикс дыры wa30 (verify после отката больше не гасит принуждение)</td><td class="vstate">живо · лучший боевой 0.92</td></tr>
+        <tr><th scope="row">v24</th><td class="vdate">29.08</td><td class="vwhat">Ручка <code>ATLAS_TIME_BANK_DRAWS</code> — отключение добора для одноволновых конфигов</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v27</th><td class="vdate">29.08</td><td class="vwhat"><b>Раунд 6, рычаги глубины</b>: спекулятивные пробы <code>try_actions</code>/<code>plan_real</code>, проактивный поиск на входе в уровень, mechanic handoff, hail-mary, зомби-гейт, авто-реплей уровней</td><td class="vstate">живо · глубина ×3.5</td></tr>
+        <tr><th scope="row">v29</th><td class="vdate">29.08</td><td class="vwhat">Раунд 8: клапан handoff (не инжектить диагностику при game_over), подсказка select-then-act</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v31/v33</th><td class="vdate">30.08</td><td class="vwhat">Раунд 10b: драфт-спидран, энтропийный cull, лимиты поиска 750/2500 узлов</td><td class="vstate">лимиты живы, спидран и энтропия мертвы</td></tr>
+        <tr><th scope="row">v36</th><td class="vdate">30.08</td><td class="vwhat">A* включён в бой: <code>h_model.pkl</code> в датасете, патч атрибутом модуля</td><td class="vstate">живо, вес понижен в V40</td></tr>
+        <tr><th scope="row">v37</th><td class="vdate">30.08</td><td class="vwhat">Драфт-спидран выключен по умолчанию; cull прозрел к заблокированным noop; диагностика cull в логах; слим-датасет 77 файлов</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v38</th><td class="vdate">30.08</td><td class="vwhat">Тот же код на починенном датасете (V37 упала на оборванном пуше)</td><td class="vstate">живо</td></tr>
+        <tr><th scope="row">v39</th><td class="vdate">30.08</td><td class="vwhat"><b>Конфиг «4 часа»</b>: conc 28 → 2 волны, потолок 14400 с, добор ВЫКЛ, раннее снятие ВКЛ</td><td class="vstate">в Фазе B</td></tr>
+        <tr><th scope="row">не собрано</th><td class="vdate">31.08</td><td class="vwhat"><b>Динамическое перепланирование бюджета</b> от абсолютного дедлайна: окно пересчитывается на каждом завершении игры и только растёт, выжившие наследуют освободившиеся часы; каждая сессия жёстко зажата по T_end</td><td class="vstate">в репозитории, выключено</td></tr>
+        <tr><th scope="row">v40</th><td class="vdate">30.08</td><td class="vwhat"><b>L1-спринт</b>, вес A* 2.0 → 0.5, смешанная h-модель</td><td class="vstate">кандидат, темп +48%</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="vhead">
+    <h2>V39</h2>
+    <span class="chip live">в Фазе B</span>
+    <p>Скорится с 06:16 МСК 31.08. Меряет один вопрос: время — рычаг или нет.</p>
+  </div>
+
+  <h4 style="margin-bottom:10px">Конфиг боевого прогона</h4>
+  <div class="cfg">
+    <code>конкурентность <b>28</b></code>
+    <code>бюджет <b>28 800 с</b> (8 ч)</code>
+    <code>потолок на игру <b>14 400 с</b> (4 ч)</code>
+    <code>= <b>2 волны</b> по 55 играм</code>
+    <code>добор времени <b>ВЫКЛ</b></code>
+    <code>тайм-банк <b>ВКЛ</b> (ради раннего снятия)</code>
+    <code>таймаут анализатора <b>480 с</b></code>
+    <code>потолок генерации <b>8 000 ток.</b></code>
+    <code>LLM-гейт <b>25</b> запросов</code>
+    <code>зомби-слотов <b>10</b></code>
+    <code>Фаза A <b>1 500 с</b></code>
+  </div>
+
+  <div class="group">
+    <h3>Принуждения: чекпоинты в промпте</h3>
+    <p class="gnote">Хост считает вызовы python-инструмента и подставляет в промпт требование,
+    когда модель чего-то не делает. Каждый порог выведен из конкретного живого провала.</p>
+    <ul class="feat">
+      <li><span class="body"><b>explore-first</b> — с 2-го вызова требует опробовать органы управления;
+      контроль считается разобранным после видимого эффекта или 3 попыток впустую. Сбрасывается на каждом уровне.</span></li>
+      <li><span class="body"><b>theory</b> — с 4-го вызова требует написать <code>predict()</code> и проверить её.</span></li>
+      <li><span class="body"><b>theory-force</b> — с 8-го вызова принуждение, которое нельзя переспорить;
+      гейт отличает настоящий вызов от пустого по полю <code>transitions_tested</code>.</span></li>
+      <li><span class="body"><b>plan</b> — каждые 3 вызова после удачной верификации; <b>plan-force</b> — с 6-го.</span></li>
+      <li><span class="body"><b>force-act</b> — 8 вызовов подряд без единого реального действия;
+      безусловный выключатель паралича, не зависит от формулировок.</span></li>
+      <li><span class="body"><b>goal-reconsider</b> — 8 верификаций с точностью ниже 0.6:
+      подсказывает, что неверна не динамика, а модель цели.</span></li>
+      <li><span class="body"><b>extract</b> — с 6-го вызова, <b>memo</b> — с 10-го: оба инструмента
+      добровольно почти не используются.</span></li>
+      <li><span class="body"><b>rollback-ультиматум</b> — 15 действий без прогресса или возврат доски
+      в состояние двухходовой давности; после 3 показов без реакции откат делает сам харнес.</span></li>
+      <li><span class="body"><b>plan_real-принуждение</b> — 10 действий застоя; после 2 показов харнес
+      запускает поиск сам; наг не повторяется больше 5 раз (для MOUSE-игр просто замолкает).</span></li>
+      <li><span class="body"><b>note-enforcement</b> — разовая рефлексия, если многошаговый план был
+      исполнен одним вызовом <code>action()</code> вопреки предупреждению.</span></li>
+      <li><span class="body"><b>санитайзер контекста</b> — каждые 20 действий без взятия уровня
+      и на каждом взятии: выкидывает ложные теории и мусор от таймаутов.</span></li>
+      <li><span class="body"><b>нормирование проб</b> — 3 бесплатные пробы, дальше намёк, затем жёсткие
+      ворота: пробовать вслепую вместо теории становится дороже.</span></li>
+    </ul>
+  </div>
+
+  <div class="group">
+    <h3>Поиск: спекулятивное исполнение на реальном движке</h3>
+    <p class="gnote">Снимок и восстановление движка превращают его в идеальный симулятор: действия внутри
+    пробы не попадают в счёт, а уровень, случайно взятый пробой, засчитывается (карточка — монотонный максимум).
+    Модели не нужно писать <code>predict()</code>, чтобы планировать.</p>
+    <ul class="feat">
+      <li><span class="body"><b>try_actions</b> — модель просит проверить последовательности:
+      до 16 последовательностей и 240 шагов за вызов, всё откатывается.</span></li>
+      <li><span class="body"><b>plan_real</b> — систематический обход плюс Монте-Карло-роллауты
+      (глубина 24, до 300 роллаутов). Общие лимиты: 5000 узлов, глубина 12, 10-60 с стены.</span></li>
+      <li><span class="body"><b>проактивный поиск на входе в уровень</b> — L1: 750 узлов / 10 с;
+      L2+: 2500 узлов / 40 с (второй уровень весит больше и стоит дороже).</span></li>
+      <li><span class="body"><b>hail-mary</b> — когда на уровне 2+ осталось ≤600 с, харнес перестаёт
+      ждать модель и перебирает доску сам: 5000 узлов / 60 с.</span></li>
+      <li><span class="body"><b>A*-порядок обхода</b> — обученная эвристика h(s) из датасета;
+      в V39 вес <b>2.0</b> (эвристика ведёт поиск).</span></li>
+      <li><span class="body"><b>авто-исполнение</b> найденного плана и <b>авто-вывод MOUSE-кандидатов</b>
+      из сегментации (до 6 точек) — для игр, где кликать некуда наугад.</span></li>
+      <li><span class="body"><b>сводка эффекта действий</b> — окно 60 переходов, отсев HUD-шума по доле 0.7:
+      в промпт идёт таблица «что реально делает каждая кнопка».</span></li>
+    </ul>
+  </div>
+
+  <div class="group">
+    <h3>Инструменты песочницы</h3>
+    <ul class="feat">
+      <li><span class="body"><b>verify_theory</b> — прогоняет <code>predict()</code> модели по журналу
+      переходов, возвращает точность и контрпримеры.</span></li>
+      <li><span class="body"><b>plan_with_theory</b> — BFS по предсказанным состояниям; отказывается
+      планировать ниже точности 0.6; поле <code>note</code> честно предупреждает, что шаги 2+ идут
+      от воображаемых состояний.</span></li>
+      <li><span class="body"><b>execute_plan</b> — исполняет план по шагу и сверяет факт с прогнозом,
+      останавливаясь на первом расхождении, а не тратя остаток плана впустую.</span></li>
+      <li><span class="body"><b>rollback</b> и якоря — возврат к сохранённой точке с обязательным
+      «выученным уроком» текстом.</span></li>
+      <li><span class="body"><b>memo</b> — словарь, переживающий ходы (песочница пересоздаётся каждый ход,
+      memo выведен из-под перезатирания).</span></li>
+      <li><span class="body"><b>extract</b> и <b>checkpoint</b> — вынос находок в устойчивую память хода.</span></li>
+    </ul>
+  </div>
+
+  <div class="group">
+    <h3>Перенос механик между уровнями</h3>
+    <ul class="feat">
+      <li><span class="body"><b>handoff-проба</b> — решение первого уровня автоматически прогоняется
+      на втором: если механика та же, уровень берётся без единого хода модели.</span></li>
+      <li><span class="body"><b>авто-повтор решённых уровней</b> после рестарта игры — не переигрывать
+      руками то, что уже пройдено.</span></li>
+    </ul>
+  </div>
+
+  <div class="group">
+    <h3>Управление дефицитом (ходы к модели и время)</h3>
+    <ul class="feat">
+      <li><span class="body"><b>LLM-гейт</b> — не больше 25 одновременных запросов к серверу
+      независимо от числа игр.</span></li>
+      <li><span class="body"><b>зомби-гейт</b> — игра на первом уровне без прогресса получает 10 слотов
+      из 25; уровень 2+ сохраняет приоритет.</span></li>
+      <li><span class="body"><b>cull по застою</b> — порог 30 действий без прогресса; с 30.08 считает
+      и заблокированные noop-guard'ом ходы (раньше «бьющиеся в стену» игры были невидимы).</span></li>
+      <li><span class="body"><b>тайм-банк: раннее снятие</b> — 0 уровней после 50% потолка → игра
+      заканчивается сама и возвращает остаток. В бою это снятие на 2-м часу.</span></li>
+      <li><span class="body"><b>retry-storm backstop</b> — 5 отказов анализатора подряд, и сессия
+      закрывается: инфраструктурный сбой не съедает весь бюджет игры.</span></li>
+      <li><span class="body"><b>спидран после победы</b> — включён, но ни разу не срабатывал: побед нет.</span></li>
+    </ul>
+  </div>
+
+  <div class="group">
+    <h3>Диагностика</h3>
+    <ul class="feat">
+      <li><span class="body">строка <code>[finished]</code> на каждую игру: состояние, уровень, счёт,
+      действия, токены, разбивка по уровням.</span></li>
+      <li><span class="body">маркеры <code>atlas:</code> на каждое срабатывание механизма — из них
+      собирается перепись.</span></li>
+      <li><span class="body">print'ы entropy-dead и zombie-gate (первый переход, раз на игру)
+      и <code>atlas_submission_diagnostics.json</code> с реальным числом игр.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="vhead">
+    <h2>V40</h2>
+    <span class="chip newv">темп подтверждён</span>
+    <p>Тот же конфиг. Разница с V39 — ровно три правки.</p>
+  </div>
+  <div class="delta">
+    <ol>
+      <li><b>L1-спринт.</b> Проактивный глубокий поиск на первом уровне откладывается, пока у модели
+      есть быстрое стоковое окно: 12 «застойных» ходов или 2 блокировки noop-guard'ом — что раньше.
+      Уровень 2+ не тронут; поиск по запросу модели и по эскалации нага не откладывается никогда.
+      Основание: у Duck сток сам берёт 50% первых уровней, медиана успешного L1 — 26 действий,
+      и даже после 14 бесплодных действий шанс взять уровень ещё 43%.</li>
+      <li><b>Вес A* понижен 2.0 → 0.5.</b> Эвристика из водителя становится разрешителем ничьих:
+      длина плана снова доминирует. Причина — h(s) не переносится на невиданные реальные игры
+      (MAE 18.6 против 15.7 у наивного среднего), а на враждебном полигоне вес 2.0 прямо отнимал
+      уровни, затягивая поиск в тупиковый карман tr01.</li>
+      <li><b>Смешанная h-модель в датасете</b> вместо синтетической (старая сохранена бэкапом).
+      Паритет с выключенным A* на враждебных играх при −2% узлов на дружелюбных — сознательный размен,
+      узлы не узкое место.</li>
+    </ol>
+    <p class="deltafoot">дифф: <code>tool_agent.py</code> +51 −8 строк · <code>h_model.pkl</code> заменён ·
+    ноутбук не менялся вовсе</p>
+    <p class="deltafoot" style="color:var(--accent)">Фаза A разобрана 31.08: действий 122 → 180 (+48%)
+    при том же токеновом бюджете, токенов на действие −40%, игр с уровнем 0 → 3, трейсбеков 0.
+    Спринт сработал на 23 из 25 игр; handoff-проба и hail-mary впервые получили работу.</p>
+  </div>
+</section>
+
+<section>
+  <div class="vhead">
+    <h2>Сверх V40</h2>
+    <p>Проверено по git: в <code>atlas_src</code> после пуша V40 нет ни одной правки.</p>
+  </div>
+
+  <div class="group">
+    <h3>В репозитории, но не в бою <span class="chip off" style="margin-left:8px">не отправлено</span></h3>
+    <ul class="feat">
+      <li><span class="body"><b>Протокол обучения h(s) изменён</b> (<code>scripts/search_lab.py</code>):
+      пропуск mouse-gated префиксов, в отложенный набор уходят все 24 ручные игры, обучение только
+      на генерированных паках. <b>Новой модели не собрано</b> — в датасете лежит смешанная модель
+      от 30.08 18:52.</span></li>
+      <li><span class="body">Страницы <code>docs/artifacts/</code> — справочник версий, промпт Gemini,
+      сравнение Фаз A. Исходники переехали в репозиторий, потому что scratchpad однажды вычистили.</span></li>
+      <li><span class="body"><b>Динамическое перепланирование бюджета</b> (бэклог 27) — реализовано
+      31.08, в <code>solver.py</code> и в сборщике. По умолчанию <b>ВЫКЛЮЧЕНО</b>
+      (<code>ATLAS_DYNAMIC_BUDGET</code>), вооружается только из боевой ветки. Ручка сборщика
+      <code>ATLAS_DYNAMIC_BUDGET_BUILD</code>. Поедет в бой той версией, для которой её включат
+      при сборке — в V40 её нет.</span></li>
+      <li><span class="body">Починен страж <code>test_atlas_fit_game_cap.py</code>: он был сломан
+      с 29.08 (исполнял сырой текст ячейки после перехода сборщика на плейсхолдеры) — то есть
+      проверка боевой ветки, поставленная после регресса 0.06, двое суток молча не работала.</span></li>
+    </ul>
+  </div>
+
+  <div class="group">
+    <h3>Есть в коде, но не работает</h3>
+    <ul class="feat">
+      <li><span class="body"><b>Драфт-спидран</b> <span class="chip dead">мёртв</span> — при
+      <code>ONLY_RESET_LEVELS</code> полный сброс до победы невозможен; выключен с V37, на поде
+      подтверждено: 1 запуск → 1 отмена.</span></li>
+      <li><span class="body"><b>Добор из тайм-банка</b> <span class="chip off">выключен конфигом</span> —
+      2 волны по 4 ч впритык заполняют 8-часовой бюджет, добравшая игра вытолкнула бы прогон за лимит
+      Kaggle. Депозит работает, брать некому.</span></li>
+      <li><span class="body"><b>Энтропийный cull</b> <span class="chip dead">мёртв</span> — в 500 партиях
+      Duck 0% петель: доска меняется постоянно, признак слеп. Держится только порог 30 действий.</span></li>
+      <li><span class="body"><b>Зомби-гейт</b> <span class="chip off">не проверен в бою</span> — порог
+      30 действий, а медианная игра в 25-минутной Фазе A делает 7. Ни разу не напечатался.</span></li>
+      <li><span class="body"><b>Спидран после победы</b> <span class="chip off">ждёт первой победы</span></span></li>
+    </ul>
+  </div>
+
+  <div class="group">
+    <h3>Спроектировано, не построено</h3>
+    <ul class="feat">
+      <li><span class="body"><s>Динамическое перепланирование бюджета</s> <span class="chip live">сделано 31.08</span>
+      — переехало в раздел «в репозитории, но не в бою» выше.</span></li>
+      <li><span class="body"><b>Конкурентность 28 → 18</b> <span class="chip todo">нужен замер</span>
+      — совет Gemini р.13.</span></li>
+      <li><span class="body"><b>Черри-пик workspace из Polyphony</b> <span class="chip todo">Ф2 портфеля</span>
+      — только утилиты (workspace/subprocess, сертификация по трейсу); полный порт признан ловушкой.</span></li>
+      <li><span class="body"><b>Проверка совместимости 35B</b> <span class="chip todo">бесплатно</span>
+      — прогнать <code>config.json</code> кандидата через transformers, не арендуя под.</span></li>
+      <li><span class="body"><b>Optuna по фабрике уровней</b> <span class="chip todo">Ф3 портфеля</span>
+      — калибровка бюджетов поиска на своём корпусе.</span></li>
+      <li><span class="body"><b>CODE FREEZE 21.09</b> — дальше только фарм лучших сборок до 30.09.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="risk">
+  <h3>Не проверено, но влияет на завтра</h3>
+  <p>В метаданных кернела датасет указан <b>без номера версии</b>
+  (<code>"dataset_sources": ["sergueimakarov/arc3-atlas-src"]</code>), тогда как модель указана
+  с версией (<code>.../1</code>). Если скоринговый реран разрешает датасет в последнюю версию,
+  а не в ту, что была прикреплена при коммите, то завтрашний сабмит V39 отработает на коде V40 —
+  и эксперимент «конфиг изолированно» перестанет что-либо значить.</p>
+  <p>Фаза A этого не опровергает и не подтверждает: она прошла до перезаливки датасета
+  (в её переписи L1-спринт не срабатывал ни разу — код был старый). Внутренности боевого рерана
+  Kaggle не отдаёт, так что задним числом это не проверить.</p>
+</section>
+
+<footer>
+  <span>источники: git diff 9d37281..216891d · atlas_src/src/ARC3-Inference/inference/{agent,framework}/ · scripts/build_atlas_notebook.py · kaggle kernels pull -m</span>
+  <span>сверено с кодом 31.08.2026, состояние репозитория HEAD = 8846fbb</span>
+</footer>
+
+</div>
