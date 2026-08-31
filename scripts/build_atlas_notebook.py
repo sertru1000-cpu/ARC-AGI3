@@ -11,6 +11,10 @@ import os
 import shutil
 from pathlib import Path
 
+def _as_bool(raw: str) -> bool:
+    return (raw or "0").strip().lower() not in {"0", "false", "no"}
+
+
 ROOT = Path(__file__).resolve().parent.parent
 SRC_NB = ROOT / "notebooks_duck" / "submission.ipynb"
 OUT_DIR = ROOT / "notebooks_atlas"
@@ -181,6 +185,22 @@ ATLAS_SUBMISSION_GAME_CAP_CEILING_S = __ATLAS_GAME_CAP_CEILING__  # substituted 
                                        # the regime that scored 0.92.
 ATLAS_MIN_GAME_CAP_S = 1800.0
 
+# 31.08 (backlog 27): dynamic budget re-planning. The static fit below sizes
+# the per-game cap ONCE, from the wave arithmetic; with draws disabled, the
+# time a stalled game returns is then never taken by anyone. Measured on
+# every Phase A length we have (25 min, 50 min, 2.2 h): 23 of 25 games
+# self-terminate at 50% of their cap, so roughly half the wall budget is
+# handed back and evaporates. When this is on, the solver recomputes a
+# per-game window from the ABSOLUTE deadline on every game completion and
+# only ever raises it, so survivors inherit the freed hours while the run
+# still cannot outlive ATLAS_SUBMISSION_BUDGET_S.
+# Substituted by the BUILDER (env ATLAS_DYNAMIC_BUDGET_BUILD, default "0") --
+# an env read left inside the cell would execute on Kaggle, where it is
+# unset, which is exactly how v25 silently ran a 4 h Phase A.
+# Armed ONLY inside atlas_fit_game_cap (the submission branch): arming it in
+# Phase A would stretch a 30-minute calibration to the full 8-hour budget.
+ATLAS_DYNAMIC_BUDGET = __ATLAS_DYNAMIC_BUDGET__
+
 print("atlas: solver config as it came from the bundle:")
 for _key, _value in ATLAS_PRISTINE.items():
     print(f"atlas:   {_key} = {_value}")
@@ -313,6 +333,21 @@ def atlas_fit_game_cap(n_games: int) -> None:
     )
     bm.solver.max_runtime_s_per_game = fitted
 
+    # atlas 31.08: hand the planner the absolute deadline. Module attributes,
+    # not env vars -- solver.py was imported long before this cell ran.
+    if ATLAS_DYNAMIC_BUDGET and hasattr(_atlas_solver_mod, "_ATLAS_DYNAMIC_BUDGET_ENABLED"):
+        _atlas_solver_mod._ATLAS_DYNAMIC_BUDGET_ENABLED = True
+        _atlas_solver_mod._ATLAS_DYNAMIC_BUDGET_TOTAL_S = ATLAS_SUBMISSION_BUDGET_S
+        _atlas_solver_mod._ATLAS_DYNAMIC_BUDGET_CEILING_S = ATLAS_SUBMISSION_GAME_CAP_CEILING_S
+        _atlas_solver_mod._ATLAS_DYNAMIC_BUDGET_MIN_S = ATLAS_MIN_GAME_CAP_S
+        print(
+            "atlas: dynamic budget re-planning ARMED -- budget "
+            f"{ATLAS_SUBMISSION_BUDGET_S:.0f}s, window ceiling "
+            f"{ATLAS_SUBMISSION_GAME_CAP_CEILING_S:.0f}s, floor {ATLAS_MIN_GAME_CAP_S:.0f}s"
+        )
+    else:
+        print("atlas: dynamic budget re-planning OFF -- static per-game cap only")
+
     # atlas: minimal_diagnostics=True on a real submission means the usual
     # summary.txt/transcripts never get written, and kernels output/logs may
     # not even reach a live competition rerun at all (unconfirmed -- the CLI
@@ -385,6 +420,38 @@ def _new_cell(source: str) -> dict:
     }
 
 
+# Build-time knobs: placeholder in ATLAS_CELL -> (env var, default, parser).
+# An env read left INSIDE the cell would execute on Kaggle, where the env is
+# unset -- that is exactly how v25 silently ran a 4 h Phase A instead of 30
+# minutes. Everything is substituted as a literal here instead.
+CELL_KNOBS = {
+    "__ATLAS_CALIBRATION_CAP_S__": ("ATLAS_CALIBRATION_CAP_S", "14400", float),
+    "__ATLAS_CONCURRENCY__": ("ATLAS_CONCURRENCY_BUILD", "20", int),
+    "__ATLAS_DRAWS__": ("ATLAS_DRAWS_BUILD", "1", _as_bool),
+    "__ATLAS_DYNAMIC_BUDGET__": ("ATLAS_DYNAMIC_BUDGET_BUILD", "0", _as_bool),
+    "__ATLAS_GAME_CAP_CEILING__": ("ATLAS_GAME_CAP_CEILING_BUILD", "8500", float),
+}
+
+
+def substituted_cell(env: dict | None = None, *, announce: bool = False) -> str:
+    """ATLAS_CELL with every build-time knob replaced by a literal.
+
+    Shared with scripts/test_atlas_*.py so the tests exercise the text that
+    really ships: before this existed the tests exec'd the raw template and
+    died on the first placeholder, which quietly disabled the guard around
+    atlas_fit_game_cap -- the one function that only ever runs in the real
+    submission branch (a hand-traced change to it once scored 0.06)."""
+    source = os.environ if env is None else env
+    text = ATLAS_CELL
+    for placeholder, (var, default, parse) in CELL_KNOBS.items():
+        value = parse(source.get(var, default))
+        text = text.replace(placeholder, repr(value))
+        assert placeholder not in text, placeholder
+        if announce:
+            print(f"builder: {placeholder.strip('_')} -> {value}")
+    return text
+
+
 def build() -> None:
     nb = json.loads(SRC_NB.read_text(encoding="utf-8"))
     cells = nb["cells"]
@@ -411,25 +478,7 @@ def build() -> None:
         _source_of(cells[dataset_cell_idx]).replace(OLD_SOURCE_DATASET, NEW_SOURCE_DATASET, 1),
     )
 
-    # 29.08: substitute BUILD-time values into the cell (an env read left
-    # inside the cell text executes on KAGGLE, where the env is unset --
-    # that is exactly how v25 silently ran a 4h Phase A instead of 30 min).
-    cap_value = float(os.environ.get("ATLAS_CALIBRATION_CAP_S", "14400"))
-    atlas_cell_text = ATLAS_CELL.replace("__ATLAS_CALIBRATION_CAP_S__", repr(cap_value))
-    assert "__ATLAS_CALIBRATION_CAP_S__" not in atlas_cell_text
-    print(f"builder: ATLAS_CALIBRATION_CAP_S -> {cap_value}")
-    conc_value = int(os.environ.get("ATLAS_CONCURRENCY_BUILD", "20"))
-    atlas_cell_text = atlas_cell_text.replace("__ATLAS_CONCURRENCY__", repr(conc_value))
-    assert "__ATLAS_CONCURRENCY__" not in atlas_cell_text
-    draws_value = (os.environ.get("ATLAS_DRAWS_BUILD", "1") or "1").strip().lower() not in {"0", "false", "no"}
-    atlas_cell_text = atlas_cell_text.replace("__ATLAS_DRAWS__", repr(draws_value))
-    assert "__ATLAS_DRAWS__" not in atlas_cell_text
-    print(f"builder: ATLAS_TIME_BANK_DRAWS -> {draws_value}")
-    print(f"builder: ATLAS_CONCURRENCY -> {conc_value}")
-    ceil_value = float(os.environ.get("ATLAS_GAME_CAP_CEILING_BUILD", "8500"))
-    atlas_cell_text = atlas_cell_text.replace("__ATLAS_GAME_CAP_CEILING__", repr(ceil_value))
-    assert "__ATLAS_GAME_CAP_CEILING__" not in atlas_cell_text
-    print(f"builder: ATLAS_SUBMISSION_GAME_CAP_CEILING_S -> {ceil_value}")
+    atlas_cell_text = substituted_cell(announce=True)
     cells.insert(hook_idx + 1, _new_cell(atlas_cell_text))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

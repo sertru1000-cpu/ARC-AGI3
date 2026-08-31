@@ -90,7 +90,11 @@ def _run_cell(bm, working_dir: Path):
     # The cell prints its own "atlas: ..." diagnostics as a side effect;
     # swallow them here so this test's own ok/FAIL lines stay readable.
     with contextlib.redirect_stdout(io.StringIO()):
-        exec(compile(build_atlas_notebook.ATLAS_CELL, "<ATLAS_CELL>", "exec"), namespace)
+        # 31.08: exec the SUBSTITUTED cell. The builder moved to build-time
+        # placeholders on 29.08 and this test kept exec'ing the raw template,
+        # so it had been dying on the first placeholder ever since -- the guard
+        # around the submission-only branch was silently off.
+        exec(compile(build_atlas_notebook.substituted_cell({}), "<ATLAS_CELL>", "exec"), namespace)
     return namespace
 
 

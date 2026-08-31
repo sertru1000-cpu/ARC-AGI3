@@ -117,6 +117,49 @@ _ATLAS_TIME_BANK_MAX_EXTRA_MULTIPLIER = 1.0
 # ends itself early and returns its unused remainder, exactly like a stalled
 # session -- just with a different (infra, not gameplay) trigger.
 _ATLAS_RETRY_STORM_THRESHOLD = 5
+
+# atlas 31.08 (backlog 27): DYNAMIC BUDGET RE-PLANNING from an absolute deadline.
+#
+# What already existed: the per-game cap is fitted ONCE, before the run, as
+# budget / ceil(n_games / concurrency) -- and a stalled game ends early and
+# deposits its remainder into the time bank. What was missing: with draws
+# disabled (the V39 battle config, where 2 waves x 4 h exactly fill the 8 h
+# budget and a draw could push the notebook past Kaggle's kill), NOBODY ever
+# takes that deposited time back. Measured: 23 of 25 games self-terminate at
+# 50% of their cap in every window length tried (25 min, 50 min, 2.2 h), so
+# roughly half the wall budget is returned and then simply evaporates.
+#
+# The fix re-plans from an ABSOLUTE deadline instead of from percentages:
+#   T_end   = run start + _ATLAS_DYNAMIC_BUDGET_TOTAL_S      (hard, never crossed)
+#   window  = clamp((T_end - now) / waves_left, MIN, CEILING) recomputed on every
+#             game completion, where waves_left counts the games not yet started
+#             plus the batch currently running
+#   deadline = max(previous deadline, now + window), itself clamped to T_end
+# Sessions read the deadline live in _atlas_effective_runtime_cap(), so raising
+# it extends games ALREADY RUNNING -- that is the whole point: when the pool
+# drains early, the survivors inherit the freed hours instead of being killed
+# at a cap that was sized for a fuller queue.
+#
+# Two safety properties, both asserted by scripts/test_atlas_dynamic_budget.py:
+#   (1) no session's cap can ever reach past T_end -- the window is clamped to
+#       the remaining time, and the per-session cap is clamped to T_end minus
+#       that session's own start;
+#   (2) the deadline only ever moves FORWARD, so no running game is cut shorter
+#       than the budget it was already promised.
+# DEFAULT OFF: with the env unset every code path below is a no-op and battle
+# behaviour is byte-identical. Armed only from the notebook's submission branch
+# (Phase A must keep its short calibration cap -- arming there would silently
+# stretch a 30-minute smoke into an 8-hour one).
+_ATLAS_DYNAMIC_BUDGET_ENABLED = (
+    os.environ.get("ATLAS_DYNAMIC_BUDGET", "0") or "0"
+).strip().lower() not in {"0", "false", "no"}
+_ATLAS_DYNAMIC_BUDGET_TOTAL_S = float(os.environ.get("ATLAS_DYNAMIC_BUDGET_TOTAL_S", "0") or "0")
+_ATLAS_DYNAMIC_BUDGET_CEILING_S = float(os.environ.get("ATLAS_DYNAMIC_BUDGET_CEILING_S", "0") or "0")
+_ATLAS_DYNAMIC_BUDGET_MIN_S = float(os.environ.get("ATLAS_DYNAMIC_BUDGET_MIN_S", "0") or "0")
+# Guards the lazy creation of the per-solver planner state (the solver object
+# is unpickled from the bundle, so it cannot carry a new dataclass field).
+_ATLAS_DYNAMIC_BUDGET_INIT_LOCK = threading.Lock()
+
 _ATLAS_MOUSE_DISPLAY_RE = re.compile(r"^MOUSE\(row=(\d+), col=(\d+)\)$")
 _LOCAL_SERVER_PROCESS_ENV_KEYS = (
     "LOCAL_ANALYZER_API_KEY",
@@ -278,6 +321,42 @@ def _atlas_extension_request(
     return min(room, cap * _ATLAS_TIME_BANK_DRAW_FRACTION)
 
 
+def _atlas_dynamic_window_decision(
+    *,
+    elapsed: float,
+    budget_s: float,
+    pending: int,
+    running: int,
+    concurrency: int,
+    ceiling_s: float,
+    min_s: float,
+) -> float:
+    """How many seconds from NOW the currently running games may still use.
+
+    Pure/testable: counters and numbers only, no solver or session state.
+
+    `pending` is games not yet started, `running` is games in flight. The
+    slice count is one for the batch in flight plus one per wave of games
+    still queued behind the concurrency semaphore -- a deliberately
+    conservative bound, since a game that started a second ago can still
+    consume a whole window. The result is clamped to the time actually left,
+    which is what makes the absolute deadline unbreakable no matter how the
+    ceiling and floor are configured.
+    """
+    remaining = budget_s - elapsed
+    if remaining <= 0:
+        return 0.0
+    conc = max(1, int(concurrency))
+    waves_queued = -(-max(0, int(pending)) // conc)  # ceil division
+    slices = waves_queued + (1 if int(running) > 0 else 0)
+    window = remaining / max(1, slices)
+    if ceiling_s > 0:
+        window = min(window, ceiling_s)
+    if min_s > 0:
+        window = max(window, min_s)
+    return max(0.0, min(window, remaining))
+
+
 def _atlas_retry_storm_decision(
     *, consecutive_failures: int, threshold: int, already_deposited: bool
 ) -> bool:
@@ -432,11 +511,18 @@ class _HarnessGameSession:
 
     def _atlas_effective_runtime_cap(self) -> float | None:
         """Base max_runtime_s_per_game plus whatever this session has drawn
-        from the shared time bank (see _ATLAS_TIME_BANK_ENABLED)."""
+        from the shared time bank (see _ATLAS_TIME_BANK_ENABLED), then
+        re-planned against the run's absolute deadline if dynamic budgeting
+        is armed (see _ATLAS_DYNAMIC_BUDGET_ENABLED).
+
+        Read live on every should_stop() check, which is exactly why raising
+        the shared deadline extends games that are ALREADY running."""
         base = self.solver.max_runtime_s_per_game
         if base is None:
             return None
-        return base + self._atlas_extra_time_s
+        cap = base + self._atlas_extra_time_s
+        planned = self.solver.atlas_dynamic_cap(self.started_at, cap)
+        return cap if planned is None else planned
 
     def runtime_limit_reached(self) -> bool:
         cap = self._atlas_effective_runtime_cap()
@@ -456,19 +542,27 @@ class _HarnessGameSession:
     def _atlas_time_remaining_s(self) -> float:
         """Seconds left on this game's wall budget (cap + granted extra
         minus elapsed); large sentinel when no cap is set. Feeds the
-        agent's hail-mary trigger (29.08, Gemini round 6)."""
-        cap = self.solver.max_runtime_s_per_game
+        agent's hail-mary trigger (29.08, Gemini round 6).
+
+        31.08: reads the EFFECTIVE cap, so a game extended by dynamic budget
+        re-planning stops seeing a last-gasp deadline it no longer has."""
+        cap = self._atlas_effective_runtime_cap()
         if cap is None or cap <= 0:
             return 1e9
-        deadline = self.started_at + float(cap) + float(self._atlas_extra_time_s)
-        return max(0.0, deadline - time.monotonic())
+        return max(0.0, (self.started_at + float(cap)) - time.monotonic())
 
     def _atlas_check_time_bank(self) -> bool:
         """Poll the time bank each should_stop() check: draw extra time if a
         new level was just reached, or end this session early (returning
         unused time to the bank) if it's genuinely stalled. Returns True if
         this session should stop NOW as a result. No-op, returns False
-        immediately, if _ATLAS_TIME_BANK_ENABLED is off or there's no cap."""
+        immediately, if _ATLAS_TIME_BANK_ENABLED is off or there's no cap.
+
+        31.08, deliberate: this reads the BASE cap, not the effective one.
+        Dynamic budget re-planning must not push the early-exit threshold
+        later -- a stalled game exiting on schedule is precisely what frees
+        the time the survivors then inherit. Do not "fix" this to use
+        _atlas_effective_runtime_cap()."""
         if not _ATLAS_TIME_BANK_ENABLED:
             return False
         cap = self.solver.max_runtime_s_per_game
@@ -1401,6 +1495,136 @@ class HarnessSolver(Solver):
         with self._atlas_time_bank_lock:
             self._atlas_time_bank_s += seconds
 
+    # ---- atlas 31.08: dynamic budget re-planning (backlog 27) --------------
+    # State lives in a plain dict created on demand, NOT in a dataclass field:
+    # this solver is unpickled from the bundle, so an instance built by an
+    # older pickle would simply not have a new field. Dropped from
+    # __getstate__/__deepcopy__ for the same reason it is created lazily --
+    # it carries a Lock.
+
+    def _atlas_dyn_state(self) -> dict[str, Any]:
+        state = getattr(self, "_atlas_dyn", None)
+        if state is None:
+            with _ATLAS_DYNAMIC_BUDGET_INIT_LOCK:
+                state = getattr(self, "_atlas_dyn", None)
+                if state is None:
+                    state = {
+                        "lock": threading.Lock(),
+                        "t0": None,
+                        "budget_s": 0.0,
+                        "total": 0,
+                        "started": 0,
+                        "finished": 0,
+                        "deadline": None,
+                    }
+                    self._atlas_dyn = state
+        return state
+
+    def atlas_dyn_arm(self, total_games: int) -> None:
+        """Start the clock for dynamic re-planning. Called once, from
+        _run_games, so t0 is the moment gameplay actually begins -- the same
+        instant the static wave arithmetic assumes when it divides the budget."""
+        if not _ATLAS_DYNAMIC_BUDGET_ENABLED:
+            return
+        state = self._atlas_dyn_state()
+        with state["lock"]:
+            state["t0"] = time.monotonic()
+            state["budget_s"] = float(_ATLAS_DYNAMIC_BUDGET_TOTAL_S)
+            state["total"] = max(0, int(total_games))
+            state["started"] = 0
+            state["finished"] = 0
+            state["deadline"] = None
+        if state["budget_s"] <= 0:
+            print(
+                "atlas: dynamic budget armed but no total budget set "
+                "-- re-planning stays inert",
+                flush=True,
+            )
+            return
+        print(
+            f"atlas: dynamic budget re-planning ACTIVE -- {state['total']} game(s), "
+            f"concurrency {max(1, int(self.concurrency))}, hard deadline in "
+            f"{state['budget_s']:.0f}s",
+            flush=True,
+        )
+        self._atlas_dyn_replan(reason="start")
+
+    def atlas_dyn_note_start(self) -> None:
+        if not _ATLAS_DYNAMIC_BUDGET_ENABLED:
+            return
+        state = self._atlas_dyn_state()
+        with state["lock"]:
+            state["started"] += 1
+
+    def atlas_dyn_note_finish(self) -> None:
+        """A game just ended (won, gave up, or was cut early). Its unused
+        share is exactly what the survivors should inherit."""
+        if not _ATLAS_DYNAMIC_BUDGET_ENABLED:
+            return
+        state = self._atlas_dyn_state()
+        with state["lock"]:
+            state["finished"] += 1
+        self._atlas_dyn_replan(reason="game_end")
+
+    def _atlas_dyn_replan(self, *, reason: str) -> None:
+        state = self._atlas_dyn_state()
+        with state["lock"]:
+            t0 = state["t0"]
+            budget = float(state["budget_s"])
+            if t0 is None or budget <= 0:
+                return
+            now = time.monotonic()
+            pending = max(0, int(state["total"]) - int(state["started"]))
+            running = max(0, int(state["started"]) - int(state["finished"]))
+            window = _atlas_dynamic_window_decision(
+                elapsed=now - t0,
+                budget_s=budget,
+                pending=pending,
+                running=running,
+                concurrency=max(1, int(self.concurrency)),
+                ceiling_s=float(_ATLAS_DYNAMIC_BUDGET_CEILING_S),
+                min_s=float(_ATLAS_DYNAMIC_BUDGET_MIN_S),
+            )
+            hard_deadline = t0 + budget
+            proposed = min(now + window, hard_deadline)
+            previous = state["deadline"]
+            # Forward only: a running game is never cut shorter than the
+            # budget it was already promised.
+            if previous is not None and proposed <= previous + 1.0:
+                return
+            state["deadline"] = proposed
+            gained = 0.0 if previous is None else proposed - previous
+        print(
+            f"atlas: dynamic budget re-plan ({reason}) -- pending={pending} "
+            f"running={running}, per-game window {window:.0f}s, "
+            f"+{gained:.0f}s vs previous, {hard_deadline - now:.0f}s to hard deadline",
+            flush=True,
+        )
+
+    def atlas_dynamic_cap(
+        self, session_started_at: float, current_cap: float
+    ) -> float | None:
+        """Re-plan one session's wall cap. Returns None when dynamic
+        budgeting is off or not armed, so the caller keeps its own value.
+
+        Extends the cap up to the shared deadline and then clamps it to the
+        run's absolute deadline -- the clamp is what guarantees no game can
+        outlive the budget, whatever the ceiling or the floor say."""
+        if not _ATLAS_DYNAMIC_BUDGET_ENABLED:
+            return None
+        state = self._atlas_dyn_state()
+        with state["lock"]:
+            t0 = state["t0"]
+            budget = float(state["budget_s"])
+            deadline = state["deadline"]
+        if t0 is None or budget <= 0:
+            return None
+        cap = float(current_cap)
+        if deadline is not None:
+            cap = max(cap, deadline - session_started_at)
+        hard = (t0 + budget) - session_started_at
+        return max(0.0, min(cap, hard))
+
     def atlas_draw_time(self, requested: float) -> float:
         """Draw up to `requested` seconds from the shared bank; returns the
         amount actually granted (0 if the bank is empty), never more than
@@ -1425,6 +1649,7 @@ class HarnessSolver(Solver):
         state.pop("_local_server_original_env", None)
         state.pop("_worker_pool", None)
         state.pop("_atlas_time_bank_lock", None)
+        state.pop("_atlas_dyn", None)
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -1457,6 +1682,8 @@ class HarnessSolver(Solver):
                 object.__setattr__(new, key, None)
             elif key == "_atlas_time_bank_lock":
                 object.__setattr__(new, key, threading.Lock())
+            elif key == "_atlas_dyn":
+                continue  # planner state is rebuilt lazily per run
             else:
                 object.__setattr__(new, key, copy.deepcopy(value, memo))
         return new
@@ -1512,6 +1739,7 @@ class HarnessSolver(Solver):
 
     async def _run_games(self, games: list[taaf.game.Game]) -> None:
         self._stop_event.clear()
+        self.atlas_dyn_arm(len(games))
         semaphore = asyncio.Semaphore(max(1, int(self.concurrency)))
         pass_indices_by_game_id: dict[str, int] = {}
         loop = asyncio.get_running_loop()
@@ -1520,11 +1748,17 @@ class HarnessSolver(Solver):
         async def run_one(index: int, pass_index: int, game: taaf.game.Game) -> None:
             async with semaphore:
                 args = (game, index, pass_index, self._local_server_for_game_index(index))
-                if pool is not None:
-                    await loop.run_in_executor(pool, functools.partial(self._play_one, *args))
-                else:
-                    # _setup wasn't called (direct test invocation).
-                    await asyncio.to_thread(self._play_one, *args)
+                # atlas 31.08: the planner counts games, not waves -- a slot
+                # frees the moment a game ends, and the next one takes it.
+                self.atlas_dyn_note_start()
+                try:
+                    if pool is not None:
+                        await loop.run_in_executor(pool, functools.partial(self._play_one, *args))
+                    else:
+                        # _setup wasn't called (direct test invocation).
+                        await asyncio.to_thread(self._play_one, *args)
+                finally:
+                    self.atlas_dyn_note_finish()
 
         tasks: list[asyncio.Task[None]] = []
         for index, game in enumerate(games):
