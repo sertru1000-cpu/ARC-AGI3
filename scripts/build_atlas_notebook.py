@@ -433,6 +433,27 @@ CELL_KNOBS = {
 }
 
 
+def substitute_knobs(text: str, env: dict | None = None, *, announce: bool = False) -> str:
+    """Replace every build-time placeholder in `text` with a literal.
+
+    31.08, found the hard way: build() used to substitute ONLY the atlas
+    cell, while RUN_CELL_PATCH -- which also carries __ATLAS_DRAWS__ -- was
+    spliced into the run cell raw. The placeholder sat on a line that runs
+    exclusively in the competition-rerun branch, so every Phase A stayed
+    green while three real submissions in a row died on a NameError about
+    half an hour in. Substitution is now text-agnostic and build() asserts
+    that no placeholder survives anywhere in the notebook."""
+    source = os.environ if env is None else env
+    for placeholder, (var, default, parse) in CELL_KNOBS.items():
+        if placeholder not in text:
+            continue
+        value = parse(source.get(var, default))
+        text = text.replace(placeholder, repr(value))
+        if announce:
+            print(f"builder: {placeholder.strip('_')} -> {value}")
+    return text
+
+
 def substituted_cell(env: dict | None = None, *, announce: bool = False) -> str:
     """ATLAS_CELL with every build-time knob replaced by a literal.
 
@@ -441,14 +462,9 @@ def substituted_cell(env: dict | None = None, *, announce: bool = False) -> str:
     died on the first placeholder, which quietly disabled the guard around
     atlas_fit_game_cap -- the one function that only ever runs in the real
     submission branch (a hand-traced change to it once scored 0.06)."""
-    source = os.environ if env is None else env
-    text = ATLAS_CELL
-    for placeholder, (var, default, parse) in CELL_KNOBS.items():
-        value = parse(source.get(var, default))
-        text = text.replace(placeholder, repr(value))
+    text = substitute_knobs(ATLAS_CELL, env, announce=announce)
+    for placeholder in CELL_KNOBS:
         assert placeholder not in text, placeholder
-        if announce:
-            print(f"builder: {placeholder.strip('_')} -> {value}")
     return text
 
 
@@ -468,7 +484,13 @@ def build() -> None:
     assert pickle_idx < hook_idx < run_idx, "unexpected notebook layout"
 
     _set_source(cells[pickle_idx], _source_of(cells[pickle_idx]).rstrip("\n") + "\n" + PRISTINE_CAPTURE)
-    _set_source(cells[run_idx], _source_of(cells[run_idx]).replace(RUN_CELL_ANCHOR, RUN_CELL_PATCH, 1))
+    # The run-cell patch carries build-time knobs too -- substitute it with
+    # the SAME values as the atlas cell, or the rerun branch dies on a
+    # NameError that no Phase A can ever reach (three burnt submissions).
+    _set_source(
+        cells[run_idx],
+        _source_of(cells[run_idx]).replace(RUN_CELL_ANCHOR, substitute_knobs(RUN_CELL_PATCH), 1),
+    )
 
     dataset_cell_idx = next(
         i for i, c in enumerate(cells) if OLD_SOURCE_DATASET in _source_of(c)
@@ -480,6 +502,11 @@ def build() -> None:
 
     atlas_cell_text = substituted_cell(announce=True)
     cells.insert(hook_idx + 1, _new_cell(atlas_cell_text))
+
+    # Last line of defence: NOTHING may reach Kaggle with a placeholder left
+    # in it, in any cell, whether or not Phase A would ever execute that line.
+    leftover = [ph for ph in CELL_KNOBS if any(ph in _source_of(c) for c in cells)]
+    assert not leftover, f"unsubstituted placeholders would ship: {leftover}"
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     OUT_NB.write_text(
