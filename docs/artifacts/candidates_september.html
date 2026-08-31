@@ -1,0 +1,219 @@
+<title>Шесть кандидатов на сентябрь</title>
+<style>
+:root{
+  --ground:#F2EFE8; --surface:#FBF9F4; --surface-2:#F5F1E9;
+  --ink:#232019; --ink-2:#544D42; --ink-3:#7C7466;
+  --rule:#DFD8C9; --rule-strong:#C9C0AD;
+  --accent:#00706A; --accent-soft:#DBEAE7;
+  --amber:#B4763A; --amber-soft:#F0E4D3;
+  --bad:#A03B2E; --bad-soft:#F2DFDB;
+  --shadow:0 1px 2px rgba(35,32,25,.06), 0 10px 26px -20px rgba(35,32,25,.5);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+    --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+    --rule:#332F27; --rule-strong:#474137;
+    --accent:#3DBFB2; --accent-soft:#123430;
+    --amber:#C08343; --amber-soft:#3A2C1A;
+    --bad:#D2705E; --bad-soft:#3A1F1A;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+  --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+  --rule:#332F27; --rule-strong:#474137;
+  --accent:#3DBFB2; --accent-soft:#123430;
+  --amber:#C08343; --amber-soft:#3A2C1A;
+  --bad:#D2705E; --bad-soft:#3A1F1A;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+}
+*{box-sizing:border-box}
+body{background:var(--ground); color:var(--ink); margin:0;
+  font-family:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:15px; line-height:1.6; -webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px; margin:0 auto; padding:44px 24px 72px; display:flex; flex-direction:column; gap:34px}
+h1,h2,h3{margin:0; text-wrap:balance; font-family:"Big Shoulders Display",Impact,"Arial Narrow",sans-serif}
+h1{font-size:clamp(38px,6.5vw,64px); font-weight:800; line-height:.94; text-transform:uppercase}
+h2{font-size:26px; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+h3{font-size:18px; font-weight:700; letter-spacing:.02em}
+p{margin:0}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; letter-spacing:.15em;
+  text-transform:uppercase; color:var(--ink-3)}
+.masthead{border-bottom:2px solid var(--ink); padding-bottom:22px; display:flex; flex-direction:column; gap:9px}
+.standfirst{font-size:17px; color:var(--ink-2); max-width:64ch; margin-top:8px}
+.key{background:var(--surface); border:1px solid var(--rule); border-left:5px solid var(--accent);
+  border-radius:3px; padding:20px 24px; display:flex; flex-direction:column; gap:10px; box-shadow:var(--shadow)}
+.key p{font-size:15px; color:var(--ink-2); max-width:72ch}
+.key b{color:var(--ink)}
+.tablewrap{overflow-x:auto; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+caption{text-align:left; font-size:12.5px; color:var(--ink-3); padding:13px 16px 3px}
+th,td{padding:9px 14px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+thead th{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--ink-3); border-bottom:1.5px solid var(--rule-strong); white-space:nowrap}
+td.num{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+tbody tr:hover{background:var(--surface-2)}
+tbody tr:last-child td{border-bottom:none}
+.cand{background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+  padding:18px 22px; display:flex; flex-direction:column; gap:8px; border-left:4px solid var(--rule-strong)}
+.cand.top{border-left-color:var(--accent)}
+.cand.weak{border-left-color:var(--amber)}
+.cand .head{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+.cand .n{font-family:"Big Shoulders Display",Impact,sans-serif; font-size:26px; font-weight:800; color:var(--ink-3)}
+.cand .price{margin-left:auto; font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px; color:var(--ink-3)}
+.cand p{font-size:14px; color:var(--ink-2)}
+.cand .why{font-size:13px; color:var(--ink-3)}
+.chip{font-size:10px; letter-spacing:.09em; text-transform:uppercase; font-weight:600;
+  padding:3px 8px; border-radius:2px; white-space:nowrap}
+.chip.big{background:var(--accent-soft); color:var(--accent)}
+.chip.small{background:var(--amber-soft); color:var(--amber)}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px;
+  background:var(--surface-2); padding:1px 5px; border-radius:2px; color:var(--ink-2)}
+.grid{display:flex; flex-direction:column; gap:12px}
+footer{border-top:1px solid var(--rule); padding-top:18px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; color:var(--ink-3)}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap">
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">ARC-AGI-3 · программа замеров · 31.08.2026</p>
+  <h1>Шесть кандидатов на сентябрь</h1>
+  <p class="standfirst">Отобраны по одному фильтру: способна ли правка поднять <b>конверсию
+  первого уровня</b> на 15–20 процентных пунктов. Всё, что бьёт по второму уровню или обещает
+  «немного лучше», отсеяно — такой эффект наш бюджет не различит.</p>
+</header>
+
+<section class="key">
+  <h2 style="font-size:22px">Находка, которая переупорядочила список</h2>
+  <p>За девять дней <b>темп упал с 53 до 12 действий на игру, и конверсия шла следом</b> — с 72%
+  у самой первой сборки до 28% у V36. Корреляция по семи длинным прогонам <b>r&nbsp;=&nbsp;0.78</b>.</p>
+  <div class="tablewrap">
+    <table>
+      <caption>Прогоны с окном 3 часа и больше</caption>
+      <thead><tr><th>сборка</th><th>действий на игру</th><th>конверсия L1</th></tr></thead>
+      <tbody>
+        <tr><td>v1, 22.08</td><td class="num">53.4</td><td class="num">72%</td></tr>
+        <tr><td>v18, 25.08</td><td class="num">52.7</td><td class="num">56%</td></tr>
+        <tr><td>v12, 24.08</td><td class="num">39.1</td><td class="num">44%</td></tr>
+        <tr><td>v24-контроль</td><td class="num">22.5</td><td class="num">52%</td></tr>
+        <tr><td>V27</td><td class="num">20.3</td><td class="num">44%</td></tr>
+        <tr><td>V33</td><td class="num">18.2</td><td class="num">48%</td></tr>
+        <tr><td>V36</td><td class="num">12.0</td><td class="num">28%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Это не доказательство причинности — прогоны различались и кодом, и окном. Но направление
+  устойчиво, и оно указывает на нашу же машинерию: за эти дни мы добавили десяток механизмов,
+  каждый из которых тратит ход. У стока при этом <b>130 действий на игру</b> и конверсия 50%.</p>
+</section>
+
+<section>
+  <h2 style="margin-bottom:18px">Кандидаты</h2>
+  <div class="grid">
+
+    <div class="cand top">
+      <div class="head"><span class="n">1</span><h3>Форма боя: 25 игр в одну волну против 49 в две</h3>
+        <span class="chip big">решает всё остальное</span><span class="price">~$11</span></div>
+      <p>Один и тот же код, потолок 2 часа, конкурентность 28. Вопрос: падает ли конверсия
+      просто оттого, что игр стало вдвое больше и появилась вторая волна.</p>
+      <p class="why">Зачем первым: локально мы и сток даём одинаковые 44–56%, а в бою у нас 24%.
+      Если конверсия просядет уже на 49 клонах — виноват режим, и это чинится конфигом. Если нет —
+      дело в самих скрытых играх, и тогда все локальные замеры имеют ограниченную ценность.
+      До этого ответа тратить деньги на остальные пункты преждевременно.</p>
+    </div>
+
+    <div class="cand top">
+      <div class="head"><span class="n">2</span><h3>Снять весь стек принуждений</h3>
+        <span class="chip big">ожидание +20…40 п.п.</span><span class="price">~$21</span></div>
+      <p>Прогон нашей сборки со всеми чекпоинтами выключенными против текущей. Сборка стоит ноль:
+      флаги уже есть. В V41 за прогон вставлено 138 explore-first, 31 theory, 29 theory-force,
+      14 memo, 9 force-act — каждый съедает ход.</p>
+      <p class="why">Прямая проверка гипотезы, на которую указывает r&nbsp;=&nbsp;0.78: наши же
+      механизмы душат темп, а темп тянет конверсию. Самый крупный ожидаемый эффект в списке
+      и самая дешёвая сборка.</p>
+    </div>
+
+    <div class="cand">
+      <div class="head"><span class="n">3</span><h3>Переключатель гипотезы о правиле</h3>
+        <span class="chip small">+5…10 п.п.</span><span class="price">в пакете</span></div>
+      <p>Самая большая корзина провалов — «объекты опознаны верно, правило неизвестно»: 6 игр из
+      23. Наш <code>goal-reconsider</code> за весь прогон V41 не сработал <b>ни разу</b>, потому
+      что висит на 8 вызовах <code>verify_theory</code>, а их было 11 на все 25 игр.</p>
+      <p class="why">Переставить триггер на «N действий без прогресса уровня». Правка в одну
+      строку, эффект — на самую крупную корзину.</p>
+    </div>
+
+    <div class="cand">
+      <div class="head"><span class="n">4</span><h3>Ранний рестарт вместо блуждания</h3>
+        <span class="chip small">+5…10 п.п.</span><span class="price">в пакете</span></div>
+      <p>45% провалов у Duck — блуждание с неверной гипотезой, и время его не лечит: в бою
+      четыре часа дали ту же конверсию 24%, что и 25 минут в калибровке.</p>
+      <p class="why">Сейчас cull только отбирает у зомби слоты к модели. Вместо этого — RESET и
+      заход с явно другой гипотезой, пока бюджет ещё есть.</p>
+    </div>
+
+    <div class="cand">
+      <div class="head"><span class="n">5</span><h3>Агентность: авто-проба органов управления</h3>
+        <span class="chip small">+5…8 п.п.</span><span class="price">в пакете</span></div>
+      <p>Когда за N ходов ни один орган управления не дал видимого эффекта, харнес сам прогоняет
+      систематическую пробу и отдаёт результат данными.</p>
+      <p class="why">Целит в игры вроде cd82, которая за 13 ходов оставила «все 6 органов не
+      опробованы», и su15. Наш полигон mr01 показал, что select-then-act открывается только
+      к 30+ действиям. Корзина малая — 2 игры из 23 — поэтому только в пакете.</p>
+    </div>
+
+    <div class="cand weak">
+      <div class="head"><span class="n">6</span><h3>Батчинг действий</h3>
+        <span class="chip small">эффект неизвестен</span><span class="price">в пакете</span></div>
+      <p>Поощрять пакеты действий за один ход промптом и примером. Прямой рычаг темпа, если
+      гипотеза пункта 2 подтвердится.</p>
+      <p class="why">Самый спекулятивный пункт: у нас нет данных о том, сколько действий модель
+      кладёт в пакет сейчас. Имеет смысл только после пункта 2 и только если тот сработает.</p>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2 style="margin-bottom:14px">Бюджет и порядок</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>шаг</th><th>что</th><th>цена</th><th>что даёт</th></tr></thead>
+      <tbody>
+        <tr><td class="num">0</td><td>Калибровка собственного разброса: 3 одинаковых прогона</td><td class="num">~$20</td><td>без неё все расчёты мощности — гадание</td></tr>
+        <tr><td class="num">1</td><td>Кандидат 1 — форма боя</td><td class="num">~$11</td><td>решает, значат ли локальные замеры хоть что-то</td></tr>
+        <tr><td class="num">2</td><td>Промер базовой сборки, 3 прогона</td><td class="num">~$21</td><td>общая база для всех дальнейших сравнений</td></tr>
+        <tr><td class="num">3</td><td>Кандидат 2 — снятие принуждений</td><td class="num">~$21</td><td>крупнейшая гипотеза</td></tr>
+        <tr><td class="num">4</td><td>Пакет 3+4+5(+6) одним рукавом</td><td class="num">~$21</td><td>атрибуции не будет, но её и не купить</td></tr>
+        <tr><td><b>итого</b></td><td><b>вся программа до конца соревнования</b></td><td class="num"><b>~$95</b></td><td>4 ответа вместо девяти дней догадок</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px; font-size:14px; color:var(--ink-2)">Прогон 49 игр при потолке 2 часа
+  и conc 28 = 2 волны × 2 ч = 4 часа пода ≈ <b>$7</b>. Двухчасовой потолок выбран не наугад:
+  у V33 при 2 часах конверсия была те же 48%, что у четырёхчасовых прогонов, — то есть половина
+  цены без потери мощности.</p>
+</section>
+
+<section class="key" style="border-left-color:var(--bad)">
+  <h2 style="font-size:22px; color:var(--bad)">Чего этот список не решает</h2>
+  <p>Все замеры дают <b>разность между сборками</b>, а не абсолютную медиану на скрытом наборе.
+  Переносится ли разность — не проверено, и единственный раз, когда мы сверяли, она
+  <b>не перенеслась</b>: подовая дельта показала «код V36 вдвое лучше V30» (конверсия 45% → 80%),
+  а в бою обе сборки легли в один шум.</p>
+  <p>Поэтому кандидат 1 стоит первым. Если окажется, что и форма боя конверсию не объясняет,
+  честный вывод будет неприятным: локальные замеры не предсказывают бой в принципе, и тогда
+  единственная оставшаяся стратегия — фарм лучшей известной сборки на публичный лидерборд плюс
+  выбор двух отправок в финал по медиане.</p>
+</section>
+
+<footer>
+  источники: runs/kaggle_v41 · runs/duck_harness_ref (500 партий стока) · runs/runpod_owng20_30_08 ·
+  docs/plan_top10_by_3009.md, пункты 29–31
+</footer>
+
+</div>
