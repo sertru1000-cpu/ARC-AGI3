@@ -1551,6 +1551,37 @@ def _extract_reasoning_text(message: dict[str, Any]) -> str:
     return _normalize_message_content(reasoning)
 
 
+# atlas 01.09: the context sanitizer was silently dead -- 19 empty returns out
+# of 23 fires on calib_1, and 3 of 3 on the V46 arm. Cause: Qwen3 answers a
+# synthesis request through the REASONING channel and returns content="".
+# _extract_reasoning_text above already knows about that channel (the
+# transcript renderer uses it); the sanitizer did not.
+#
+# Salvaging has one hard constraint that makes the naive fix WRONG: the whole
+# point of this mechanism is to SHRINK the context. Pasting several thousand
+# tokens of raw deliberation back in would do the exact opposite of what it is
+# for. So take the TAIL -- a reasoning model puts its conclusion last -- cut it
+# at a line boundary, and cap it hard. If nothing usable survives the cap, we
+# return "" and the caller keeps the old history, exactly as before.
+_ATLAS_SALVAGE_MAX_CHARS = 1200
+_ATLAS_SALVAGE_MIN_CHARS = 120
+
+
+def _atlas_salvage_synthesis(reasoning: str, limit: int = _ATLAS_SALVAGE_MAX_CHARS) -> str:
+    """Recover a usable synthesis from a reasoning-only reply, or "" if none."""
+    text = (reasoning or "").strip()
+    if len(text) < _ATLAS_SALVAGE_MIN_CHARS:
+        return ""
+    if len(text) > limit:
+        text = text[-limit:]
+        # drop the partial first line so the snapshot never starts mid-sentence
+        newline = text.find("\n")
+        if 0 <= newline < limit // 2:
+            text = text[newline + 1:]
+    text = text.strip()
+    return text if len(text) >= _ATLAS_SALVAGE_MIN_CHARS else ""
+
+
 def _is_context_length_error(exc: BaseException) -> bool:
     message = str(exc).lower()
     return (
@@ -3876,6 +3907,16 @@ class ToolAgent:
             _append_transcript_section(analyzer_log, "CONTEXT SANITIZER", f"failed ({reason}): {exc}")
             return
         snapshot = str((result.message or {}).get("content", "") or "").strip()
+        if not snapshot:
+            # atlas 01.09: fall back to the reasoning channel before giving up
+            # (see _atlas_salvage_synthesis for why this is capped).
+            snapshot = _atlas_salvage_synthesis(_extract_reasoning_text(result.message or {}))
+            if snapshot:
+                print(
+                    f"atlas: context sanitizer had no content -- salvaged "
+                    f"{len(snapshot)} chars from the reasoning channel",
+                    flush=True,
+                )
         if not snapshot:
             print("atlas: context sanitizer returned empty content -- keeping existing history untouched", flush=True)
             return
