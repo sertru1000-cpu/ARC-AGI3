@@ -21,3 +21,10 @@ To update a page: edit the file here, then republish to its EXISTING url
 
 Before republishing a page whose source is NOT here, read the live version
 first (`Artifact action: "read"` with its url) and build the edit on that.
+
+## Генерируемые страницы
+
+`stock_thresholds.html` собирается скриптом `gen_stock_thresholds.py` (лежит здесь же).
+Править надо СКРИПТ, потом перегенерировать и перепубликовать в тот же url:
+
+    .venv/Scripts/python.exe docs/artifacts/gen_stock_thresholds.py
