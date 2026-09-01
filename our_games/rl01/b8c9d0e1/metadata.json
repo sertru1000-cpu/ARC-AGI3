@@ -1,0 +1,18 @@
+{
+  "game_id": "rl01-b8c9d0e1",
+  "title": "Relay (atlas testbed, long-level batch)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard",
+    "atlas_own",
+    "atlas_long"
+  ],
+  "class_name": "Rl01",
+  "baseline_actions": [
+    55,
+    62,
+    66,
+    70,
+    78
+  ]
+}

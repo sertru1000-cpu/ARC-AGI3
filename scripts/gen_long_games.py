@@ -244,6 +244,116 @@ def sim_done(spec, state):
 ''',
 )
 
+MECHANICS["fr01"] = dict(
+    title="Ferry",
+    blurb=("Crates must be carried to the depot ONE AT A TIME. Stepping on a "
+           "crate picks it up; stepping on the depot while loaded drops it. The "
+           "discovery is CAPACITY: the board shows several crates and one depot "
+           "and says nothing about how many hands you have, so the obvious plan "
+           "-- sweep them all up, then deliver -- silently does nothing."),
+    actions="[1, 2, 3, 4]",
+    sim='''
+
+def sim_initial(spec):
+    return (tuple(spec["start"]), False, frozenset(tuple(c) for c in spec["crates"]), 0)
+
+
+def sim_step(spec, state, action):
+    pos, loaded, crates, done = state
+    delta = MOVES.get(action)
+    if delta is None:
+        return state
+    nxt = (pos[0] + delta[0], pos[1] + delta[1])
+    if nxt not in walkable(spec):
+        return state
+    if not loaded and nxt in crates:
+        return (nxt, True, crates - {nxt}, done)
+    if loaded and nxt == tuple(spec["depot"]):
+        return (nxt, False, crates, done + 1)
+    return (nxt, loaded, crates, done)
+
+
+def sim_done(spec, state):
+    pos, loaded, crates, done = state
+    return not crates and not loaded and pos == tuple(spec["exit"])
+''',
+    sprites='''
+    dc, dr = spec["depot"]
+    sprites.append(Sprite(_box_px(MARK_DONE), name="depot", x=dc * CELL, y=dr * CELL,
+                          layer=1, blocking=BlockingMode.NOT_BLOCKED, collidable=False))
+    for i, (c, r) in enumerate(spec["crates"]):
+        sprites.append(Sprite(_solid_px(MARK), name=f"crate_{i}", x=c * CELL, y=r * CELL,
+                              layer=2, blocking=BlockingMode.NOT_BLOCKED, collidable=False))
+''',
+    sync='''
+        for i, (c, r) in enumerate(spec["crates"]):
+            s = self._sprite(f"crate_{i}")
+            if s is not None:
+                gone = (c, r) not in self._atlas_state[2]
+                px = [[0] * CELL for _ in range(CELL)] if gone else _solid_px(MARK)
+                for rr in range(CELL):
+                    for cc in range(CELL):
+                        s.pixels[rr][cc] = px[rr][cc]
+''',
+)
+
+MECHANICS["rl01"] = dict(
+    title="Relay",
+    blurb=("Two gates, and a switch that opens one while closing the other. The "
+           "switch is nowhere near either gate. The discovery is NON-LOCAL "
+           "CAUSALITY: acting here changes the board there, which is invisible "
+           "from the spot where you act -- the class of rule an agent cannot "
+           "deduce without walking back to look."),
+    actions="[1, 2, 3, 4]",
+    sim='''
+
+def sim_initial(spec):
+    return (tuple(spec["start"]), 0, 0)
+
+
+def sim_step(spec, state, action):
+    pos, phase, opened = state
+    delta = MOVES.get(action)
+    if delta is None:
+        return state
+    nxt = (pos[0] + delta[0], pos[1] + delta[1])
+    if nxt not in walkable(spec):
+        return state
+    gates = [tuple(g) for g in spec["gates"]]
+    if nxt in gates:
+        idx = gates.index(nxt)
+        # a gate opens only in ITS phase and only in turn: gate i wants phase
+        # i % 2, so passing three of them forces two trips back to the switch
+        if idx != opened or (idx % 2) != phase:
+            return state
+        return (nxt, phase, opened + 1)
+    if nxt == tuple(spec["switch"]):
+        return (nxt, 1 - phase, opened)
+    return (nxt, phase, opened)
+
+
+def sim_done(spec, state):
+    return state[2] == len(spec["gates"]) and state[0] == tuple(spec["exit"])
+''',
+    sprites='''
+    sc, sr = spec["switch"]
+    sprites.append(Sprite(_solid_px(MARK_DONE), name="switch", x=sc * CELL, y=sr * CELL,
+                          layer=1, blocking=BlockingMode.NOT_BLOCKED, collidable=False))
+    for i, (c, r) in enumerate(spec["gates"]):
+        sprites.append(Sprite(_box_px(MARK), name=f"gate_{i}", x=c * CELL, y=r * CELL,
+                              layer=2, blocking=BlockingMode.NOT_BLOCKED, collidable=False))
+''',
+    sync='''
+        for i, (c, r) in enumerate(spec["gates"]):
+            s = self._sprite(f"gate_{i}")
+            if s is not None:
+                px = _box_px(MARK if i == self._atlas_state[1] else HAZARD)
+                for rr in range(CELL):
+                    for cc in range(CELL):
+                        s.pixels[rr][cc] = px[rr][cc]
+''',
+)
+
 MECHANICS["cy01"] = dict(
     title="Cycle",
     blurb=("A hazard sweeps one corridor on a fixed period; entering it on the "
@@ -470,6 +580,18 @@ def spread(ring, count, offset=0):
     return [ring[int((i + 1) * step + offset) % len(ring)] for i in range(count)]
 
 
+# rl01 gate/switch placements, by perimeter index, produced by the search
+# described in specs_for. Regenerate with the snippet in that comment if the
+# ring geometry ever changes -- these indices are meaningless on another ring.
+RL01_LAYOUTS = [
+    (26, 9, 5, 11),    # optimum 55
+    (33, 5, 48, 8),    # optimum 62
+    (20, 21, 10, 7),   # optimum 66
+    (29, 6, 42, 10),   # optimum 70
+    (29, 32, 4, 18),   # optimum 78
+]
+
+
 def specs_for(gid: str) -> list[dict]:
     walls = ring_walls()
     ring = perimeter(walls)
@@ -489,6 +611,21 @@ def specs_for(gid: str) -> list[dict]:
             # the walk to double back rather than take the short way round
             base.update(doors=spread(ring, 3, off % 5),
                         exit=ring[(n - 2 - (off % 5)) % n])
+        elif gid == "fr01":
+            # ящики на дальней дуге: каждый требует отдельного рейса
+            base.update(crates=spread(ring, 2 + (lvl % 2), off + n // 4),
+                        depot=ring[2], exit=ring[(n // 2 + off) % n])
+        elif gid == "rl01":
+            # Placements FOUND BY SEARCH, not chosen by hand. Two gates and one
+            # switch on a ring cannot be made long: whatever a shut gate
+            # blocks, the other way round is open, so the optimum never left
+            # the twenties. Three gates that must be passed IN ORDER and in
+            # ALTERNATING phase force two return trips to the switch, and then
+            # a search over 3000 random placements found 40 in the 55-78 band.
+            # These five are spread across that band.
+            g0, g1, g2, sw = RL01_LAYOUTS[lvl]
+            base.update(gates=[ring[g0], ring[g1], ring[g2]],
+                        switch=ring[sw], exit=ring[(g2 + 2) % n])
         elif gid == "cy01":
             # the sweeper owns one whole side; the exit is beyond it, and the
             # other way round is walled off, so the only route is timed
@@ -531,6 +668,7 @@ def optimum(module, spec, limit: int = 400_000) -> int | None:
 
 
 HASHES = {"gk01": "b2c3d4e5", "ac01": "c3d4e5f6", "ky01": "d4e5f6a7",
+          "fr01": "a7b8c9d0", "rl01": "b8c9d0e1",
           "cy01": "e5f6a7b8", "tw01": "f6a7b8c9"}
 
 
@@ -577,7 +715,7 @@ def main() -> None:
     # never into the 50-80 band -- that is a design problem, not a tuning one.
     # Shipping them at 8 actions would quietly put two SHORT games into a
     # batch whose entire purpose is long levels.
-    for gid in ("gk01", "ac01", "ky01"):
+    for gid in ("gk01", "ac01", "ky01", "fr01", "rl01"):
         source = render(gid)
         module = load(gid, source)
         opt = [optimum(module, spec) for spec in module.LEVELS]

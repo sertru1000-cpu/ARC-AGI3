@@ -1,0 +1,18 @@
+{
+  "game_id": "fr01-a7b8c9d0",
+  "title": "Ferry (atlas testbed, long-level batch)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard",
+    "atlas_own",
+    "atlas_long"
+  ],
+  "class_name": "Fr01",
+  "baseline_actions": [
+    80,
+    93,
+    54,
+    75,
+    46
+  ]
+}

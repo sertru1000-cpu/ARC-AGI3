@@ -170,6 +170,8 @@ SOLVERS = {
     "gk01": lambda: optimal_actions_generated("gk01"),
     "ac01": lambda: optimal_actions_generated("ac01"),
     "ky01": lambda: optimal_actions_generated("ky01"),
+    "fr01": lambda: optimal_actions_generated("fr01"),
+    "rl01": lambda: optimal_actions_generated("rl01"),
 }
 
 
