@@ -520,6 +520,61 @@ def atlas_fit_game_cap(n_games: int) -> None:
         print(f"atlas: could not write submission diagnostics: {exc!r}")
 
 
+# ---------------------------------------------------------------------------
+# 01.09: Phase A on OUR OWN 24 games instead of the 25 public ones.
+#
+# Why this exists. The stock control (1.61) versus our fork (0.85) showed our
+# layer fails specifically on UNSEEN games: stock transfers from public to
+# hidden at x1.01, we transfer at x0.42. The mechanism is overfitting -- our
+# thresholds were tuned against failures observed in those same 25 games
+# ("found on r11l", "found on dc22"), and h_model.pkl is trained on them. So
+# any A/B run on the public 25 reproduces a known local advantage and says
+# nothing about transfer. Our own games are the only local set that is not
+# contaminated that way.
+#
+# KNOWN LIMITATION, stated so nobody forgets it: the own games' first levels
+# are SHORT (baseline median 6.5 actions, max 20) while the games we never
+# take need 21-78. So this set measures MECHANICS (generated tokens per
+# action, tempo) honestly, but it cannot reproduce the long-exploration
+# failure that costs us the most. Longer own games are a separate task.
+#
+# NEVER reaches a submission: guarded here on true_submission, and the run
+# cell replaces bm.games from the gateway for a real rerun regardless.
+ATLAS_PHASE_A_OWN_GAMES = __ATLAS_OWN_GAMES__
+if ATLAS_PHASE_A_OWN_GAMES and true_submission:
+    print("atlas: own-games knob IGNORED -- this is a competition rerun")
+elif ATLAS_PHASE_A_OWN_GAMES:
+    import os as _atlas_os_g
+    import taaf.game_api as _atlas_game_api
+    _own_hits = sorted(_atlas_glob.glob("/kaggle/input/*/our_games")) or sorted(
+        _atlas_glob.glob("/kaggle/input/**/our_games", recursive=True))
+    if not _own_hits:
+        # Deliberately FATAL, not a fallback. A silent fall back to the public
+        # 25 would produce a green run that measured the contaminated set --
+        # the exact shape of failure that cost three submission slots on
+        # 31.08, where a broken path stayed invisible because nothing crashed.
+        raise RuntimeError(
+            "atlas: ATLAS_OWN_GAMES_BUILD=1 but no our_games/ directory in "
+            "/kaggle/input -- refusing to silently fall back to the public 25"
+        )
+    _own_dir = _own_hits[0]
+    _own_ids = sorted(
+        d for d in _atlas_os_g.listdir(_own_dir)
+        if _atlas_os_g.path.isdir(_atlas_os_g.path.join(_own_dir, d))
+    )
+    if not _own_ids:
+        raise RuntimeError(f"atlas: {_own_dir} contains no game directories")
+    _own_spec = _atlas_game_api.ArcadeSpec(environments_dir=_own_dir)
+    bm.games = [
+        _atlas_game_api.GameAPI(env_name=_g, arcade_spec=_own_spec)
+        for _g in _own_ids
+    ]
+    bm.n_passes = 1
+    bm.game_weights = None
+    bm.label = f"{bm.label}-own{len(_own_ids)}"
+    print(f"atlas: PHASE A ON OWN GAMES -- {len(_own_ids)} games from {_own_dir}")
+    print(f"atlas:   {', '.join(_own_ids)}")
+
 print("atlas: effective solver config:")
 print(f"atlas:   analyzer_timeout      = {bm.solver.analyzer_timeout}")
 print(f"atlas:   analyzer_max_output   = {_atlas_tool_agent._LOCAL_ANALYZER_MAX_OUTPUT}")
@@ -605,6 +660,7 @@ CELL_KNOBS = {
     "__ATLAS_PASSES__": ("ATLAS_PASSES_BUILD", "1", int),
     "__ATLAS_STOCK_PHASE_B__": ("ATLAS_STOCK_PHASE_B_BUILD", "0", _as_bool),
     "__ATLAS_STOCK__": ("ATLAS_STOCK_BUILD", "0", _as_bool),
+    "__ATLAS_OWN_GAMES__": ("ATLAS_OWN_GAMES_BUILD", "0", _as_bool),
 }
 
 
