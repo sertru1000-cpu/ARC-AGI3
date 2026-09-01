@@ -1,0 +1,18 @@
+{
+  "game_id": "ac01-c3d4e5f6",
+  "title": "Accumulator (atlas testbed, long-level batch)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard",
+    "atlas_own",
+    "atlas_long"
+  ],
+  "class_name": "Ac01",
+  "baseline_actions": [
+    64,
+    61,
+    60,
+    57,
+    54
+  ]
+}

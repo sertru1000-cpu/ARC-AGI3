@@ -162,9 +162,11 @@ def main() -> None:
           f"raised={raised!r} games={len(bm.games)}")
 
     # === 5. the games on disk are real and complete =======================
-    check("our_games holds 24 game directories", len(ids) == 24, f"found {len(ids)}")
+    check("our_games holds at least the original 24 games", len(ids) >= 24,
+          f"found {len(ids)} -- games went missing")
     missing = []
-    first_level: list[int] = []
+    short_l1: list[int] = []
+    long_l1: list[int] = []
     for g in ids:
         metas = list((OWN / g).glob("*/metadata.json"))
         if not metas:
@@ -174,19 +176,25 @@ def main() -> None:
         base = data.get("baseline_actions") or []
         if not base:
             missing.append(g)
+        elif "atlas_long" in (data.get("tags") or []):
+            long_l1.append(base[0])
         else:
-            first_level.append(base[0])
+            short_l1.append(base[0])
     check("every own game carries metadata and baselines", not missing, f"{missing}")
 
-    # === 6. the block's stated limitation is still true ===================
-    # The comment claims own first levels are SHORT compared with the public
-    # games we never take (median human baseline 54, range 21-78). If someone
-    # adds long games, this check fires and the comment must be revised.
-    med = statistics.median(first_level)
-    check(f"own first levels are still short (median {med}, max {max(first_level)})",
-          med < 21,
-          "own games now reach the long-exploration class -- update the "
-          "KNOWN LIMITATION comment in build_atlas_notebook.py")
+    # === 6. the testbed covers BOTH length classes ========================
+    # 01.09: the original 24 were all short (median 6.5, max 20) while the
+    # public games we never clear need 21-78 -- so the testbed could not
+    # reproduce the failure it was meant to study. The long batch fixes that.
+    # Both halves have to stay: without the short games there is no contrast,
+    # without the long ones the set is blind to our main failure again.
+    check(f"the original short games are still there (median {statistics.median(short_l1)})",
+          statistics.median(short_l1) < 21,
+          "the short half is gone -- the contrast between length classes is lost")
+    check(f"a long batch covers the 50-80 class ({sorted(long_l1)})",
+          bool(long_l1) and all(50 <= b <= 80 for b in long_l1),
+          "no game reproduces the long-exploration failure, or one drifted "
+          "out of the band -- see scripts/test_atlas_long_games.py")
 
     if FAILURES:
         print(f"\n{len(FAILURES)} check(s) failed.")

@@ -1,0 +1,18 @@
+{
+  "game_id": "gk01-b2c3d4e5",
+  "title": "Gatekeeper (atlas testbed, long-level batch)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard",
+    "atlas_own",
+    "atlas_long"
+  ],
+  "class_name": "Gk01",
+  "baseline_actions": [
+    55,
+    59,
+    47,
+    51,
+    41
+  ]
+}

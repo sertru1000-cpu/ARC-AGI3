@@ -1,0 +1,18 @@
+{
+  "game_id": "lm01-a1b2c3d4",
+  "title": "Long March (atlas testbed, long-level batch)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard",
+    "atlas_own",
+    "atlas_long"
+  ],
+  "class_name": "Lm01",
+  "baseline_actions": [
+    65,
+    65,
+    76,
+    65,
+    65
+  ]
+}

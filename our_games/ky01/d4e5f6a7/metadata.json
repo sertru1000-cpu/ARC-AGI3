@@ -1,0 +1,18 @@
+{
+  "game_id": "ky01-d4e5f6a7",
+  "title": "Keyring (atlas testbed, long-level batch)",
+  "default_fps": 6,
+  "tags": [
+    "keyboard",
+    "atlas_own",
+    "atlas_long"
+  ],
+  "class_name": "Ky01",
+  "baseline_actions": [
+    50,
+    47,
+    49,
+    46,
+    48
+  ]
+}
