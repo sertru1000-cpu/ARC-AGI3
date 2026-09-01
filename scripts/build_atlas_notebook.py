@@ -300,9 +300,25 @@ ATLAS_CALIBRATION_CAP_S = __ATLAS_CALIBRATION_CAP_S__  # value substituted by th
                                    # against 0.11 / 1-of-25 for the
                                    # previous (theoryforce) build at a
                                    # matched window.
+# 31.08: repetitions for Phase A. `n_passes` deep-copies every game N times and
+# schedules all copies through the SAME concurrency semaphore (taaf/benchmark.py
+# line ~149), so 25 games x 3 passes = 75 tasks at concurrency 28 = 3 waves.
+# This is how the stock Duck reference was measured (25 games x 20 passes = 500
+# game-runs) and it is the only affordable way to get repetition: the unit of
+# observation becomes a game-pass, not a run, so one kernel run yields 75
+# observations instead of 25. Phase A ONLY -- the submission branch sets
+# n_passes = 1 itself and must never be multiplied.
+ATLAS_PHASE_A_PASSES = __ATLAS_PASSES__  # substituted by the BUILDER (env ATLAS_PASSES_BUILD, default 1)
+
 if not true_submission:
     bm.solver.max_runtime_s_per_game = ATLAS_CALIBRATION_CAP_S
     print(f"atlas: Phase A calibration cap -- max_runtime_s_per_game = {ATLAS_CALIBRATION_CAP_S:.0f}s")
+    if ATLAS_PHASE_A_PASSES > 1:
+        bm.n_passes = ATLAS_PHASE_A_PASSES
+        print(
+            f"atlas: Phase A repetitions -- n_passes = {bm.n_passes} "
+            f"({len(bm.games)} games x {bm.n_passes} = {len(bm.games) * bm.n_passes} game-runs)"
+        )
 
 
 def atlas_fit_game_cap(n_games: int) -> None:
@@ -430,6 +446,7 @@ CELL_KNOBS = {
     "__ATLAS_DRAWS__": ("ATLAS_DRAWS_BUILD", "1", _as_bool),
     "__ATLAS_DYNAMIC_BUDGET__": ("ATLAS_DYNAMIC_BUDGET_BUILD", "0", _as_bool),
     "__ATLAS_GAME_CAP_CEILING__": ("ATLAS_GAME_CAP_CEILING_BUILD", "8500", float),
+    "__ATLAS_PASSES__": ("ATLAS_PASSES_BUILD", "1", int),
 }
 
 

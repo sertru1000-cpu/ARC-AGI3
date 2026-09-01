@@ -294,12 +294,20 @@ def main() -> None:
     assert spec.loader is not None
     spec.loader.exec_module(builder)
 
-    cell = builder.ATLAS_CELL.replace("__ATLAS_CALIBRATION_CAP_S__", "1500.0")
-    cell = cell.replace("__ATLAS_CONCURRENCY__", "28")
-    cell = cell.replace("__ATLAS_DRAWS__", "False")
-    cell = cell.replace("__ATLAS_GAME_CAP_CEILING__", "14400.0")
-    cell_on = cell.replace("__ATLAS_DYNAMIC_BUDGET__", "True")
-    cell_off = cell.replace("__ATLAS_DYNAMIC_BUDGET__", "False")
+    # 31.08: substitute through the builder's own helper, never by hand. A
+    # hand-written list drifts the moment a knob is added -- which is exactly
+    # how this test broke when ATLAS_PASSES_BUILD appeared, and a cousin of the
+    # bug that cost three submissions.
+    base_env = {"ATLAS_CALIBRATION_CAP_S": "1500", "ATLAS_CONCURRENCY_BUILD": "28",
+                "ATLAS_DRAWS_BUILD": "0", "ATLAS_GAME_CAP_CEILING_BUILD": "14400"}
+    cell_on = builder.substitute_knobs(builder.ATLAS_CELL,
+                                       {**base_env, "ATLAS_DYNAMIC_BUDGET_BUILD": "1"})
+    cell_off = builder.substitute_knobs(builder.ATLAS_CELL,
+                                        {**base_env, "ATLAS_DYNAMIC_BUDGET_BUILD": "0"})
+    for name, text in (("on", cell_on), ("off", cell_off)):
+        left = [ph for ph in builder.CELL_KNOBS if ph in text]
+        if left:
+            _fail("cell fully substituted", f"{name}: {left}")
 
     class _Solver:
         def __init__(self) -> None:
