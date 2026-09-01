@@ -50,15 +50,38 @@ def _ok(name: str) -> None:
     print(f"ok   {name}")
 
 
+SOLVER = ROOT / "atlas_src/src/ARC3-Inference/inference/framework/solver.py"
+
+# Constants that size a container in EITHER source file. Same trap as
+# _ATLAS_ROLLBACK_LOOP_WINDOW: a huge value allocates instead of disabling.
+SIZING_ALL = SIZING_CONSTANTS | {"_ATLAS_ACTION_EFFECT_HISTORY_WINDOW"}
+
+
+def _cell(**env: str) -> str:
+    """The atlas cell with the given build knobs substituted, as shipped."""
+    return builder.substitute_knobs(builder.ATLAS_CELL, env)
+
+
 def _arm_block(enabled: bool) -> str:
-    """The notebook's coercion block, with the knob substituted as shipped."""
-    text = builder.substitute_knobs(
-        builder.ATLAS_CELL,
-        {"ATLAS_CHECKPOINTS_BUILD": "1" if enabled else "0"},
-    )
+    """Just the coercion block -- it now ENDS where the ablation block starts.
+
+    01.09: the ablation block was inserted between the coercion block and the
+    A* section, so the old end-anchor silently swallowed it and this guard
+    started reporting the ablation's constants as 'left firing'. Anchoring on
+    the next block's own first line keeps the two independent.
+    """
+    text = _cell(ATLAS_CHECKPOINTS_BUILD="1" if enabled else "0",
+                 ATLAS_STOCK_BUILD="0")
     start = text.index("ATLAS_CHECKPOINTS = ")
-    end = text.index("# 30.08: A* heuristic", start)
-    return text[start:end]
+    return text[start:text.index("ATLAS_STOCK = ", start)]
+
+
+def _stock_block(enabled: bool) -> str:
+    """Just the maximal-ablation block."""
+    text = _cell(ATLAS_CHECKPOINTS_BUILD="0",
+                 ATLAS_STOCK_BUILD="1" if enabled else "0")
+    start = text.index("ATLAS_STOCK = ")
+    return text[start:text.index("# 30.08: A* heuristic", start)]
 
 
 def main() -> None:
@@ -103,7 +126,7 @@ def main() -> None:
 
     # === 4. Every patched name still EXISTS in the source ==================
     # A rename would make the arm silently weaker than it claims to be.
-    declared = set(re.findall(r"^(_ATLAS_[A-Z0-9_]+) *=", src, re.M))
+    declared = set(re.findall(r"^\s*(_ATLAS_[A-Z0-9_]+) *=", src, re.M))
     missing = [n for n in names if n not in declared]
     if missing:
         _fail("patched names exist in tool_agent.py",
@@ -141,7 +164,79 @@ def main() -> None:
               f"{sorted(set(bad))} feeds arithmetic or a subscript")
     _ok(f"all {len(numeric)} numeric thresholds are used only in comparisons")
 
-    print("\nAll coercion-arm checks passed.")
+    # === 7. MAXIMAL ABLATION: names exist, nothing sizes, nothing survives ==
+    # Same two failure modes as the coercion arm, one layer up: a renamed
+    # constant would leave a whole layer silently running, and a container-
+    # sizing constant would allocate instead of disabling.
+    on = _stock_block(True)
+    if "ATLAS_STOCK = True" not in on:
+        _fail("stock knob substitutes", "expected the literal True")
+    if "ATLAS_STOCK = False" not in _stock_block(False):
+        _fail("stock knob substitutes", "expected the literal False")
+
+    ab_names = sorted(set(re.findall(r'"(_ATLAS_[A-Z0-9_]+)"', on)))
+    if len(ab_names) < 15:
+        _fail("ablation is complete", f"only {len(ab_names)} constants listed")
+
+    declared_all = declared | set(
+        re.findall(r"^\s*(_ATLAS_[A-Z0-9_]+) *=", SOLVER.read_text(encoding="utf-8"), re.M)
+    )
+    gone = [n for n in ab_names if n not in declared_all]
+    if gone:
+        _fail("ablated names exist in the sources",
+              f"{gone} -- renamed or moved; a whole layer would silently stay ON")
+
+    sized = sorted(set(ab_names) & SIZING_ALL)
+    if sized:
+        _fail("no container-sizing constant in the ablation",
+              f"{sized} slices a list -- a huge value allocates, not disables")
+    _ok(f"maximal ablation lists {len(ab_names)} constants, all declared, "
+        f"none container-sizing")
+
+    # Execute it against fakes and check every listed name was actually written.
+    mods = {}
+    for mod_name in ("_atlas_tool_agent", "_atlas_solver_mod"):
+        m = types.ModuleType(mod_name)
+        for n in ab_names:
+            setattr(m, n, 3)  # a sentinel no ablation value can equal
+        mods[mod_name] = m
+    solver_fake = type("S", (), {"analyzer_timeout": 480.0})()
+    ns = dict(mods)
+    ns["bm"] = type("B", (), {"solver": solver_fake})()
+    ns["print"] = lambda *a, **k: None
+    exec(compile(on, "<stock ablation>", "exec"), ns)
+
+    untouched = [f"{mod}.{n}" for mod, m in mods.items()
+                 for n in ab_names if getattr(m, n) == 3
+                 and n in re.findall(r'"(_ATLAS_[A-Z0-9_]+)"',
+                                     on.split(f'"{mod}"')[1].split("},")[0])]
+    if untouched:
+        _fail("ablation writes every constant it lists", f"{untouched}")
+    if solver_fake.analyzer_timeout != 900.0:
+        _fail("ablation restores the bundle's analyzer timeout",
+              f"got {solver_fake.analyzer_timeout}, expected 900.0")
+    _ok("the ablation block runs clean against fakes and puts "
+        "analyzer_timeout back to 900s")
+
+    # The OFF side must be completely inert.
+    off_mods = {}
+    for mod_name in ("_atlas_tool_agent", "_atlas_solver_mod"):
+        m = types.ModuleType(mod_name)
+        for n in ab_names:
+            setattr(m, n, 3)
+        off_mods[mod_name] = m
+    solver_fake2 = type("S", (), {"analyzer_timeout": 480.0})()
+    ns2 = dict(off_mods)
+    ns2["bm"] = type("B", (), {"solver": solver_fake2})()
+    ns2["print"] = lambda *a, **k: None
+    exec(compile(_stock_block(False), "<stock ablation off>", "exec"), ns2)
+    if any(getattr(m, n) != 3 for m in off_mods.values() for n in ab_names):
+        _fail("ablation OFF is inert", "the OFF side modified a constant")
+    if solver_fake2.analyzer_timeout != 480.0:
+        _fail("ablation OFF is inert", "the OFF side changed analyzer_timeout")
+    _ok("with ATLAS_STOCK_BUILD=0 the ablation block changes nothing")
+
+    print("\nAll coercion-arm and ablation checks passed.")
 
 
 if __name__ == "__main__":

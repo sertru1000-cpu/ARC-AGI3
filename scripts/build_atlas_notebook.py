@@ -300,6 +300,80 @@ if not ATLAS_CHECKPOINTS:
 else:
     print("atlas: coercion stack ON (baseline arm)")
 
+# ---------------------------------------------------------------------------
+# 01.09: MAXIMAL ABLATION -- every HOST-SIDE mechanism we ever added, off.
+#
+# Naming honesty: this is NOT byte-identical to stock Duck and cannot be.
+# `plan_real` and `rollback` are our additions woven into the STATIC prompt,
+# and no module attribute removes a tool from a prompt. True stock already
+# exists and is already measured: the separate `arc3-duck-baseline` kernel,
+# which scored 1.61 on 01.09. So this switch answers a different, still-open
+# question -- is the damage in our HOST BEHAVIOURS, or in the prompt/dataset
+# layer that survives them?
+#
+# Implies ATLAS_CHECKPOINTS=0 (the coercion stack is a host behaviour too).
+# Every value below was checked to be a flag or a comparison operand.
+# _ATLAS_ACTION_EFFECT_HISTORY_WINDOW is deliberately NOT touched: it slices
+# a list, so a huge value allocates instead of disabling -- the summary is
+# silenced through MIN_TRANSITIONS instead. Same trap as ROLLBACK_LOOP_WINDOW.
+ATLAS_STOCK = __ATLAS_STOCK__
+if ATLAS_STOCK:
+    _atlas_never = 10 ** 9
+    _atlas_ablation = {
+        "_atlas_tool_agent": {
+            # the search layer: the A* heuristic is trained on the same 25
+            # public games and on unseen ones loses to a naive mean (MAE 18.6
+            # vs 15.7, measured 30.08). Weight 0 makes it inert whatever the
+            # cache holds; plan_real itself stays, the model calls it freely.
+            "_ATLAS_ASTAR_WEIGHT": 0.0,
+            "_ATLAS_ASTAR_MODEL_PATH": "",
+            "_ATLAS_PLAN_REAL_PROACTIVE": False,
+            # LLM rationing: stock has no gate at all.
+            "_ATLAS_LLM_MAX_CONCURRENT": 0,
+            "_ATLAS_LLM_REQUEST_GATE": None,
+            "_ATLAS_LLM_ZOMBIE_SLOTS": 0,
+            "_ATLAS_LLM_ZOMBIE_GATE": None,
+            "_ATLAS_ZOMBIE_AFTER_ACTIONS": _atlas_never,
+            "_ATLAS_ZOMBIE_ENTROPY_AFTER": _atlas_never,
+            # host automation
+            "_ATLAS_L1_STOCK_SPRINT": False,
+            "_ATLAS_MECHANIC_HANDOFF": False,
+            "_ATLAS_LEVEL_AUTO_REPLAY": False,
+            "_ATLAS_DRAFT_SPEEDRUN": False,
+            # the biggest single prompt injection we own: 716 of 818 lines in
+            # calib_1 were the action-effect summary, more than every
+            # checkpoint combined, and the coercion arm does NOT remove it.
+            "_ATLAS_ACTION_EFFECT_MIN_TRANSITIONS": _atlas_never,
+        },
+        "_atlas_solver_mod": {
+            "_ATLAS_TIME_BANK_ENABLED": False,
+            "_ATLAS_TIME_BANK_DRAWS_ENABLED": False,
+            "_ATLAS_SPEEDRUN_ENABLED": False,
+            "_ATLAS_DYNAMIC_BUDGET_ENABLED": False,
+        },
+    }
+    _atlas_absent = []
+    for _mod_name, _patches in _atlas_ablation.items():
+        _mod = globals().get(_mod_name)
+        for _k, _v in _patches.items():
+            if _mod is not None and hasattr(_mod, _k):
+                setattr(_mod, _k, _v)
+            else:
+                _atlas_absent.append(f"{_mod_name}.{_k}")
+    # the analyzer timeout goes back to the bundle's own 900s. The OUTPUT cap
+    # deliberately stays at 8000: v1 shipped it unbounded and the comment on
+    # ATLAS_ANALYZER_MAX_OUTPUT_TOKENS calls that "the real bug" -- reverting
+    # a fix is not ablation, it is reintroducing a known defect.
+    bm.solver.analyzer_timeout = 900.0
+    _atlas_total = sum(len(v) for v in _atlas_ablation.values())
+    print(f"atlas: MAXIMAL ABLATION -- {_atlas_total - len(_atlas_absent)} of "
+          f"{_atlas_total} host mechanisms off, analyzer_timeout back to 900s")
+    if _atlas_absent:
+        print(f"atlas: WARNING -- absent from this build, NOT disabled: {_atlas_absent}")
+    print("atlas: still OURS and NOT removable this way -- plan_real and "
+          "rollback live in the static prompt; true stock is the "
+          "arc3-duck-baseline kernel (1.61 on 01.09)")
+
 # 30.08: A* heuristic for plan_real (pod A/B on the 25 publics: 5 levels /
 # RHAE 0.69 with it vs 1 / 0.11 without, matched 1h arms). The path env is
 # read at IMPORT time (the same too-late trap as everything above), so the
@@ -530,6 +604,7 @@ CELL_KNOBS = {
     "__ATLAS_GAME_CAP_CEILING__": ("ATLAS_GAME_CAP_CEILING_BUILD", "8500", float),
     "__ATLAS_PASSES__": ("ATLAS_PASSES_BUILD", "1", int),
     "__ATLAS_STOCK_PHASE_B__": ("ATLAS_STOCK_PHASE_B_BUILD", "0", _as_bool),
+    "__ATLAS_STOCK__": ("ATLAS_STOCK_BUILD", "0", _as_bool),
 }
 
 
