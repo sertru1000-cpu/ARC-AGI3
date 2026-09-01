@@ -28,3 +28,4 @@ first (`Artifact action: "read"` with its url) and build the edit on that.
 Править надо СКРИПТ, потом перегенерировать и перепубликовать в тот же url:
 
     .venv/Scripts/python.exe docs/artifacts/gen_stock_thresholds.py
+| `gemini_round15.html` | https://claude.ai/code/artifact/28079520-9715-48ed-b126-e18d13281e9d |
