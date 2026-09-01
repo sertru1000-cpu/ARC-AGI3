@@ -128,29 +128,65 @@ def main() -> None:
     # Rebuild just the patched fragment and execute it against fakes. A bare
     # placeholder identifier raises NameError here, exactly as it did on
     # Kaggle, instead of silently passing a syntax check.
-    patched = builder.substitute_knobs(builder.RUN_CELL_PATCH)
-    body = "\n".join(line[8:] if line.startswith("        ") else line
-                     for line in patched.splitlines())
-    ns = {
-        "bm": type("B", (), {"games": [], "n_passes": 0, "game_weights": None,
-                             "solver": type("S", (), {"concurrency": 28,
-                                                      "max_runtime_s_per_game": 7920.0})()})(),
-        "_competition_games": lambda: ["g"] * 55,
-        "atlas_fit_game_cap": lambda n: None,
-    }
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            exec(compile(body, "<run-cell submission branch>", "exec",
-                         flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT), ns)
-    except NameError as exc:
-        _fail("submission branch executes", f"{exc} -- this is the 31.08 failure, exactly")
-    except Exception as exc:  # pragma: no cover - fakes are minimal
-        _fail("submission branch executes", f"unexpected {exc!r}")
+    def _dry_run(stock_phase_b: bool) -> dict:
+        """Execute the submission-only branch against fakes and report what it did."""
+        env = {"ATLAS_STOCK_PHASE_B_BUILD": "1" if stock_phase_b else "0"}
+        patched = builder.substitute_knobs(builder.RUN_CELL_PATCH, env)
+        if PLACEHOLDER_RE.search(patched):
+            _fail("run-cell patch substitutes",
+                  f"placeholder survived (stock_phase_b={stock_phase_b})")
+        body = "\n".join(line[8:] if line.startswith("        ") else line
+                         for line in patched.splitlines())
+        called: list[int] = []
+        solver_mod = type("M", (), {"_ATLAS_TIME_BANK_ENABLED": True})
+        ns = {
+            "bm": type("B", (), {"games": [], "n_passes": 0, "game_weights": None,
+                                 "solver": type("S", (), {"concurrency": 28,
+                                                          "max_runtime_s_per_game": 7920.0})()})(),
+            # the real hidden set: 110 games (dataset docs, confirmed 01.09)
+            "_competition_games": lambda: ["g"] * 110,
+            "atlas_fit_game_cap": lambda n: called.append(n),
+            "_atlas_solver_mod": solver_mod,
+        }
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                exec(compile(body, "<run-cell submission branch>", "exec",
+                             flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT), ns)
+        except NameError as exc:
+            _fail("submission branch executes",
+                  f"{exc} (stock_phase_b={stock_phase_b}) -- the 31.08 failure, exactly")
+        except Exception as exc:  # pragma: no cover - fakes are minimal
+            _fail("submission branch executes",
+                  f"unexpected {exc!r} (stock_phase_b={stock_phase_b})")
+        return {"fit_called": called, "bank": solver_mod._ATLAS_TIME_BANK_ENABLED,
+                "games": len(ns["bm"].games), "passes": ns["bm"].n_passes}
+
+    # --- 5a. our own Phase B: the cap is fitted to the budget --------------
+    ours = _dry_run(False)
+    if ours["fit_called"] != [110]:
+        _fail("our Phase B fits the cap", f"atlas_fit_game_cap calls: {ours['fit_called']}")
     import os as _os
     if _os.environ.get("ATLAS_TIME_BANK_DRAWS") not in {"0", "1"}:
         _fail("submission branch sets the draws env", "expected '0' or '1'")
-    _ok(f"the submission-only branch runs clean against fakes "
-        f"(ATLAS_TIME_BANK_DRAWS={_os.environ.get('ATLAS_TIME_BANK_DRAWS')})")
+    _ok(f"our Phase B branch runs clean and fits the cap for 110 games "
+        f"(draws={_os.environ.get('ATLAS_TIME_BANK_DRAWS')})")
+
+    # --- 5b. stock-parity Phase B: no fitting, time bank off --------------
+    # 01.09: this branch is the whole point of the arm -- if it silently kept
+    # fitting the cap, the run would differ from stock in exactly the way the
+    # experiment is meant to rule out, and Phase A would never execute it.
+    stock = _dry_run(True)
+    if stock["fit_called"]:
+        _fail("stock Phase B does NOT fit the cap",
+              f"atlas_fit_game_cap was called with {stock['fit_called']}")
+    if stock["bank"] is not False:
+        _fail("stock Phase B disables the time bank",
+              "_ATLAS_TIME_BANK_ENABLED left True -- stock has no such mechanism")
+    if stock["games"] != 110 or stock["passes"] != 1:
+        _fail("stock Phase B still loads the games",
+              f"games={stock['games']} passes={stock['passes']}")
+    _ok("stock-parity Phase B: cap untouched (7920s from the bundle), "
+        "time bank off, 110 games x 1 pass")
 
     print("\nAll notebook-placeholder checks passed.")
 

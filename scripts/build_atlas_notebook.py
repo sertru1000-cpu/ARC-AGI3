@@ -463,13 +463,40 @@ RUN_CELL_ANCHOR = """        bm.games = _competition_games()
 RUN_CELL_PATCH = """        bm.games = _competition_games()
         bm.n_passes = 1
         bm.game_weights = None
-        # atlas 29.08 (option B): v23 regime -- time-bank draws ON (waves of
-        # 20; deposits from stalled games get re-drawn by progressing ones,
-        # ceiling 8500s keeps a maxed draw far under the platform kill).
         import os as _atlas_os
-        _atlas_os.environ["ATLAS_TIME_BANK_DRAWS"] = "1" if __ATLAS_DRAWS__ else "0"
-        # atlas: a rerun has no soft deadline, so size the per-game cap to fit.
-        atlas_fit_game_cap(len(bm.games))"""
+        if __ATLAS_STOCK_PHASE_B__:
+            # 01.09 (owner's call): Phase B is a BYTE-FOR-BYTE copy of stock
+            # duck v1 -- the three lines above and nothing else. Rationale:
+            # stock scored 1.61 on the hidden set against our median 0.85, and
+            # its local mean (1.60, measured 30.08 over 20 passes) transferred
+            # 1:1 while ours transferred x0.42. The hidden games are not
+            # harder; our layer fails on unseen ones. So the control must
+            # differ from stock ONLY in the agent layer under test.
+            #
+            # Concretely this drops two things:
+            #  * atlas_fit_game_cap -- no budget division. The per-game cap
+            #    stays whatever the bundle carries (7920s), exactly as stock.
+            #    110 games / conc 28 = 4 rounds x 2.2h = 8.8h; stock itself
+            #    just proved that survives (it passed 9.00h and finished).
+            #  * the time bank -- stock has no such mechanism. Draws were
+            #    already off, so this only removes the stall EARLY EXIT, which
+            #    can end a game sooner but never later: it cannot cause a
+            #    platform timeout, only forfeit time a stalled game had left.
+            if hasattr(_atlas_solver_mod, "_ATLAS_TIME_BANK_ENABLED"):
+                _atlas_solver_mod._ATLAS_TIME_BANK_ENABLED = False
+            print(
+                "atlas: Phase B = STOCK duck v1 parity -- per-game cap "
+                f"{getattr(bm.solver, 'max_runtime_s_per_game', None)}s from the bundle, "
+                "no budget fitting, time bank OFF",
+                flush=True,
+            )
+        else:
+            # atlas 29.08 (option B): v23 regime -- time-bank draws ON (waves of
+            # 20; deposits from stalled games get re-drawn by progressing ones,
+            # ceiling 8500s keeps a maxed draw far under the platform kill).
+            _atlas_os.environ["ATLAS_TIME_BANK_DRAWS"] = "1" if __ATLAS_DRAWS__ else "0"
+            # atlas: a rerun has no soft deadline, so size the per-game cap to fit.
+            atlas_fit_game_cap(len(bm.games))"""
 
 
 def _source_of(cell: dict) -> str:
@@ -502,6 +529,7 @@ CELL_KNOBS = {
     "__ATLAS_DYNAMIC_BUDGET__": ("ATLAS_DYNAMIC_BUDGET_BUILD", "0", _as_bool),
     "__ATLAS_GAME_CAP_CEILING__": ("ATLAS_GAME_CAP_CEILING_BUILD", "8500", float),
     "__ATLAS_PASSES__": ("ATLAS_PASSES_BUILD", "1", int),
+    "__ATLAS_STOCK_PHASE_B__": ("ATLAS_STOCK_PHASE_B_BUILD", "0", _as_bool),
 }
 
 
