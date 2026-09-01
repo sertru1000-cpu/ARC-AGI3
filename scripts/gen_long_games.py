@@ -593,53 +593,64 @@ RL01_LAYOUTS = [
 
 
 def specs_for(gid: str) -> list[dict]:
+    """Nine levels per game, with the load rising level by level.
+
+    01.09, measured against the public 25: they carry a median of 7 levels
+    (range 6-10) and their baseline grows x3.2 from level 1 to level 5 -- the
+    first level is a warm-up before the real game. Our first batch shipped 5
+    flat levels (growth x0.9), which left two gaps that matter:
+
+      * RHAE divides by the sum of level weights, so a 5-level game and a
+        10-level game with one level cleared score 6.7 and 1.8. A flat
+        5-level testbed cannot produce comparable RHAE at all;
+      * a flat game never tests whether an agent that cleared level 1 can
+        keep going when the next level is twice as long.
+
+    So the count rises to 9 and the load per level rises with it. Level 1
+    still has to land in 50-80: that is the class we actually fail on, and
+    losing it to make room for escalation would defeat the batch.
+    """
     walls = ring_walls()
     ring = perimeter(walls)
     n = len(ring)
     out = []
-    for lvl in range(5):
+    for lvl in range(9):
         base = dict(walls=walls, start=ring[0])
         off = lvl * 3
+        # grow: level 1 carries `lo` marks, level 9 carries `hi`
+        def grow(lo, hi):
+            return lo + round((hi - lo) * lvl / 8)
+        # Escalate where the MECHANIC allows it, and say so where it does not.
+        # Three of the five are "visit each once", and one lap of a fixed ring
+        # covers any number of marks: adding pads moved gk01 from 55 to 58
+        # across nine levels. Growing the ring instead (32x32, arc-based
+        # placement) does escalate -- and blows the BFS check past ten minutes,
+        # because the state space is cells x 2^marks. An unverified baseline is
+        # exactly what this batch exists to avoid, so the ring stays at 16 and
+        # only the two mechanics whose cost is MULTIPLICATIVE escalate:
+        # fr01 (one trip per crate) and rl01 (one return per gate).
+        off = lvl * 3
+
+        def grow(lo, hi):
+            return lo + round((hi - lo) * lvl / 8)
+
         if gid == "gk01":
-            # every pad must be reached AND pressed, so the tour is a lap
-            base.update(pads=spread(ring, 3 + (lvl % 2), off),
+            base.update(pads=spread(ring, 3 + (lvl % 3), off),
                         exit=ring[(n // 2 + off) % n])
         elif gid == "ac01":
             base.update(tokens=spread(ring, 8, off), exit=ring[(n // 2 + off) % n])
         elif gid == "ky01":
-            # doors sit ON the ring: a shut door blocks, so the order forces
-            # the walk to double back rather than take the short way round
             base.update(doors=spread(ring, 3, off % 5),
                         exit=ring[(n - 2 - (off % 5)) % n])
         elif gid == "fr01":
-            # ящики на дальней дуге: каждый требует отдельного рейса
-            base.update(crates=spread(ring, 2 + (lvl % 2), off + n // 4),
+            base.update(crates=spread(ring, grow(2, 5), off + n // 4),
                         depot=ring[2], exit=ring[(n // 2 + off) % n])
         elif gid == "rl01":
-            # Placements FOUND BY SEARCH, not chosen by hand. Two gates and one
-            # switch on a ring cannot be made long: whatever a shut gate
-            # blocks, the other way round is open, so the optimum never left
-            # the twenties. Three gates that must be passed IN ORDER and in
-            # ALTERNATING phase force two return trips to the switch, and then
-            # a search over 3000 random placements found 40 in the 55-78 band.
-            # These five are spread across that band.
-            g0, g1, g2, sw = RL01_LAYOUTS[lvl]
-            base.update(gates=[ring[g0], ring[g1], ring[g2]],
-                        switch=ring[sw], exit=ring[(g2 + 2) % n])
-        elif gid == "cy01":
-            # the sweeper owns one whole side; the exit is beyond it, and the
-            # other way round is walled off, so the only route is timed
-            side = [cell for cell in ring if cell[0] == GRID - 2]
-            cut = ring[(n - 2 - lvl) % n]
-            base.update(walls=walls + [cut], lane=side,
-                        exit=ring[(n - 6 - lvl) % n])
-        elif gid == "tw01":
-            # the twin mirrors up/down; targets are each other's mirror, which
-            # is what makes the level solvable at all
-            mirror = {(c, r): (GRID - 1 - c, r) for (c, r) in ring}
-            start_b = mirror[ring[0]]
-            exit_a = ring[(n - 3 - off) % n]
-            base.update(start_b=start_b, exit=exit_a, exit_b=mirror[exit_a])
+            g0, g1, g2, sw = RL01_LAYOUTS[lvl % len(RL01_LAYOUTS)]
+            gates = [ring[g0], ring[g1], ring[g2]]
+            for extra in range(grow(0, 2)):
+                gates.append(ring[(g0 + 7 * (extra + 1)) % n])
+            base.update(gates=gates, switch=ring[sw], exit=ring[(g2 + 2) % n])
         out.append(base)
     return out
 

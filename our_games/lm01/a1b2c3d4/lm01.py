@@ -50,6 +50,18 @@ LEVELS = [
          start=(1, 11), exit=(12, 1)),
     dict(corridors=[1, 3, 5, 7, 9, 11], turns=[12, 1, 12, 1, 12],
          start=(12, 11), exit=(1, 1)),
+    # 01.09: nine levels, to match the public set's 6-10. lm01 stays FLAT on
+    # purpose -- it is the pure-length control, and a control that also got
+    # harder would stop isolating length from difficulty. Escalation lives in
+    # fr01 and rl01, whose cost is multiplicative in the marks.
+    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[1, 12, 1, 12, 1],
+         start=(1, 1), exit=(12, 11)),
+    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[12, 1, 12, 1, 12],
+         start=(12, 1), exit=(12, 11)),
+    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[1, 12, 1, 12, 1],
+         start=(12, 11), exit=(1, 1)),
+    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[12, 1, 12, 1, 12],
+         start=(1, 11), exit=(12, 1)),
 ]
 
 

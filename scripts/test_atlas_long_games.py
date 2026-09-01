@@ -185,7 +185,12 @@ def main() -> None:
     for game in games:
         meta = json.loads(next(OWN.glob(f"{game}/*/metadata.json")).read_text(encoding="utf-8"))
         base = meta.get("baseline_actions") or []
-        check(f"{game}: has a baseline for every level", len(base) >= 5, f"{base}")
+        # 01.09: nine levels, to match the public set's median of 7 (range
+        # 6-10). Level count is not cosmetic -- RHAE divides by the sum of
+        # level weights, so a 5-level game and a 10-level game with one level
+        # cleared score 6.7 and 1.8 for the same achievement.
+        check(f"{game}: carries at least 9 levels", len(base) >= 9,
+              f"only {len(base)} levels: {base}")
         if not base:
             continue
 
@@ -216,6 +221,19 @@ def main() -> None:
         completed_bad, _ = play(game, [1] * len(actions))
         check(f"{game}: a degenerate path does not clear the level",
               completed_bad == 0, "the level completes without solving it")
+
+    # A report, not a gate. Escalation is only possible where the mechanic's
+    # cost is MULTIPLICATIVE in the number of marks. A "visit each once" game
+    # saturates at one lap of the ring -- adding pads moved gk01 from 55 to 58
+    # across nine levels -- so gk01/ac01/ky01/lm01 stay flat by construction,
+    # and failing them for that would punish them for their own design. The
+    # public set grows x3.2 from level 1 to 5; only fr01 and rl01 answer that.
+    print("\n     рост базлайна с первого уровня к последнему:")
+    for game in games:
+        meta = json.loads(next(OWN.glob(f"{game}/*/metadata.json")).read_text(encoding="utf-8"))
+        base = meta.get("baseline_actions") or []
+        if len(base) >= 2:
+            print(f"       {game}: {base[0]:3} -> {base[-1]:3}   x{base[-1] / base[0]:.1f}")
 
     if FAILURES:
         print(f"\n{len(FAILURES)} check(s) failed.")
