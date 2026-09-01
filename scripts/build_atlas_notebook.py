@@ -246,6 +246,60 @@ if hasattr(_atlas_tool_agent, "_ATLAS_LLM_ZOMBIE_GATE"):
     _atlas_tool_agent._ATLAS_LLM_ZOMBIE_GATE = _atlas_threading.Semaphore(10)
     print("atlas: patched tool_agent zombie gate = 10 (level-1 no-progress cull)")
 
+# ---------------------------------------------------------------------------
+# 01.09: THE COERCION STACK, as one build-time switch (candidate 2).
+# Measured on calib_1 (25 games, one wave, 2h cap): 851 checkpoint injections
+# against 449 real actions -- 1.9 coercions per move, explore-first alone
+# firing 394 times. Meanwhile every game ended `gave_up` having used ~25 of
+# its 120 available minutes, at 18 actions/game against stock's 130.
+# The hypothesis this arm tests: our own machinery, not the games, is what
+# throttles tempo, and tempo is what drags level-1 conversion (r = 0.78).
+#
+# Principle: remove what the HARNESS FORCES, keep what the MODEL CHOOSES.
+# plan_real, verify_theory, memo, rollback all stay available as tools --
+# the model called plan_real 108 times on its own and that is untouched.
+#
+# Implemented as module-attribute patches, not env vars: these constants are
+# read at import and the modules are already imported by the unpickle cell
+# (same trap the _LOCAL_ANALYZER_MAX_OUTPUT comment above documents). Every
+# patch is hasattr-guarded and every constant was checked to be used ONLY in
+# comparisons -- _ATLAS_ROLLBACK_LOOP_WINDOW is deliberately NOT touched
+# because it also sizes a deque, and a huge value there leaks memory.
+ATLAS_CHECKPOINTS = __ATLAS_CHECKPOINTS__
+if not ATLAS_CHECKPOINTS:
+    _atlas_off = 10 ** 9  # "never fires", safe: comparison-only thresholds
+    _atlas_coercions = {
+        "_ATLAS_EXPLORE_NUDGE_AFTER_CALLS": _atlas_off,      # fired 394x
+        "_ATLAS_THEORY_FORCE_AFTER_CALLS": _atlas_off,       # fired 170x
+        "_ATLAS_FORCE_ACT_AFTER_CALLS": _atlas_off,          # fired  96x
+        "_ATLAS_THEORY_CHECKPOINT_ENABLED": False,           # fired  50x
+        "_ATLAS_THEORY_NAG_AFTER_CALLS": _atlas_off,
+        "_ATLAS_PLAN_FORCE_AFTER_CALLS": _atlas_off,         # fired  43x
+        "_ATLAS_PLAN_NAG_EVERY": _atlas_off,                 # fired  11x
+        "_ATLAS_MEMO_NUDGE_AFTER_CALLS": _atlas_off,         # fired  29x
+        "_ATLAS_EXTRACT_NUDGE_AFTER_CALLS": _atlas_off,
+        "_ATLAS_GOAL_RECONSIDER_AFTER_CALLS": _atlas_off,    # fired   3x
+        "_ATLAS_ROLLBACK_STALL_AFTER_CALLS": _atlas_off,     # 18 of 21 triggers
+        "_ATLAS_PROBE_RATION_FREE": _atlas_off,              # fired  17x
+        "_ATLAS_PLAN_REAL_STALL_AFTER_ACTIONS": _atlas_off,
+        "_ATLAS_CONTEXT_SANITIZE_EVERY_CALLS": _atlas_off,   # 23x, 19 empty
+        "_ATLAS_PLAN_REAL_PROACTIVE": False,                 # 26x, all fruitless
+    }
+    _atlas_missing = [k for k in _atlas_coercions if not hasattr(_atlas_tool_agent, k)]
+    for _k, _v in _atlas_coercions.items():
+        if hasattr(_atlas_tool_agent, _k):
+            setattr(_atlas_tool_agent, _k, _v)
+    print(f"atlas: COERCION STACK OFF -- {len(_atlas_coercions) - len(_atlas_missing)} "
+          f"of {len(_atlas_coercions)} knobs patched")
+    if _atlas_missing:
+        # Loud, not fatal: the source dataset may predate a constant. The arm
+        # is still valid, but the log must say which part did not come off.
+        print(f"atlas: WARNING -- absent from this build, NOT disabled: {_atlas_missing}")
+    print("atlas: residual by design -- the rollback ping-pong trigger "
+          "(3 of 21 fires on calib_1) stays, its window also sizes a deque")
+else:
+    print("atlas: coercion stack ON (baseline arm)")
+
 # 30.08: A* heuristic for plan_real (pod A/B on the 25 publics: 5 levels /
 # RHAE 0.69 with it vs 1 / 0.11 without, matched 1h arms). The path env is
 # read at IMPORT time (the same too-late trap as everything above), so the
@@ -442,6 +496,7 @@ def _new_cell(source: str) -> dict:
 # minutes. Everything is substituted as a literal here instead.
 CELL_KNOBS = {
     "__ATLAS_CALIBRATION_CAP_S__": ("ATLAS_CALIBRATION_CAP_S", "14400", float),
+    "__ATLAS_CHECKPOINTS__": ("ATLAS_CHECKPOINTS_BUILD", "1", _as_bool),
     "__ATLAS_CONCURRENCY__": ("ATLAS_CONCURRENCY_BUILD", "20", int),
     "__ATLAS_DRAWS__": ("ATLAS_DRAWS_BUILD", "1", _as_bool),
     "__ATLAS_DYNAMIC_BUDGET__": ("ATLAS_DYNAMIC_BUDGET_BUILD", "0", _as_bool),
