@@ -39,3 +39,6 @@ notebooks_student/submission.ipynb
 
 # Personal Claude Code permission overrides (not for the team)
 .claude/settings.local.json
+
+# копия полигона, раскладывается scripts/push_dataset.sh перед пушем датасета
+atlas_src/our_games/
