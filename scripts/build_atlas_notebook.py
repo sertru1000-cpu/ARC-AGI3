@@ -327,6 +327,15 @@ if ATLAS_STOCK:
             # cache holds; plan_real itself stays, the model calls it freely.
             "_ATLAS_ASTAR_WEIGHT": 0.0,
             "_ATLAS_ASTAR_MODEL_PATH": "",
+            # 02.09, found in the V47 log: clearing the path is NOT enough.
+            # _priority() branches on whether a MODEL OBJECT exists, not on
+            # the weight -- with a model loaded and w=0 the priority collapses
+            # to attempt_len (plain breadth-first), while a disabled heuristic
+            # gives -change (novelty ordering). Those are different orderings,
+            # so w=0 was a THIRD regime, not the ablated one. Marking the cache
+            # "loaded, model None" makes _atlas_astar_model() return None
+            # without touching disk, and _priority takes the novelty branch.
+            "_ATLAS_ASTAR_CACHE": {"loaded": True, "model": None},
             "_ATLAS_PLAN_REAL_PROACTIVE": False,
             # LLM rationing: stock has no gate at all.
             "_ATLAS_LLM_MAX_CONCURRENT": 0,
@@ -383,6 +392,12 @@ if ATLAS_STOCK:
 import glob as _atlas_glob
 _astar_hits = sorted(_atlas_glob.glob("/kaggle/input/*/h_model.pkl")) or sorted(
     _atlas_glob.glob("/kaggle/input/**/h_model.pkl", recursive=True))
+# 02.09: this section sits BELOW the ablation block and used to hand the path
+# straight back, undoing it. V47 shipped with the heuristic still loading.
+# Order is a fragile thing to depend on, so the gate is explicit instead.
+if ATLAS_STOCK:
+    _astar_hits = []
+    print("atlas: A* heuristic NOT loaded -- maximal ablation is on")
 if _astar_hits and hasattr(_atlas_tool_agent, "_ATLAS_ASTAR_MODEL_PATH"):
     _atlas_tool_agent._ATLAS_ASTAR_MODEL_PATH = _astar_hits[0]
     _atlas_tool_agent._ATLAS_ASTAR_CACHE = {"loaded": False, "model": None}

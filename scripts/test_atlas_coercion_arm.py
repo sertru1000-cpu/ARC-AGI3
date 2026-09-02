@@ -126,7 +126,7 @@ def main() -> None:
 
     # === 4. Every patched name still EXISTS in the source ==================
     # A rename would make the arm silently weaker than it claims to be.
-    declared = set(re.findall(r"^\s*(_ATLAS_[A-Z0-9_]+) *=", src, re.M))
+    declared = set(re.findall(r"^\s*(_ATLAS_[A-Z0-9_]+)\s*(?::[^=\n]+)? *=", src, re.M))
     missing = [n for n in names if n not in declared]
     if missing:
         _fail("patched names exist in tool_agent.py",
@@ -179,7 +179,7 @@ def main() -> None:
         _fail("ablation is complete", f"only {len(ab_names)} constants listed")
 
     declared_all = declared | set(
-        re.findall(r"^\s*(_ATLAS_[A-Z0-9_]+) *=", SOLVER.read_text(encoding="utf-8"), re.M)
+        re.findall(r"^\s*(_ATLAS_[A-Z0-9_]+)\s*(?::[^=\n]+)? *=", SOLVER.read_text(encoding="utf-8"), re.M)
     )
     gone = [n for n in ab_names if n not in declared_all]
     if gone:
@@ -217,6 +217,32 @@ def main() -> None:
               f"got {solver_fake.analyzer_timeout}, expected 900.0")
     _ok("the ablation block runs clean against fakes and puts "
         "analyzer_timeout back to 900s")
+
+    # === 7b. the heuristic is REALLY gone, not merely weighted zero =======
+    # 02.09, paid for with a whole submission build. _priority() branches on
+    # whether a model OBJECT exists; with a model loaded and weight 0 the
+    # ordering becomes attempt_len (breadth-first), not the -change novelty
+    # ordering a disabled heuristic gives. V47 shipped in that third regime
+    # because the A* section sits BELOW the ablation block and handed the path
+    # back. Two things have to hold now, and both are checked.
+    if '"_ATLAS_ASTAR_CACHE"' not in on:
+        _fail("the ablation empties the A* cache",
+              "weight 0 alone leaves _priority on the heuristic branch")
+    cache = getattr(mods["_atlas_tool_agent"], "_ATLAS_ASTAR_CACHE", None)
+    if not (isinstance(cache, dict) and cache.get("loaded") and cache.get("model") is None):
+        _fail("the A* cache says loaded-with-nothing", f"got {cache!r}")
+
+    whole = _cell(ATLAS_CHECKPOINTS_BUILD="0", ATLAS_STOCK_BUILD="1")
+    # bound the window by the section's own next statement, not by a byte
+    # count -- a comment growing past 400 chars once hid the gate from this
+    # very check and made a correct build look broken.
+    astar_at = whole.index("_astar_hits = sorted(")
+    gate = whole[astar_at:whole.index("if _astar_hits and hasattr", astar_at)]
+    if "if ATLAS_STOCK:" not in gate or "_astar_hits = []" not in gate:
+        _fail("the A* loader is gated on the ablation",
+              "the section below the ablation block can hand the path back")
+    _ok("the A* heuristic is fully off under ablation: cache emptied AND the "
+        "loader gated, so block order no longer matters")
 
     # The OFF side must be completely inert.
     off_mods = {}
