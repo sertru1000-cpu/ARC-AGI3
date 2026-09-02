@@ -36,6 +36,39 @@ OUR_DATASET = "sergueimakarov/arc3-atlas-src"
 
 CAP_S = float(os.environ.get("ATLAS_STOCKLAB_CAP_S", "1500"))
 CONC = int(os.environ.get("ATLAS_STOCKLAB_CONC", "30"))
+BATCH = os.environ.get("ATLAS_STOCKLAB_BATCH", "0") not in ("0", "", "false", "no")
+
+# The one and only change we make to stock's own prompt, and the reason for it.
+#
+# Measured 02.09 on stock playing our 30-game testbed, 25-minute cap:
+#   a game fits about TWELVE model calls, ~2 minutes each. That ceiling is set
+#   by wall clock and cannot be raised from inside the agent.
+#   games that cleared a level: 12 calls, 2.17 actions per call, 28 actions
+#   games that scored zero:     11 calls, 0.68 actions per call,  8 actions
+#   fl01 (best, 40 points):      9 calls, 5.11 actions per call, 46 actions
+#   cl01 (worst):               34 calls, ZERO actions in the whole game
+# Same number of calls either way. The whole difference is how many actions
+# the model puts in one answer.
+#
+# Stock already mentions batching in one clause. This makes the turn budget
+# explicit, because the model has no way to know it otherwise.
+#
+# Why the downside is bounded: a wrong batch costs real actions, and actions
+# only enter the score through min(baseline/actions, 1.0) on levels you DO
+# complete. We complete so few that the efficiency term is nearly free, while
+# a level not reached is a flat zero.
+BATCH_HINT = (
+    "\n- YOUR TURN BUDGET IS SMALL AND FIXED. A game affords roughly a dozen "
+    "`python` calls in total -- not hundreds. Every call that returns without "
+    "an `action(...)` spends one of them for nothing.\n"
+    "- Therefore prefer an ORDERED BATCH over a single step whenever your world "
+    "model supports more than one move: `action([...])` takes a list and each "
+    "entry costs you nothing extra in turns. If you are only sure about the "
+    "first few moves of a plan, batch those and inspect afterwards -- that is "
+    "still far better than spending a whole turn on one step.\n"
+    "- Reserve single-step turns for the case where you genuinely cannot "
+    "predict the next state until you have seen this one.\n"
+)
 
 # The one cell we add. It runs AFTER duck's own public-evaluation block, so it
 # overrides whatever that set -- and only outside a competition rerun.
@@ -83,6 +116,13 @@ if not true_submission:
     if hasattr(bm.solver, "max_runtime_s_per_game"):
         bm.solver.max_runtime_s_per_game = {cap}
 
+    if {batch}:
+        import inference.agent.tool_agent as _lab_agent
+        _before = len(_lab_agent.PYTHON_ADDENDUM)
+        _lab_agent.PYTHON_ADDENDUM = _lab_agent.PYTHON_ADDENDUM + {hint!r}
+        print(f"stock-lab: BATCH HINT added -- addendum {{_before}} -> "
+              f"{{len(_lab_agent.PYTHON_ADDENDUM)}} chars")
+
     print(f"stock-lab: UNMODIFIED Duck on {{len(_ids)}} own games from {{_own_dir}}")
     print(f"stock-lab:   concurrency={{bm.solver.concurrency}} "
           f"cap={{bm.solver.max_runtime_s_per_game}}s passes={{bm.n_passes}}")
@@ -98,7 +138,7 @@ def build() -> None:
         i for i, c in enumerate(nb["cells"])
         if "Q38_P1_PUBLIC_GAME_IDS" in "".join(c["source"])
     )
-    source = SWAP_CELL.format(conc=CONC, cap=CAP_S)
+    source = SWAP_CELL.format(conc=CONC, cap=CAP_S, batch=BATCH, hint=BATCH_HINT)
     nb["cells"].insert(idx + 1, {
         "cell_type": "code",
         "execution_count": None,
@@ -129,6 +169,7 @@ def build() -> None:
     print(f"  ячеек {len(nb['cells'])} (у стока {len(orig)}, добавлена одна)")
     print(f"  стоковые ячейки не тронуты: проверено побайтово")
     print(f"  игр 30, конкурентность {CONC}, потолок {CAP_S:.0f}с")
+    print(f"  подсказка про батчинг: {'ВКЛ' if BATCH else 'выкл'}")
     print(f"  датасеты: {', '.join(meta['dataset_sources'])}")
 
 
