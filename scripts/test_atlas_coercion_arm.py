@@ -262,7 +262,43 @@ def main() -> None:
         _fail("ablation OFF is inert", "the OFF side changed analyzer_timeout")
     _ok("with ATLAS_STOCK_BUILD=0 the ablation block changes nothing")
 
-    print("\nAll coercion-arm and ablation checks passed.")
+    # === 8. PROMPT ARM: patched on the right module, and really stock =====
+    # 02.09. `from .prompts import PYTHON_ADDENDUM` binds the name at import,
+    # so patching the prompts module would be silently ineffective -- the same
+    # shape as the A* loader that kept handing its path back in V47. The arm
+    # must write to tool_agent, and the file it loads must not smuggle our own
+    # tools back in.
+    whole_p = _cell(ATLAS_CHECKPOINTS_BUILD="0", ATLAS_STOCK_BUILD="1",
+                    ATLAS_STOCK_PROMPT_BUILD="1")
+    arm_start = whole_p.index("ATLAS_STOCK_PROMPT = ")
+    arm = whole_p[arm_start:whole_p.index('print("atlas: effective solver config:")', arm_start)]
+    if "ATLAS_STOCK_PROMPT = True" not in arm:
+        _fail("prompt knob substitutes", "expected the literal True")
+    if "_atlas_tool_agent.PYTHON_ADDENDUM =" not in arm:
+        _fail("prompt arm patches tool_agent",
+              "patching the prompts module would be silently ineffective")
+    if "raise RuntimeError" not in arm:
+        _fail("a missing addendum file is fatal",
+              "a silent fallback would keep the nine tools and look green")
+    _ok("the prompt arm patches tool_agent and refuses to run without the file")
+
+    STOCK_FILE = ROOT / "atlas_src/stock_python_addendum.txt"
+    if not STOCK_FILE.exists():
+        _fail("the stock addendum ships in the dataset", f"{STOCK_FILE} missing")
+    stock_text = STOCK_FILE.read_text(encoding="utf-8")
+    ours_in = [t for t in ("plan_real", "try_actions", "save_checkpoint",
+                           "rollback", "execute_plan", "memo") if t in stock_text]
+    if ours_in:
+        _fail("the stock addendum carries none of our tools", f"{ours_in}")
+    absent = [t for t in ("action(", "verify_theory(", "plan_with_theory(")
+              if t not in stock_text]
+    if absent:
+        _fail("the stock addendum keeps the three real ones", f"{absent}")
+    ours_len = len(AGENT.read_text(encoding="utf-8"))
+    _ok(f"the stock addendum is {len(stock_text)} chars with three tools, "
+        f"none of our six")
+
+    print("\nAll coercion-arm, ablation and prompt checks passed.")
 
 
 if __name__ == "__main__":

@@ -590,6 +590,51 @@ elif ATLAS_PHASE_A_OWN_GAMES:
     print(f"atlas: PHASE A ON OWN GAMES -- {len(_own_ids)} games from {_own_dir}")
     print(f"atlas:   {', '.join(_own_ids)}")
 
+# ---------------------------------------------------------------------------
+# 02.09: PROMPT ARM -- back to the THREE tools the fork started with.
+#
+# Measured this evening: stock's PYTHON_ADDENDUM described `action`,
+# `verify_theory` and `plan_with_theory`. Ours describes nine -- we added
+# execute_plan, memo, save_checkpoint, rollback, try_actions and plan_real,
+# four of them on 27.08, the round after which the submission series went
+# 0.92 -> 0.65 -> 0.57. The block grew from 5.3 KB to 13.8 KB.
+#
+# They overlap by purpose: a plan can be searched three ways, a hypothesis
+# checked two, a plan executed two. So every turn the model first decides
+# HOW to work and only then works. The bill is visible in the vLLM log:
+# 2693 generated tokens per call against stock's 815, and 0.4 actions per
+# call against stock's ~3.4.
+#
+# The implementations stay in the code and still run if the model calls
+# them; they simply stop occupying its attention and the prompt.
+#
+# PATCHED ON tool_agent, NOT on prompts: `from .prompts import
+# PYTHON_ADDENDUM` binds the name at import, so rebinding the prompts
+# module attribute would be silently ineffective -- the exact shape of bug
+# that let the A* heuristic keep loading in V47.
+ATLAS_STOCK_PROMPT = __ATLAS_STOCK_PROMPT__
+if ATLAS_STOCK_PROMPT:
+    _sp_hits = sorted(_atlas_glob.glob("/kaggle/input/*/stock_python_addendum.txt")) or sorted(
+        _atlas_glob.glob("/kaggle/input/**/stock_python_addendum.txt", recursive=True))
+    if not _sp_hits:
+        # fatal, never a silent fallback: a run that quietly kept the nine
+        # tools would look green and measure the wrong thing.
+        raise RuntimeError(
+            "atlas: ATLAS_STOCK_PROMPT_BUILD=1 but stock_python_addendum.txt "
+            "is not in /kaggle/input -- refusing to run with our own prompt"
+        )
+    with open(_sp_hits[0], encoding="utf-8") as _fh:
+        _stock_addendum = _fh.read()
+    _ours = [t for t in ("plan_real", "try_actions", "save_checkpoint",
+                         "rollback", "execute_plan", "memo")
+             if t in _stock_addendum]
+    if _ours:
+        raise RuntimeError(f"atlas: stock addendum still mentions {_ours}")
+    _before = len(_atlas_tool_agent.PYTHON_ADDENDUM)
+    _atlas_tool_agent.PYTHON_ADDENDUM = _stock_addendum
+    print(f"atlas: PROMPT BACK TO STOCK -- python addendum {_before} -> "
+          f"{len(_stock_addendum)} chars, tools 9 -> 3")
+
 print("atlas: effective solver config:")
 print(f"atlas:   analyzer_timeout      = {bm.solver.analyzer_timeout}")
 print(f"atlas:   analyzer_max_output   = {_atlas_tool_agent._LOCAL_ANALYZER_MAX_OUTPUT}")
@@ -675,6 +720,7 @@ CELL_KNOBS = {
     "__ATLAS_PASSES__": ("ATLAS_PASSES_BUILD", "1", int),
     "__ATLAS_STOCK_PHASE_B__": ("ATLAS_STOCK_PHASE_B_BUILD", "0", _as_bool),
     "__ATLAS_STOCK__": ("ATLAS_STOCK_BUILD", "0", _as_bool),
+    "__ATLAS_STOCK_PROMPT__": ("ATLAS_STOCK_PROMPT_BUILD", "0", _as_bool),
     "__ATLAS_OWN_GAMES__": ("ATLAS_OWN_GAMES_BUILD", "0", _as_bool),
 }
 
