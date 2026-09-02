@@ -29,3 +29,4 @@ first (`Artifact action: "read"` with its url) and build the edit on that.
 
     .venv/Scripts/python.exe docs/artifacts/gen_stock_thresholds.py
 | `gemini_round15.html` | https://claude.ai/code/artifact/28079520-9715-48ed-b126-e18d13281e9d |
+| `plan_two_weeks.html` | https://claude.ai/code/artifact/55e75635-bb55-416b-82ad-1f2d19b4835f |

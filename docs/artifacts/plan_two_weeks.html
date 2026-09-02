@@ -1,0 +1,234 @@
+<title>Две недели до 15 сентября</title>
+<meta name="description" content="План на 02–15.09: перестать быть хуже субстрата, затем взяться за второй уровень — единственный рычаг, который ведёт вверх.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#F2EFE8; --surface:#FBF9F4; --surface-2:#F5F1E9;
+  --ink:#232019; --ink-2:#544D42; --ink-3:#7C7466;
+  --rule:#DFD8C9; --rule-strong:#C9C0AD;
+  --accent:#00706A; --accent-soft:#DBEAE7;
+  --amber:#B4763A; --amber-soft:#F0E4D3;
+  --bad:#A03B2E; --bad-soft:#F2DFDB;
+  --shadow:0 1px 2px rgba(35,32,25,.06), 0 10px 26px -20px rgba(35,32,25,.5);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+    --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+    --rule:#332F27; --rule-strong:#474137;
+    --accent:#3DBFB2; --accent-soft:#123430;
+    --amber:#C08343; --amber-soft:#3A2C1A;
+    --bad:#D2705E; --bad-soft:#3A1F1A;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+  --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+  --rule:#332F27; --rule-strong:#474137;
+  --accent:#3DBFB2; --accent-soft:#123430;
+  --amber:#C08343; --amber-soft:#3A2C1A;
+  --bad:#D2705E; --bad-soft:#3A1F1A;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+}
+*{box-sizing:border-box}
+body{background:var(--ground); color:var(--ink); margin:0;
+  font-family:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:15px; line-height:1.62; -webkit-font-smoothing:antialiased}
+.wrap{max-width:1010px; margin:0 auto; padding:44px 24px 76px; display:flex; flex-direction:column; gap:36px}
+h1,h2,h3{margin:0; text-wrap:balance; font-family:"Big Shoulders Display",Impact,"Arial Narrow",sans-serif}
+h1{font-size:clamp(38px,6.5vw,64px); font-weight:800; line-height:.94; text-transform:uppercase}
+h2{font-size:26px; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+h3{font-size:17px; font-weight:700; letter-spacing:.03em}
+p{margin:0}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; letter-spacing:.15em;
+  text-transform:uppercase; color:var(--ink-3)}
+.masthead{border-bottom:2px solid var(--ink); padding-bottom:22px; display:flex; flex-direction:column; gap:9px}
+.standfirst{font-size:17px; color:var(--ink-2); max-width:64ch; margin-top:8px}
+.key{background:var(--surface); border:1px solid var(--rule); border-left:5px solid var(--bad);
+  border-radius:3px; padding:20px 24px; display:flex; flex-direction:column; gap:11px; box-shadow:var(--shadow)}
+.key.good{border-left-color:var(--accent)}
+.key p{font-size:15px; color:var(--ink-2); max-width:74ch}
+.key b{color:var(--ink)}
+.tablewrap{overflow-x:auto; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+caption{text-align:left; font-size:12.5px; color:var(--ink-3); padding:13px 16px 3px}
+th,td{padding:9px 14px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+thead th{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--ink-3); border-bottom:1.5px solid var(--rule-strong); white-space:nowrap}
+td.num,th.num{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+tbody tr:hover{background:var(--surface-2)}
+tbody tr:last-child td,tbody tr:last-child th{border-bottom:none}
+.day{display:grid; grid-template-columns:auto 1fr; gap:16px; align-items:start;
+  border-bottom:1px solid var(--rule); padding:14px 0}
+.day:last-child{border-bottom:none}
+.day .when{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; color:var(--ink-3);
+  white-space:nowrap; padding-top:2px; min-width:88px}
+.day .what{display:flex; flex-direction:column; gap:5px}
+.day .what b{color:var(--ink)}
+.day .what span{font-size:13.5px; color:var(--ink-3)}
+.week{background:var(--surface); border:1px solid var(--rule); border-radius:3px; padding:6px 22px 12px}
+.chip{font-size:10px; letter-spacing:.09em; text-transform:uppercase; font-weight:600;
+  padding:3px 8px; border-radius:2px; white-space:nowrap}
+.chip.sub{background:var(--accent-soft); color:var(--accent)}
+.chip.loc{background:var(--amber-soft); color:var(--amber)}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px;
+  background:var(--surface-2); padding:1px 5px; border-radius:2px; color:var(--ink-2)}
+ul{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px; color:var(--ink-2); font-size:14.5px}
+ul b{color:var(--ink)}
+footer{border-top:1px solid var(--rule); padding-top:18px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; color:var(--ink-3)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">ARC-AGI-3 · стратегия · 02.09.2026</p>
+  <h1>Две недели до 15 сентября</h1>
+  <p class="standfirst">Цель пересмотрена. Топ-10 больше не рабочая задача — не из осторожности,
+  а по арифметике. Считаем прогресс от стока, а не от чужой десятки.</p>
+</header>
+
+<section class="key">
+  <h2 style="font-size:21px">Почему цель пересмотрена</h2>
+  <p>Потолок балла для агента, берущего <b>только первый уровень во всех играх при идеальной
+  эффективности</b>, равен <b>3.52</b>. Порог топ-10 сегодня <b>3.85</b> — он этот потолок уже
+  превысил.</p>
+  <p>То есть безошибочный агент, берущий первый уровень в каждой из 55 скрытых игр, окажется
+  одиннадцатым. Топ-10 без второго уровня <b>арифметически недостижим</b>, а не просто труден.</p>
+  <div class="tablewrap">
+    <table>
+      <caption>Порог десятого места по датам</caption>
+      <thead><tr><th>дата</th><th class="num">порог топ-10</th><th>что это значило</th></tr></thead>
+      <tbody>
+        <tr><td>22.08</td><td class="num">2.57</td><td>сток сам по себе давал первую десятку</td></tr>
+        <tr><td>01.09</td><td class="num">3.39</td><td>96% от потолка первого уровня</td></tr>
+        <tr><td><b>02.09</b></td><td class="num"><b>3.85</b></td><td><b>выше потолка первого уровня</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Цель ставилась 22 августа против планки 2.57. С тех пор поле ушло вперёд <b>в полтора раза</b>.
+  Дело не в том, что мы плохо старались — планка сдвинулась под ногами.</p>
+</section>
+
+<section class="key good">
+  <h2 style="font-size:21px">Что становится рабочей целью</h2>
+  <p><b>Первое: перестать быть хуже субстрата.</b> Чистый Duck на скрытом наборе даёт 1.61, мы —
+  0.85. Это вопрос ближайшей недели и он решается измерениями, а не изобретениями.</p>
+  <p><b>Второе: научиться брать второй уровень.</b> Единственный рычаг, который вообще ведёт вверх,
+  и мы его ни разу не трогали. Девять дней ушли на механизмы, душившие первый.</p>
+  <p>Прогресс меряем от 1.61. Если глубина пойдёт — цель можно вернуть.</p>
+</section>
+
+<section>
+  <h2 style="margin-bottom:14px">Число, вокруг которого строится вторая неделя</h2>
+  <div class="tablewrap">
+    <table>
+      <caption>75 игро-прогонов калибровки, 01.09</caption>
+      <thead><tr><th>что</th><th class="num">сколько</th></tr></thead>
+      <tbody>
+        <tr><td>взят первый уровень</td><td class="num">31</td></tr>
+        <tr><td>взят второй уровень</td><td class="num">6</td></tr>
+        <tr><td><b>доходит от первого ко второму</b></td><td class="num"><b>19%</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px; color:var(--ink-2); max-width:74ch">А вот как выглядят попытки на
+  втором уровне — <b>ходов сделано против базлайна человека</b>:</p>
+  <div class="tablewrap" style="margin-top:10px">
+    <table>
+      <thead><tr><th>игра</th><th class="num">наших ходов на 2-м</th><th class="num">базлайн 2-го</th></tr></thead>
+      <tbody>
+        <tr><td>ls20</td><td class="num"><b>0</b></td><td class="num">123</td></tr>
+        <tr><td>su15</td><td class="num"><b>0</b>, 12, 11</td><td class="num">42</td></tr>
+        <tr><td>re86</td><td class="num"><b>0</b>, 12</td><td class="num">42</td></tr>
+        <tr><td>sb26</td><td class="num">18, 1, <b>0</b></td><td class="num">28</td></tr>
+        <tr><td>ar25</td><td class="num">4, 3, 11</td><td class="num">50</td></tr>
+        <tr><td>tu93</td><td class="num">1, 10, 18</td><td class="num">16</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px; color:var(--ink-2); max-width:74ch"><b>Нули.</b> Игра берёт первый
+  уровень и делает на втором ноль ходов. Это не «не сумели решить» — это смерть на самом переходе.
+  И первый подозреваемый уже починен: чистильщик контекста срабатывает <b>именно на переходе
+  уровня</b> и возвращал пустое 19 раз из 23. Починка уехала 02.09 в датасете 35 и ещё ни разу
+  не мерилась.</p>
+</section>
+
+<section>
+  <h2 style="margin-bottom:14px">Неделя первая: 02–08.09 — перестать быть хуже стока</h2>
+  <div class="week">
+    <div class="day"><div class="when">ср 03.09<br><span class="chip sub">сабмит</span></div>
+      <div class="what"><b>V48 — максимальная абляция</b>
+      <span>18 хостовых механизмов сняты, эвристика A* не грузится, Фаза B стоковая.
+      Пороги записаны: ≥1.36 значимо, ≤1.24 отвергает «дотянули до стока»</span></div></div>
+    <div class="day"><div class="when">чт 04.09<br><span class="chip sub">сабмит</span></div>
+      <div class="what"><b>Подтверждение или следующий рукав</b>
+      <span>Если V48 дала выше 1.36 — повторяем ТУ ЖЕ сборку. Она станет новой базой, а ошибочная
+      база отравит всё, что построим сверху. Если ниже — идём в слой промпта</span></div></div>
+    <div class="day"><div class="when">пт 05.09<br><span class="chip sub">сабмит</span></div>
+      <div class="what"><b>Лучшая известная сборка</b>
+      <span>Слот не сгорает и лидерборд берёт максимум по сабмитам, поэтому повтор лучшего —
+      бесплатный билет, а не трата</span></div></div>
+    <div class="day"><div class="when">сб 06.09<br><span class="chip loc">квота</span></div>
+      <div class="what"><b>Лестница на своих играх — атрибуция</b>
+      <span>Квота сбрасывается до 45 часов. Четыре рукава по два часа: какие из 18 механизмов
+      вредили. Локально точность ±2 п.п. против 0.45 балла на лидерборде — атрибуция возможна
+      только здесь. Конверсию считаем РАЗДЕЛЬНО по коротким и длинным играм, иначе длинный класс
+      даст пятую часть сигнала и утонет</span></div></div>
+    <div class="day"><div class="when">вс 07–08.09</div>
+      <div class="what"><b>Сборка по итогам лестницы</b>
+      <span>Возвращаем то, что окупилось; отправляем</span></div></div>
+  </div>
+</section>
+
+<section>
+  <h2 style="margin-bottom:14px">Неделя вторая: 09–15.09 — второй уровень</h2>
+  <div class="week">
+    <div class="day"><div class="when">пн 09.09<br><span class="chip loc">разбор</span></div>
+      <div class="what"><b>Что происходит на переходе уровня</b>
+      <span>По транскриптам: игра взяла первый, дальше ноль ходов. Кончилось время? Сломался
+      контекст? Не сработал сброс состояния? Данные есть, замера нет</span></div></div>
+    <div class="day"><div class="when">вт 10.09<br><span class="chip loc">замер</span></div>
+      <div class="what"><b>Даёт ли что-нибудь починенный чистильщик</b>
+      <span>Он уже в датасете, но ни разу не мерился. Полигон для этого готов: у fr01 и rl01
+      уровни нарастают ×1.6 и ×2.8, то есть переход реально нагружает</span></div></div>
+    <div class="day"><div class="when">ср–пт</div>
+      <div class="what"><b>Рычаг на глубину</b>
+      <span>Каким он будет — зависит от разбора. Проверяется локально, потом сабмитом</span></div></div>
+    <div class="day"><div class="when">каждый день<br><span class="chip sub">сабмит</span></div>
+      <div class="what"><b>Слот не пропускаем никогда</b>
+      <span>Даже если нового нет — повтор лучшей сборки. Сид сэмплирования не задан, значит это
+      честный новый бросок</span></div></div>
+  </div>
+</section>
+
+<section class="key">
+  <h2 style="font-size:21px">Правила, которые не меняются</h2>
+  <ul>
+    <li><b>Атрибуция локально, проверка сабмитом.</b> На лидерборде видно только эффекты больше
+    0.45 балла; на полигоне — от 2 процентных пунктов.</li>
+    <li><b>Никогда не мерить правку на 25 публичных играх.</b> Мы на них переобучились: сток
+    переносится с публичных на скрытые как ×1.01, мы — как ×0.42.</li>
+    <li><b>Пороги пишутся до броска и не двигаются после.</b> Иначе 1.30 превращается в «почти
+    значимо, давайте посмотрим под другим углом».</li>
+    <li><b>Пустой слот — потерянный бесплатный билет.</b> Лидерборд берёт максимум по сабмитам.</li>
+  </ul>
+</section>
+
+<section class="key">
+  <h2 style="font-size:21px">Что заставит пересмотреть этот план</h2>
+  <p><b>Если второй уровень не поддастся за неделю</b> — значит рычага у нас нет, и остаток
+  сентября разумнее потратить на устойчивость лучшего результата, а не на новые гипотезы.</p>
+  <p><b>Если V48 придёт около 1.0</b> — вред не в хостовых механизмах и не в принуждениях, а в
+  слое промпта и датасета. Тумблерами он не снимается; разговор пойдёт про сам форк, и первая
+  неделя удлинится.</p>
+</section>
+
+<footer>
+  Источники: 75 игро-прогонов калибровки 01.09 · сабмиты 55929018 (сток 1.61) и 55950187 (V46 1.04) ·
+  лидерборд 02.09 · docs/plan_top10_by_3009.md
+</footer>
+
+</div>
