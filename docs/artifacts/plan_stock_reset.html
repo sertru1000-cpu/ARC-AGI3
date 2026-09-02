@@ -1,0 +1,160 @@
+<title>Переход на сток</title>
+<meta name="description" content="План перехода: база становится чистым Duck, наш форк откладывается, каждая новая правка должна окупиться на полигоне прежде чем получить слот.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#F2EFE8; --surface:#FBF9F4; --surface-2:#F5F1E9;
+  --ink:#232019; --ink-2:#544D42; --ink-3:#7C7466;
+  --rule:#DFD8C9; --rule-strong:#C9C0AD;
+  --accent:#00706A; --accent-soft:#DBEAE7;
+  --amber:#B4763A; --amber-soft:#F0E4D3;
+  --bad:#A03B2E; --bad-soft:#F2DFDB;
+  --shadow:0 1px 2px rgba(35,32,25,.06), 0 10px 26px -20px rgba(35,32,25,.5);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+    --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+    --rule:#332F27; --rule-strong:#474137;
+    --accent:#3DBFB2; --accent-soft:#123430;
+    --amber:#C08343; --amber-soft:#3A2C1A;
+    --bad:#D2705E; --bad-soft:#3A1F1A;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141311; --surface:#1C1B18; --surface-2:#232119;
+  --ink:#EFEADF; --ink-2:#B7AF9F; --ink-3:#8B8375;
+  --rule:#332F27; --rule-strong:#474137;
+  --accent:#3DBFB2; --accent-soft:#123430;
+  --amber:#C08343; --amber-soft:#3A2C1A;
+  --bad:#D2705E; --bad-soft:#3A1F1A;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px -20px rgba(0,0,0,.95);
+}
+*{box-sizing:border-box}
+body{background:var(--ground); color:var(--ink); margin:0;
+  font-family:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:15px; line-height:1.62; -webkit-font-smoothing:antialiased}
+.wrap{max-width:960px; margin:0 auto; padding:44px 24px 72px; display:flex; flex-direction:column; gap:32px}
+h1,h2{margin:0; text-wrap:balance; font-family:"Big Shoulders Display",Impact,"Arial Narrow",sans-serif}
+h1{font-size:clamp(36px,6vw,58px); font-weight:800; line-height:.95; text-transform:uppercase}
+h2{font-size:24px; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+p{margin:0}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; letter-spacing:.15em;
+  text-transform:uppercase; color:var(--ink-3)}
+.masthead{border-bottom:2px solid var(--ink); padding-bottom:20px; display:flex; flex-direction:column; gap:8px}
+.standfirst{font-size:17px; color:var(--ink-2); max-width:64ch; margin-top:6px}
+.key{background:var(--surface); border:1px solid var(--rule); border-left:5px solid var(--accent);
+  border-radius:3px; padding:18px 22px; display:flex; flex-direction:column; gap:10px; box-shadow:var(--shadow)}
+.key.hard{border-left-color:var(--bad)}
+.key p{font-size:15px; color:var(--ink-2); max-width:74ch}
+.key b{color:var(--ink)}
+.tablewrap{overflow-x:auto; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+caption{text-align:left; font-size:12.5px; color:var(--ink-3); padding:12px 15px 3px}
+th,td{padding:9px 14px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+thead th{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--ink-3); border-bottom:1.5px solid var(--rule-strong); white-space:nowrap}
+td.num{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+ol,ul{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:10px;
+  color:var(--ink-2); font-size:14.5px}
+ol b,ul b{color:var(--ink)}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px;
+  background:var(--surface-2); padding:1px 5px; border-radius:2px; color:var(--ink-2)}
+footer{border-top:1px solid var(--rule); padding-top:16px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; color:var(--ink-3)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">ARC-AGI-3 · решение владельца · 02.09.2026, вечер</p>
+  <h1>Переход на сток</h1>
+  <p class="standfirst">База становится чистым Duck. Наш форк откладывается целиком, а не
+  выключается по частям — сегодня выяснилось, что это разные вещи.</p>
+</header>
+
+<section class="key hard">
+  <h2 style="font-size:20px">Почему выключателями не обойтись</h2>
+  <p>Замер вечера 02.09, пара прогонов на 30 своих играх, различие только в промпте:</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>сборка</th><th class="num">токенов на вызов</th><th class="num">действий на вызов</th></tr></thead>
+      <tbody>
+        <tr><td>наша полная</td><td class="num">2 693</td><td class="num">0.36</td></tr>
+        <tr><td>всё выключено, 9 инструментов</td><td class="num">1 864</td><td class="num">0.95</td></tr>
+        <tr><td>всё выключено, 3 инструмента</td><td class="num">1 647</td><td class="num">1.18</td></tr>
+        <tr><td><b>сток</b></td><td class="num"><b>815</b></td><td class="num"><b>~3.4</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Мы сняли принуждения, 18 хостовых механизмов, эвристику и шесть инструментов из промпта —
+  и всё равно остались <b>вдвое дороже стока на каждый ход</b>. Разница сидит в том, что мы
+  правили помимо добавок. Значит «сток» — это <b>другой кернел</b>, а не наш с погашенными
+  тумблерами.</p>
+</section>
+
+<section>
+  <h2 style="margin-bottom:14px">Что становится чем</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>что</th><th>роль</th></tr></thead>
+      <tbody>
+        <tr><td><code>arc3-duck-baseline</code> + апстримовый датасет</td>
+            <td><b>база и лучший актив</b> — 1.61, уже отправлен, приватный балл посчитан</td></tr>
+        <tr><td>новый кернел от стока</td>
+            <td><b>линия разработки</b>: чистый форк апстрима, каждая правка отдельно и измеримо</td></tr>
+        <tr><td><code>arc3-atlas</code>, 1 023 строки правок</td>
+            <td><b>откладывается</b>. Не удаляется — остаётся источником идей и предостережений</td></tr>
+        <tr><td>полигон, 30 игр</td>
+            <td><b>сохраняется</b>: 24 коротких + 6 длинных по 9 уровней, проверены игрой</td></tr>
+        <tr><td><code>conversion.py</code>, разбор логов vLLM</td>
+            <td><b>сохраняется</b> — это единственное, что за две недели окупилось</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="key hard">
+  <h2 style="font-size:20px">Неудобная правда о «строить вверх»</h2>
+  <p><b>У нас нет ни одной доказанно полезной добавки.</b> Всё, что сделано за две недели,
+  измерено как нейтральное или вредное: принуждения дали +0.14 балла (не значимо), эвристика A*
+  не переносится, инструменты стоят дороже, чем дают.</p>
+  <p>Значит первый шаг от стока — <b>не добавлять, а разбирать</b>. Сток даёт 1.61 при пороге
+  топ-10 в 3.85; его собственный провал надо изучить так же, как мы изучали свой. Впервые есть
+  чем: полигон и метрики цены хода.</p>
+</section>
+
+<section>
+  <h2 style="margin-bottom:14px">Порядок работ</h2>
+  <ol>
+    <li><b>Промерить сток на полигоне.</b> Один прогон Фазы A, 30 своих игр, те же условия, что
+    у V49/V50. Даст опорную линию: конверсия по классам, токенов на вызов, действий на вызов —
+    в НАШИХ условиях, а не по чужому августовскому прогону. ~35 минут квоты.</li>
+    <li><b>Разобрать, где сток проваливается.</b> По его логам и транскриптам: те же вопросы,
+    что мы задавали себе — длинные первые уровни, переход на второй, гибель. У нас есть его
+    прогон от 22.08 (3.02 на 25 публичных, 15 игр со счётом, 19 уровней, ~49 действий на игру).</li>
+    <li><b>Собрать линию разработки.</b> Новый кернел: апстримовый датасет плюс маленький свой
+    с полигоном и патч-файлами. Правки — явные и минимальные, каждая со своим тумблером и
+    стражем, как мы научились.</li>
+    <li><b>Первая гипотеза — только после пункта 2.</b> Пока её нет, добавлять нечего.</li>
+  </ol>
+</section>
+
+<section class="key">
+  <h2 style="font-size:20px">Правило, ради которого всё это</h2>
+  <p><b>Ни одна строка не попадает в сборку, пока не окупилась на полигоне.</b> Метрики есть и
+  они дешёвые: токенов на вызов, действий на вызов, конверсия раздельно по коротким и длинным.
+  Тридцать пять минут на замер против суток на слот.</p>
+  <p>Слот тратится только на то, от чего ждём <b>больше 1.61</b>. Всё остальное меряется
+  локально.</p>
+</section>
+
+<footer>
+  Источники: V49/V50 (пара прогонов 02.09 на 30 своих играх) · сабмиты 55929018 (сток 1.61),
+  55950187 (V46 1.04) · docs/duck_baseline_22.08.md · логи vLLM
+</footer>
+
+</div>

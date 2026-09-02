@@ -31,3 +31,4 @@ first (`Artifact action: "read"` with its url) and build the edit on that.
 | `gemini_round15.html` | https://claude.ai/code/artifact/28079520-9715-48ed-b126-e18d13281e9d |
 | `plan_two_weeks.html` | https://claude.ai/code/artifact/55e75635-bb55-416b-82ad-1f2d19b4835f |
 | `gemini_round16.html` | https://claude.ai/code/artifact/e6566078-8faa-43cd-8adf-f39069226bd8 |
+| `plan_stock_reset.html` | https://claude.ai/code/artifact/656161b6-8aa9-48fe-a0b2-e6081c04feb0 |
