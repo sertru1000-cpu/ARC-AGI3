@@ -1,0 +1,188 @@
+<title>Gemini раунд 16</title>
+<meta name="description" content="Промпт внешнему критику: второй уровень требует вдвое больше ходов, а наш темп — один ход в 6.7 минуты, поэтому он недостижим арифметически.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f6f5f1; --surface:#ffffff; --surface-2:#efeee8; --ink:#20242a; --muted:#68707a;
+  --line:#e2ded4; --line-strong:#cdc7b8;
+  --accent:#175e54; --accent-soft:#e3efec; --btn:#175e54; --btn-ink:#ffffff;
+  --warn:#8a5a2b; --warn-soft:#f3e9dc;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#161a1d; --surface:#1e2429; --surface-2:#232a30; --ink:#e8e5de; --muted:#9aa2ab;
+    --line:#2e353b; --line-strong:#3d464d;
+    --accent:#5cc0b2; --accent-soft:rgba(92,192,178,.12); --btn:#2d7a6e; --btn-ink:#eafaf7;
+    --warn:#d59a5c; --warn-soft:rgba(213,154,92,.12);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161a1d; --surface:#1e2429; --surface-2:#232a30; --ink:#e8e5de; --muted:#9aa2ab;
+  --line:#2e353b; --line-strong:#3d464d;
+  --accent:#5cc0b2; --accent-soft:rgba(92,192,178,.12); --btn:#2d7a6e; --btn-ink:#eafaf7;
+  --warn:#d59a5c; --warn-soft:rgba(213,154,92,.12);
+}
+*{box-sizing:border-box}
+body{background:var(--bg); color:var(--ink); margin:0; padding:1.6rem 1rem 4rem;
+  font:15px/1.6 "Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.page{max-width:56rem; margin:0 auto; display:flex; flex-direction:column; gap:1.1rem}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--muted); margin:0}
+h1{font-size:1.45rem; line-height:1.25; margin:.25rem 0 0; text-wrap:balance; font-weight:700}
+.sub{color:var(--muted); margin:0; font-size:.92rem; max-width:62ch}
+.bar{position:sticky; top:0; z-index:5; background:var(--bg); padding:.7rem 0; display:flex;
+  gap:.9rem; align-items:center; border-bottom:1px solid var(--line)}
+button{background:var(--btn); color:var(--btn-ink); border:none; border-radius:8px;
+  padding:.55rem 1.2rem; font:600 .95rem/1 "Public Sans",sans-serif; cursor:pointer}
+button:hover{filter:brightness(1.08)}
+button:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+#status{color:var(--accent); font-size:.85rem; font-family:"IBM Plex Mono",monospace}
+.facts{display:grid; grid-template-columns:repeat(auto-fit,minmax(11rem,1fr)); gap:.7rem}
+.fact{background:var(--surface); border:1px solid var(--line); border-radius:9px;
+  padding:.8rem .95rem; display:flex; flex-direction:column; gap:.15rem}
+.fact.alarm{border-color:var(--line-strong); background:var(--warn-soft)}
+.fact b{font-family:"IBM Plex Mono",monospace; font-size:1.35rem; font-weight:500;
+  font-variant-numeric:tabular-nums; line-height:1.1}
+.fact.alarm b{color:var(--warn)}
+.fact span{font-size:.8rem; color:var(--muted); line-height:1.35}
+h2{font-size:.95rem; margin:.5rem 0 -.3rem; font-weight:600}
+pre{background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  padding:1.15rem 1.3rem; margin:0; white-space:pre-wrap; word-wrap:break-word; overflow-x:auto;
+  font:13.5px/1.6 "IBM Plex Mono",ui-monospace,Consolas,monospace}
+footer{color:var(--muted); font-size:.82rem; border-top:1px solid var(--line); padding-top:.9rem;
+  font-family:"IBM Plex Mono",monospace}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="page">
+
+<header>
+  <p class="eyebrow">ARC-AGI-3 · внешний критик · 02.09.2026</p>
+  <h1>Gemini раунд 16 — второй уровень</h1>
+  <p class="sub">Скопируйте промпт целиком и передайте критику. Все числа — наши замеры за
+  01–02.09, из первых рук.</p>
+</header>
+
+<div class="bar">
+  <button onclick="copyPrompt()">Скопировать промпт</button>
+  <span id="status" role="status" aria-live="polite"></span>
+</div>
+
+<h2>Что уходит критику</h2>
+<div class="facts">
+  <div class="fact alarm"><b>19%</b><span>из взявших первый уровень доходят до второго</span></div>
+  <div class="fact alarm"><b>56 / 22 / 22</b><span>кончилось время / погибли / взяли — из 32 переходов</span></div>
+  <div class="fact alarm"><b>6.7 мин</b><span>один наш ход; базлайн второго уровня — 54 хода</span></div>
+  <div class="fact"><b>1.9x</b><span>во столько раз второй уровень длиннее первого</span></div>
+  <div class="fact"><b>7 441</b><span>сгенерированных токенов на один ход</span></div>
+  <div class="fact"><b>0%</b><span>простой видеокарты — она загружена целиком</span></div>
+</div>
+
+<h2>Промпт</h2>
+<pre id="prompt">
+Ты — внешний технический критик нашего участия в Kaggle ARC Prize 2026 (ARC-AGI-3). Раунды 1–15 приняты. Отвечай жёстко, конкретными алгоритмами и числами; не пересказывай наши данные обратно. Если посылка неверна — скажи прямо.
+
+ЗАДАЧА. Агент играет в скрытые интерактивные grid-игры. Скрытый набор — 110 игр за один прогон, Kaggle делит результат пополам: 55 в публичный лидерборд, 55 в приватный. Балл за взятый уровень = min(базлайн_человека / действия_агента, 1.0)^2 * 100 — отношение режется до единицы ДО квадрата, то есть обогнать человека нельзя. Непройденный уровень = 0, но его вес остаётся в знаменателе; балл игры = среднее по уровням, взвешенное номером уровня. Один сабмит в сутки. Стек: наш форк харнесса Duck, Qwen3.8-27B-FP8 на vLLM, один RTX Pro 6000 96 ГБ.
+
+ГДЕ МЫ. Чистый Duck на скрытом наборе даёт 1.61, наш форк — медиана 0.85 по девяти сабмитам. Мы сняли стек принуждений (15 механизмов, срабатывали 851 раз на 449 ходов) — получили 1.04, не значимо. Сейчас в воздухе максимальная абляция: 18 хостовых механизмов сняты, включая эвристику A*, шлюзы к модели и сводку эффектов действий.
+
+Порог топ-10 сегодня 3.85 и растёт быстро (2.57 десять дней назад). Потолок для агента, берущего ТОЛЬКО первый уровень во всех играх при идеальной эффективности, — 3.52. То есть топ-10 без второго уровня арифметически недостижим. Отсюда и этот раунд.
+
+=== ЧТО МЫ ИЗМЕРИЛИ ПРО ВТОРОЙ УРОВЕНЬ ===
+
+Три одинаковых прогона по 25 публичным играм, потолок 2 часа на игру, конкурентность 28, одна волна. 75 игро-прогонов.
+
+  взят первый уровень ......... 31
+  взят второй уровень .......... 6
+  доходит от первого ко второму  19%
+
+Разбор 32 переходов на второй уровень по событийным логам:
+
+  кончилось время / сдались .... 18  (56%)
+  GAME_OVER, погибли ............ 7  (22%)
+  взяли второй уровень .......... 7  (22%)
+
+После перехода игра делает медиану 48 событий (размах 5–105) — то есть она НЕ умирает на переходе и не застревает мгновенно, она играет и не успевает.
+
+ВАЖНАЯ ПОПРАВКА К НАШИМ ЖЕ ДАННЫМ: сначала мы прочитали в логах «ноль ходов на втором уровне» и чуть не построили на этом гипотезу о поломке на переходе. Это оказался артефакт: счётчики в строках `[finished]` затирает откат движка (rollback), и по ним игра выглядит бездействующей. Событийные логи показывают обратное. Не строй ответ на предположении, что переход ломается — он не ломается.
+
+=== АРИФМЕТИКА, КОТОРАЯ ПО-НАШЕМУ ВСЁ ОБЪЯСНЯЕТ ===
+
+Базлайн человека по уровням (наши 25 публичных игр):
+
+  первый уровень:  медиана 30  (размах 7–78)
+  второй уровень:  медиана 54  (размах 6–177)
+  рост L1 -> L2:   медиана 1.9x
+
+Наш темп: 18 действий за двухчасовую игру, то есть ОДИН ХОД В 6.7 МИНУТЫ. У стокового Duck — 130 действий на игру на той же машине и той же модели.
+
+Значит 54 хода второго уровня при нашем темпе = ШЕСТЬ ЧАСОВ. Потолок игры — два. Второй уровень для нас не «трудный», а недостижимый по времени. Мы берём его только там, где случайно укладываемся сильно ниже базлайна.
+
+Куда уходит время — разобрано по логам vLLM (726 замеров загрузки за прогон):
+
+  простой видеокарты ............... 0% времени
+  активных запросов ................ 25 из 25 игр, очередь пуста
+  генерация ........................ 472 токена/с
+  прогнано контекста за прогон ..... 10.5 млн токенов
+  сгенерировано .................... 3.34 млн токенов
+  из них учтено бенчмарком ......... 18%
+
+На ОДИН ход: 7 441 сгенерированный токен и 23 314 токенов прогнанного контекста. То есть на каждое действие в среде приходится порядка десятка полных обращений к модели, и лишь одно из них производит ход. Версия «игры спят в нашем CPU-поиске» закрыта: карта загружена постоянно.
+
+=== ЧТО ЕЩЁ ВИДНО ПРО ВТОРОЙ УРОВЕНЬ ===
+
+Три игры гибнут на втором уровне ВСЕГДА, во всех трёх прогонах: ft09, sp80, tu93. На первом уровне они не гибнут ни разу. То есть на втором появляется механика смерти, которой раньше не было, и агент на неё не реагирует.
+
+Рост базлайна крайне неравномерен: ls20 5.6x (22 -> 123), s5i5 4.5x, ka59 3.9x — но у четырёх игр второй уровень КОРОЧЕ первого (cd82 55 -> 8, sc25 36 -> 6, ft09 43 -> 12). То есть «второй уровень длиннее» — правило с исключениями, и в коротких случаях мы всё равно его не берём.
+
+=== ЧТО УЖЕ ЗАКРЫТО, НЕ ПРЕДЛАГАЙ ЗАНОВО ===
+
+- Обученная эвристика A* для поиска: на 3193 парах из невиданных партий Duck MAE 18.6 против 15.7 у предсказания константой. Не переносится, снята.
+- Энтропийная отсечка зациклившихся игр: в 500 партиях Duck ровно 0% петель.
+- Дистилляция в меньшую модель: закрыта 22.08.
+- Больше времени на игру: игры и так расходуют весь двухчасовой потолок.
+- Стек принуждений (чекпоинты, заставляющие звать инструменты): снят, дал +0.14 балла, не значимо.
+- Чистильщик контекста на переходе уровня: был сломан (возвращал пустое 19 раз из 23), починен 02.09, эффект ещё не измерен.
+
+=== ВОПРОСЫ ===
+
+1. ГЛАВНЫЙ. Что нужно, чтобы взять второй уровень, если первый уже взят? Нам кажется, что ответ целиком в темпе: 54 хода при одном ходе в 6.7 минуты не помещаются в два часа никак. Если ты согласен — какая архитектура даёт ход за 20–30 секунд вместо шести минут на этом железе? Если не согласен — что мы упускаем?
+
+2. Десяток обращений к модели на один ход в среде — это наша машинерия или неизбежность tool-loop? Стоковый Duck делает 130 ходов на игру той же моделью. Что у него устроено иначе?
+
+3. Второй уровень — это та же задача, что первый, только длиннее, или качественно другая? У нас есть довод в обе стороны: рост базлайна вдвое говорит за «длиннее», а три игры, гибнущие на втором и никогда на первом, — за «другая».
+
+4. Знание, добытое на первом уровне, должно переноситься на второй (те же объекты, та же физика) — но у нас нет ни одного признака, что это происходит. Как построить перенос между уровнями, чтобы второй уровень стартовал не с нуля?
+
+5. Что в этом разборе выглядит для тебя ошибочно рассуждённым?
+</pre>
+
+<footer>
+  Источники: runs/calib_1..3 (75 игро-прогонов 01.09, событийные логи и логи vLLM) ·
+  сабмиты 55929018 (сток 1.61), 55950187 (V46 1.04) · лидерборд 02.09
+</footer>
+
+</div>
+
+<script>
+function say(t){document.getElementById('status').textContent = t;}
+function copyPrompt(){
+  var t = document.getElementById('prompt').textContent.trim();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(function(){
+      say('Скопировано ✓ ' + t.length + ' символов');
+    }).catch(fallback);
+  } else { fallback(); }
+  function fallback(){
+    try {
+      var r = document.createRange(); r.selectNodeContents(document.getElementById('prompt'));
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      document.execCommand('copy'); s.removeAllRanges();
+      say('Скопировано ✓ ' + t.length + ' символов');
+    } catch (e) {
+      say('Не вышло скопировать — выделите текст вручную');
+    }
+  }
+}
+</script>
