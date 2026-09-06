@@ -1,12 +1,14 @@
 {
-    "game_id": "pt01-d0e1f2a3",
-    "class_name": "Pt01",
-    "title": "Portals",
-    "baseline_actions": [
-        4,
-        8,
-        7,
-        8,
-        9
-    ]
+  "game_id": "pt01-d0e1f2a3",
+  "class_name": "Pt01",
+  "title": "Portals",
+  "baseline_actions": [
+    30,
+    53,
+    53,
+    50,
+    86,
+    68,
+    83
+  ]
 }

@@ -1,12 +1,15 @@
 {
-    "game_id": "cl01-f8a9b0c1",
-    "class_name": "Cl01",
-    "title": "Clockgates",
-    "baseline_actions": [
-        8,
-        6,
-        7,
-        8,
-        18
-    ]
+  "game_id": "cl01-f8a9b0c1",
+  "class_name": "Cl01",
+  "title": "Clockgates",
+  "baseline_actions": [
+    30,
+    54,
+    50,
+    57,
+    97,
+    80,
+    85,
+    92
+  ]
 }

@@ -33,8 +33,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OWN = ROOT / "our_games"
 
-GRID = 16
-CELL = 4
+# 03.09: the board grew and the cell shrank, together, because the frame is
+# capped at 64x64 pixels (solver.py:416) and GRID*CELL must fit inside it.
+# At 16x4 the ring was 52 steps long and EVERY "visit each mark once" level
+# cost one lap, which is why gk01/ac01/ky01 shipped nine levels that all cost
+# 50-55. The board is the difficulty here; nothing else was ever going to move
+# it. 21x3 = 63 pixels, and a lap is 4*(20-2m) for ring inset m -- 24 steps at
+# m=7 up to 72 at m=1, so a level's cost is now something we set.
+GRID = 21
+CELL = 3
 
 # --- the shared skeleton ---------------------------------------------------
 # Everything above the mechanic hook is identical across the five games.
@@ -546,10 +553,21 @@ class {cls}(ARCBaseGame):
 # A ring corridor around a solid core: walking the ring is long, and the
 # mechanics decide how many times you must go round.
 
-def ring_walls(inner: int = 3) -> list[tuple[int, int]]:
-    """A solid block in the middle, so the only route is the outer ring."""
-    lo, hi = inner, GRID - 1 - inner
-    return [(c, r) for c in range(lo, hi + 1) for r in range(lo, hi + 1)]
+def ring_bounds(inset: int) -> tuple[int, int]:
+    """The (lo, hi) square the corridor runs along, for a given inset."""
+    return inset, GRID - 1 - inset
+
+
+def ring_walls(inset: int = 1) -> list[tuple[int, int]]:
+    """Wall off everything except the square corridor at `inset`.
+
+    The old version only filled the middle, so the corridor was always the
+    board's outer edge and its length was fixed by GRID alone. Walling both
+    sides makes the inset a per-level knob: lap = 4 * (GRID - 1 - 2*inset).
+    """
+    lo, hi = ring_bounds(inset)
+    return [(c, r) for c in range(1, GRID - 1) for r in range(1, GRID - 1)
+            if not (lo <= c <= hi and lo <= r <= hi and (c in (lo, hi) or r in (lo, hi)))]
 
 
 def perimeter(walls) -> list[tuple[int, int]]:
@@ -561,7 +579,10 @@ def perimeter(walls) -> list[tuple[int, int]]:
     inside the wall block and every level became unsolvable at once.
     """
     blocked = {tuple(w) for w in walls}
-    lo, hi = 1, GRID - 2
+    free = [(c, r) for c in range(1, GRID - 1) for r in range(1, GRID - 1)
+            if (c, r) not in blocked]
+    lo = min(c for c, _ in free)
+    hi = max(c for c, _ in free)
     ring = []
     for c in range(lo, hi + 1):
         ring.append((c, lo))
@@ -592,6 +613,67 @@ RL01_LAYOUTS = [
 ]
 
 
+# --- per-level layout, tuned to the PUBLIC difficulty curve -----------------
+# (ring inset, mark count, offset) per level, chosen by searching every
+# combination and keeping the one whose BFS optimum lands closest to the
+# public median for that level.
+#
+# WHY these numbers and not the old ones. Measured 03.09 over five runs of the
+# 30-game testbed: our long games were never cleared once, not on any level.
+# Their level 1 cost 50-80 actions against the public median of 30, so the
+# agent never got in, and the escalation they were built for was never
+# exercised. Worse, every "visit each once" level cost exactly one lap of a
+# fixed ring, so nine levels all cost 50-55 and the batch had no escalation to
+# exercise in the first place: gk01 ran 55 59 55 44 50 52 45 49 55.
+#
+# The public curve, from runs/calib_1 (25 games): a level-1 warm-up at 30,
+# then DOUBLE at level 2, a plateau, and a jump at level 5.
+PUBLIC_CURVE = [30, 54, 51, 54, 96, 80, 86, 92, 163, 225]
+
+# Сколько уровней у КАЖДОЙ игры -- из scripts/level_plan.json, а не девять на
+# всех. Публичные 25 игр несут 6-10 уровней: девять по шесть, пять по семь,
+# шесть по восемь, четыре по девять, одна по десять (медиана 7, runs/calib_1).
+#
+# Длина -- это знаменатель счёта игры (сумма номеров уровней), и он решает
+# многое: взятый уровень стоит 4.76 балла на шестиуровневой игре и 2.22 на
+# девятиуровневой. Полигон из одних девятиуровневых поэтому систематически
+# ЗАНИЖАЛ бы наш RHAE против боевого -- зеркало прежней ошибки, где пять
+# плоских уровней его завышали (6.67 за уровень).
+_PLAN_PATH = ROOT / "scripts" / "level_plan.json"
+LEVEL_PLAN = json.loads(_PLAN_PATH.read_text(encoding="utf-8")) if _PLAN_PATH.exists() else {}
+
+
+# Цель для каждой игры -- НАСТОЯЩАЯ кривая одной из публичных игр, а не
+# медиана по набору. Раздача в scripts/target_curves.json, её делает
+# scripts/assign_target_curves.py.
+#
+# Медиана [30, 54, 51, 54, 96, 80, ...] не описывает ни одну публичную игру:
+# на пятом уровне они разбросаны от 23 до 500. Требуя её от каждой нашей игры,
+# генератор требовал недостижимого -- игры брали первые четыре уровня,
+# упирались в пятый с целью 96 и отбрасывались целиком ("решаемых уровней 5").
+#
+# Взята ДОСТИЖИМАЯ часть публичного набора: кривые с максимумом до 200, их
+# пятнадцать из двадцати пяти. Тяжёлый хвост (dc22 требует 578 действий на
+# шестом уровне, m0r0 -- 500 на пятом) нашим механикам не по силам: потолок
+# доски 21x21 около 163 даже там, где стоимость умножается с числом меток.
+# Это осознанное ограничение полигона -- он воспроизводит более скромную
+# половину публичных игр и НЕ воспроизводит их тяжёлый хвост.
+_TC_PATH = ROOT / "scripts" / "target_curves.json"
+TARGET_CURVES = json.loads(_TC_PATH.read_text(encoding="utf-8")) if _TC_PATH.exists() else {}
+
+
+def curve_for_long(gid: str) -> list[int]:
+    entry = TARGET_CURVES.get(gid)
+    return list(entry["curve"]) if entry else PUBLIC_CURVE
+
+
+def levels_for(gid: str) -> int:
+    """Сколько уровней у игры: длина её целевой кривой, но не больше таблицы."""
+    want = len(curve_for_long(gid))
+    return min(want, len(LAYOUT.get(gid, PUBLIC_CURVE)))
+
+
+
 def specs_for(gid: str) -> list[dict]:
     """Nine levels per game, with the load rising level by level.
 
@@ -610,47 +692,25 @@ def specs_for(gid: str) -> list[dict]:
     still has to land in 50-80: that is the class we actually fail on, and
     losing it to make room for escalation would defeat the batch.
     """
-    walls = ring_walls()
-    ring = perimeter(walls)
-    n = len(ring)
     out = []
-    for lvl in range(9):
+    for lvl in range(levels_for(gid)):
+        inset, count, off = LAYOUT[gid][lvl]
+        walls = ring_walls(inset)
+        ring = perimeter(walls)
+        n = len(ring)
         base = dict(walls=walls, start=ring[0])
-        off = lvl * 3
-        # grow: level 1 carries `lo` marks, level 9 carries `hi`
-        def grow(lo, hi):
-            return lo + round((hi - lo) * lvl / 8)
-        # Escalate where the MECHANIC allows it, and say so where it does not.
-        # Three of the five are "visit each once", and one lap of a fixed ring
-        # covers any number of marks: adding pads moved gk01 from 55 to 58
-        # across nine levels. Growing the ring instead (32x32, arc-based
-        # placement) does escalate -- and blows the BFS check past ten minutes,
-        # because the state space is cells x 2^marks. An unverified baseline is
-        # exactly what this batch exists to avoid, so the ring stays at 16 and
-        # only the two mechanics whose cost is MULTIPLICATIVE escalate:
-        # fr01 (one trip per crate) and rl01 (one return per gate).
-        off = lvl * 3
-
-        def grow(lo, hi):
-            return lo + round((hi - lo) * lvl / 8)
-
         if gid == "gk01":
-            base.update(pads=spread(ring, 3 + (lvl % 3), off),
-                        exit=ring[(n // 2 + off) % n])
+            base.update(pads=spread(ring, count, off), exit=ring[(n // 2 + off) % n])
         elif gid == "ac01":
-            base.update(tokens=spread(ring, 8, off), exit=ring[(n // 2 + off) % n])
+            base.update(tokens=spread(ring, count, off), exit=ring[(n // 2 + off) % n])
         elif gid == "ky01":
-            base.update(doors=spread(ring, 3, off % 5),
-                        exit=ring[(n - 2 - (off % 5)) % n])
+            base.update(doors=spread(ring, count, off), exit=ring[(n - 2 - off) % n])
         elif gid == "fr01":
-            base.update(crates=spread(ring, grow(2, 5), off + n // 4),
-                        depot=ring[2], exit=ring[(n // 2 + off) % n])
+            base.update(crates=spread(ring, count, off + n // 4), depot=ring[2],
+                        exit=ring[(n // 2 + off) % n])
         elif gid == "rl01":
-            g0, g1, g2, sw = RL01_LAYOUTS[lvl % len(RL01_LAYOUTS)]
-            gates = [ring[g0], ring[g1], ring[g2]]
-            for extra in range(grow(0, 2)):
-                gates.append(ring[(g0 + 7 * (extra + 1)) % n])
-            base.update(gates=gates, switch=ring[sw], exit=ring[(g2 + 2) % n])
+            base.update(gates=spread(ring, count, off), switch=ring[(off + 3) % n],
+                        exit=ring[(off + n // 2) % n])
         out.append(base)
     return out
 
@@ -730,7 +790,11 @@ def main() -> None:
         source = render(gid)
         module = load(gid, source)
         opt = [optimum(module, spec) for spec in module.LEVELS]
-        flag = "" if opt[0] is not None and 50 <= opt[0] <= 80 else "   <-- ВНЕ ДИАПАЗОНА 50-80"
+        # Прежняя проверка требовала первый уровень в 50-80 действий. Цель
+        # оказалась неверной: публичная МЕДИАНА первого уровня 30, а 50-80 --
+        # верх её диапазона, поэтому партия, построенная под него, не была
+        # взята ни разу за пять прогонов. Сверяемся с кривой и планом длин.
+        flag = "" if len(opt) == levels_for(gid) else "   <-- ДЛИНА НЕ ПО ПЛАНУ"
         print(f"{gid}  {MECHANICS[gid]['title']:14} оптимум по уровням: {opt}{flag}")
         if args.check:
             continue

@@ -268,31 +268,31 @@
 <div class="page">
 
   <div class="masthead">
-    <div class="eyebrow">ARC Prize 2026 · kaggle.com/code/sergueimakarov/arc3-atlas</div>
+    <div class="eyebrow">ARC Prize 2026 · arc3-atlas → arc3-stock-lab → arc3-stock-battle</div>
     <h1>Atlas Version History</h1>
-    <p class="subhead">Каждая версия кернела <code style="font-family:var(--font-mono);background:var(--surface-2);padding:0.1em 0.4em;border-radius:4px;">arc3-atlas</code> — что изменилось и что это дало. Заливка узла на линии = боевой сабмишен (Phase B, тратит суточную квоту); полый узел = только калибровка (Phase A, GPU-квота).</p>
+    <p class="subhead">Что менялось от версии к версии и что это дало. С 02.09 линия разработки сменилась: наш форк <code style="font-family:var(--font-mono);background:var(--surface-2);padding:0.1em 0.4em;border-radius:4px;">arc3-atlas</code> отложен, база — чистый Duck, потому что контрольный сабмит стока (1.61) обошёл нашу боевую медиану (0.85) вдвое. Заливка узла на линии = боевой сабмишен (Phase B, тратит суточную квоту); полый узел = только калибровка (Phase A, GPU-квота).</p>
   </div>
 
   <div class="stat-strip">
     <div class="stat">
       <span class="stat-label">Лучший боевой</span>
-      <span class="stat-value win">1.19</span>
-      <span class="stat-note">версия 3</span>
+      <span class="stat-value win">1.61</span>
+      <span class="stat-note">чистый сток, duck-baseline v1 (01.09) — наш форк ни разу его не догнал</span>
     </div>
     <div class="stat">
-      <span class="stat-label">Последний боевой</span>
-      <span class="stat-value regress">0.57</span>
-      <span class="stat-note">v30 (30.08): код v26+r8 на конфиге v23 — серия после v23: 0.92 → 0.65 → 0.57</span>
+      <span class="stat-label">Наш форк, медиана</span>
+      <span class="stat-value regress">0.85</span>
+      <span class="stat-note">девять сабмитов; лучший 0.92 (v23), последний измеренный V46 = 1.04</span>
     </div>
     <div class="stat">
-      <span class="stat-label">Боевых потрачено</span>
-      <span class="stat-value">9</span>
-      <span class="stat-note">лучший актуальный — 0.92 (v23); v30 = 0.57</span>
+      <span class="stat-label">Порог топ-10</span>
+      <span class="stat-value">4.26</span>
+      <span class="stat-note">03.09, растёт на +0.4/день; потолок агента «только первый уровень» 3.52 уже ниже порога — без второго уровня недостижимо</span>
     </div>
     <div class="stat">
-      <span class="stat-label">Текущая</span>
-      <span class="stat-value">40</span>
-      <span class="stat-note">v39 в бой 31.08; v40 меряет темп для 01.09</span>
+      <span class="stat-label">В бою сейчас</span>
+      <span class="stat-value">1.52</span>
+      <span class="stat-note">бой: сток 1.61, v3 (lean B) 1.52; публичные: lean B 5.44 против стока 3.02; ПОЛИГОН (30 своих игр): сток 22.75 против lean B 21.49 — надстройка нейтральна на невиданных играх</span>
     </div>
   </div>
 
@@ -304,6 +304,22 @@
   </div>
 
   <div class="timeline">
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">stock-flash v1</span><span class="v-date">06.09 07:14 МСК, Phase A (2,2 ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary"><strong>Смена фундамента: Duck на Qwen3.8-Flash-Next-NVFP4.</strong> Новый кернел <code>arc3-stock-flash</code> = публичный кернел <code>keithtyser/duck-qwen3-8-flash-next-nvfp4-mtp</code> ячейка в ячейку: промпты, цикл и песочница Duck (бандл 30.06), модель RadixArk NVFP4 (125B MoE, 6B активных, MTP-3), закреплённый рантайм vLLM/CUDA 13, сторожок сервера, та же карта RTX Pro 6000, 7920 с/игру, conc 28. Наших надстроек нет.</p>
+        <ul class="changes">
+          <li>опора: тот же кернел дал 6.76 (keithtyser, 01.09) и 9.00 (копия у Tufa Labs, 01.09) на публичных 25 против 3.02 нашего стока 27B; 36 и 45 уровней против 19</li>
+          <li>семь проверок до пуша чисты: ноутбук равен оригиналу, источники и карта те же, боевая ветка через шлюз, бюджет в обеих ветках, <code>ONLY_RESET_LEVELS=true</code>, наших обёрток нет</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Критерии записаны до пуша:</strong> польза &mdash; RHAE &ge; 5.0 и первый уровень в &ge; 18 играх из 25; провал &mdash; &lt; 4.0 или падение vLLM-сервера; между &mdash; повтор перед боем. При пользе &mdash; слот боя 06.09 из этой версии. Фаза A идёт, не разобрана.</p>
+      </div>
+    </div>
 
     <div class="entry">
       <div class="node"></div>
@@ -896,11 +912,172 @@
       </div>
     </div>
 
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">duck</span><span class="v-date">01.09, Phase B</span></div>
+          <span class="badge">контрольный сабмит</span>
+        </div>
+        <p class="summary"><strong>Чистый Duck без единой нашей правки &mdash; 1.61.</strong> Наша боевая медиана по девяти сабмитам 0.85, лучший за всё время 0.92. Кернел <code>arc3-duck-baseline</code> версия 1.</p>
+        <p class="score-note" style="margin-top:0.5rem;">Суть не в баллах, а в ПЕРЕНОСЕ: сток локально 1.60 &rarr; в бою 1.61 (&times;1.01); мы локально 1.88 &rarr; в бою 0.85 (&times;0.45). Значит скрытые игры не сложнее публичных, а ломается наш слой &mdash; и именно на невиданных играх. «Налога скрытого набора», на котором девять дней строились планы, не существует.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">v41&ndash;v50</span><span class="v-date">31.08&ndash;02.09</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary"><strong>Серия абляций нашего форка. Ни одна добавка не подтвердилась.</strong> V46 (снят весь стек принуждений) = 1.04 при пороге значимости 1.36 &rarr; не значимо. V48 (максимальная абляция, 15 механизмов принуждения + 18 хостовых + эвристика A*) собрана и прогнана, в бой не отправлялась.</p>
+        <ul class="changes">
+          <li class="fix">V47 отменена: блок абляции чистил путь к <code>h_model.pkl</code>, а секция A* стояла НИЖЕ и прописывала его обратно &mdash; правка молча отменялась порядком выполнения</li>
+          <li>Цена хода найдена как рабочая метрика: сток 815 сгенерированных токенов на вызов, наша полная сборка 2693, V46 1613, V48 1537 &mdash; половину разрыва прошли выключателями, вторая половина в промпте</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Решение владельца 02.09: <strong>возвращаемся к стоку и идём от него</strong>. Наш форк откладывается целиком, а не выключается по частям &mdash; выяснилось, что это разные вещи: со всеми тумблерами вниз мы всё равно вдвое дороже стока на ход.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">lab</span><span class="v-date">02&ndash;03.09, Phase A</span></div>
+          <span class="badge phase-a">измерительный кернел</span>
+        </div>
+        <p class="summary"><strong>Новый кернел <code>arc3-stock-lab</code>: нетронутый Duck на наших тридцати играх.</strong> Одиннадцать стоковых ячеек проверены побайтово, добавлена одна.</p>
+        <ul class="changes">
+          <li class="fix">Найден и починен изъян ЗАМЕРА, а не агента: в Фазе A сток передаёт <code>soft_end_time=None</code>, поэтому досиживающие игры получали карту почти в одиночку. В двух прогонах из пяти 4&ndash;5 таких игр дали средний балл 22&ndash;24 против 2.6&ndash;9.2 у остальных &mdash; и обе оказались в одном рукаве, из-за чего артефакт расписания выглядел как работающая правка</li>
+          <li class="fix">Написан <code>scripts/rhae.py</code>: <code>summary.txt</code> пишется по таймеру и дважды за вечер соврал (0.36 при настоящих 5.87). Читатель сверяет три источника и берёт максимум по игре</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">После починки честное сравнение: сток 2.49 и 5.45, сток с подсказкой 5.17. <strong>Подсказка внутри стокового разброса &mdash; эффект не доказан.</strong></p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">battle&nbsp;1</span><span class="v-date">03.09, БОЕВОЙ</span></div>
+          <span class="badge submission" style="background:var(--regress-bg);color:var(--regress-ink);">Phase B: 1.28</span>
+        </div>
+        <p class="summary"><strong>Первый кандидат стоковой линии: <code>arc3-stock-battle</code> версия 1.</strong> Сток плюс ОДНА добавка &mdash; подсказка про ограниченный бюджет ходов, дописанная к <code>PYTHON_ADDENDUM</code>. Остальные одиннадцать ячеек побайтово стоковые.</p>
+        <ul class="changes">
+          <li class="fix">Подсказка вынесена ЗА гейт <code>true_submission</code>: в лабораторном кернеле она стояла внутри него и в зачётном реране не применилась бы &mdash; поехал бы чистый сток, а лог Фазы A честно печатал бы «подсказка добавлена»</li>
+          <li>Наш датасет не монтируется вовсе: боевой сборке он не нужен, а лишний каталог в <code>/kaggle/input</code> &mdash; способ подцепить не тот список игр</li>
+          <li>Написан страж <code>scripts/test_stock_battle.py</code> под ровно эту ловушку</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;">Фаза A разобрана: 25 игр, потолок 25 мин, RHAE 0.85, уровень взят в 7 играх. С калибровками (1.67&ndash;2.16) НЕ сравнимо &mdash; там потолок два часа. Сопоставимое одно: Фаза A версии 48 при том же потолке взяла 6 игр. Подсказка доказанно доехала до модели: текст найден в файлах промптов и транскриптах.
+        <br><br><strong>Пороги записаны до броска:</strong> около 1.6 &mdash; сборочная линия исправна, подсказка нейтральна; выше 1.9 &mdash; подсказка переносится; ниже 1.3 &mdash; наш сборщик ломает сток. Третий исход самый ценный: мы ни разу не отправляли ничего, что собрал <code>build_stocklab_notebook.py</code>, а всё дальнейшее строится на нём.
+        <br><br><strong>Вердикт ~21:50 МСК: 1.28.</strong> Формально третий исход, но один бросок при &sigma;&nbsp;&asymp;&nbsp;0.45 (500 партий Duck) от стока 1.61 отличается на ~0.7&sigma; &mdash; не различимо. Сборка чистая (Фаза A: апстрим-бандл, 0 строк atlas). Что можно утверждать: подсказка про бюджет ходов эффекта не показала; база &mdash; чистый сток.</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">lab&nbsp;v7</span><span class="v-date">03.09 18:38 МСК пуш, RUNNING сразу; датасет src v36 18:36</span></div>
+          <span class="badge" style="background:var(--regress-bg);color:var(--regress-ink);">измерен НЕ сток</span>
+        </div>
+        <p class="summary"><strong>Чистый сток на 11 готовых играх полигона &mdash; один вопрос: где агент умирает на втором уровне.</strong> Датасет <code>arc3-atlas-src</code> v36 = полигон из рабочего дерева (11 игр пересобраны на настоящие публичные кривые: L1&nbsp;&asymp;&nbsp;30, доска 21&times;21, все уровни различны, базлайны доказаны перебором); 139 файлов на Kaggle сверены со списком. Остальные 19 игр в датасете есть, но в прогон не входят.</p>
+        <ul class="changes">
+          <li>Сборщик получил явный список игр (<code>ATLAS_STOCKLAB_GAMES</code>): <code>ac01 fr01 gk01 ky01 lm01 rl01 cl01 cm01 cv01 ic01 pt01</code>; отсутствие любой из них &mdash; ошибка, а не прогон на остатке</li>
+          <li>Конкурентность 11, потолок <strong>2700 с</strong> на игру, общий дедлайн 2900 с (починка <code>soft_end</code> из карточки lab), подсказка про батчинг ВЫКЛ</li>
+          <li>Почему 2700, а не 1500 (выведено, не измерено): при 1500 с игра получает ~12 вызовов &times; 2.17 действия &asymp; 28 действий &mdash; ровно базлайн L1, второго уровня не увидеть. При 11 играх вместо 28 боевых ответы приходят ~в 2.5 раза быстрее: 45 мин при conc 11 &asymp; 2 ч на игру Фазы B</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Вердикт 19:50 МСК: прогон измерил НАШ ФОРК, не сток.</strong> В промптах 174 строки <code>[atlas</code>, в логе <code>auto-anchor created</code>; <code>taaf_setup_env.json</code> показывает, что датасет Duck в этой сессии Kaggle не смонтировал и искатель бандла взял <code>arc3-atlas-src</code> (наш src/ с тем же маркером). Тем же дефектом заражены вчерашние stocklab_batch (5.87) и batch3 (11.22); чистые — stock_deadline, stock_own30_b, batch2, duck_01_09 и battle&nbsp;1. Числа v7 как данные о форке: RHAE 0.41, L1 в 2 из 11, большинство игр сдались после 1&ndash;14 действий (ранний cull). Вопрос про второй уровень открыт. Починка готова, не запушена: игры из датасета без маркера <code>arc3-own-games</code>, ячейка падает на чужом бандле.
+        <br><br>(до вердикта) Ожидаемое окончание ~19:45 МСК, квоты ~65 мин. Читать: <code>artifacts/*_events.jsonl</code> (<code>level_completed</code>, <code>stop_reason</code>) и транскрипты по игре; RHAE только через <code>scripts/rhae.py</code>. Арифметика к прогону (500 партий стока, <code>runs/duck_harness_ref</code>): P(L1) 50%, P(L2) 11%, P(L2|L1) 21%; взятый уровень стоит 64 очка из 100; спидран до 100 поднял бы сток лишь до 2.41. Для 4.3 при эффективности 0.85 нужно P1 70% и P2 ~32%, для 6.0 &mdash; P2 ~52%.</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">lab&nbsp;v8</span><span class="v-date">03.09 19:47 МСК пуш, RUNNING сразу; датасет arc3-own-games 19:46</span></div>
+          <span class="badge pending">отменена владельцем</span>
+        </div>
+        <p class="summary"><strong>Повтор замера v7 с починенной лабораторией.</strong> Игры полигона переехали в отдельный датасет <code>sergueimakarov/arc3-own-games</code> (60 файлов, БЕЗ <code>taaf-kaggle-bundle.json</code>), так что искатель бандла в стоковой ячейке видит только датасет Duck; наша ячейка падает первой строкой, если <code>BUNDLE_DIR</code> не содержит <code>jakobbrggen</code>. Остальное как в v7: 11 игр, conc 11, потолок 2700 с, дедлайн 2900 с, подсказка выкл.</p>
+        <p class="score-note" style="margin-top:0.5rem;">Отменена владельцем через ~10 мин после старта: вопрос про сток на полигоне снят — для чистого стока ответ есть в 500 партиях Duck на публичных играх (см. план); квота сохранена (~1:05).</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">lab&nbsp;v9</span><span class="v-date">03.09 21:44 МСК пуш, 55 мин</span></div>
+          <span class="badge" style="background:var(--win-bg);color:var(--win-ink);">RHAE 23.15 · без контроля</span>
+        </div>
+        <p class="summary"><strong>Первый прогон «протокола чтения доски» (Gemini р.17) на полигоне.</strong> Сток + одна ячейка: заголовок <code>PROTOCOL = {inventory, diff, rule, budget, hypothesis, next}</code> обязателен в начале каждого python-вызова (обёртка <code>run_sandboxed_python</code> отказывает коду без него &mdash; вызов сгорает, действия нет), в конец каждого хода дописываются <code>[NOTICE]</code> о серии нулевых диффов и напоминание <code>[PROTOCOL]</code> (обёртка <code>_build_user_prompt</code>). Те же 11 игр, conc 11, 2700/2900 с, датасет <code>arc3-own-games</code>, проверка бандла.</p>
+        <ul class="changes">
+          <li>Поправки к Gemini, проверенные по данным: у стока нет видимого текста (39/39 анализов без content) &mdash; структура внутри кода; действия «wait» в ARC-AGI-3 нет &mdash; только флаг, без авто-шага</li>
+          <li>Обёртки сверены с настоящим апстримом Duck (бандл скачан), сухой тест зелёный, страж боевой сборки чист</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Разобрано 04.09 00:05 МСК:</strong> RHAE 23.15, первый уровень в 9 из 11, второй в 7, 33 уровня, pt01 пройдена целиком (7/7), lm01 7 из 9, cm01 6 из 8. Темп 8&ndash;23 действия на вызов (форк на тех же играх: ~1; сток Duck на публичных: 2&ndash;2.8). Протокол исполнен: 246 из 254 вызовов с заголовком PROTOCOL, отказов 0, [NOTICE] 11 раз. Бандл апстримовский. <strong>Чего нет:</strong> контроля (чистый сток на этих 11 играх при 2700 с не прогонялся), второго прогона; полигон льстит агенту, чей поиск ломает лабиринты. Утверждать можно одно: модель протокол исполняет и батчит.
+        <br><br>Контроль для пары &mdash; чистый сток на тех же 11 играх и потолке (v8 был снят; повторить после субботнего сброса квоты). Читать: <code>scripts/rhae.py</code>, <code>scripts/l2_autopsy.py</code>, доля вызовов с заполненным PROTOCOL и отказов «Rejected before execution» в транскриптах.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">battle&nbsp;2</span><span class="v-date">04.09 04:32 МСК пуш · бой 04.09</span></div>
+          <span class="badge">Phase B · 1.46 · шум</span>
+        </div>
+        <p class="summary"><strong>Сток + «протокол чтения доски» — в бой.</strong> Та же добавка, что в lab v9 (заголовок <code>PROTOCOL</code> обязателен, обёртки <code>run_sandboxed_python</code> и <code>_build_user_prompt</code>), но ВНЕ гейта <code>true_submission</code> (страж: подсказка и обёртки на строках 24/27, гейт на 29), наш датасет не монтируется, стоковые ячейки побайтово равны. Фаза A: публичные 25, потолок 1500 с одной волной (~25 мин игры + загрузка) &mdash; по просьбе владельца.</p>
+        <p class="score-note" style="margin-top:0.5rem;">Основание: lab v9 на полигоне &mdash; RHAE 23.15, 33 уровня, протокол исполнен в 97% вызовов; контроля нет, один прогон. <strong>Фаза A разобрана (04.09 05:10 МСК):</strong> RHAE 0.90, первый уровень в 8 играх из 25, второй &mdash; ни в одной; протокол исполнен в 245 из 269 вызовов (91%), отказов 0, [NOTICE] 13 раз, учтён 11. Против Фазы A battle&nbsp;1 (сток + батч, те же 25 игр, тот же потолок): 0.85 и 7 игр &mdash; неразличимо. Батчинга по 8&ndash;23 действия, как на полигоне, нет: 1&ndash;3 действия на вызов. Сборка чистая (апстрим-бандл, обёртки установлены).<br><br><strong>Пороги, записанные до отправки:</strong> &ge;&nbsp;2.1 &mdash; сигнал, повторить ту же версию; 1.3&ndash;2.1 &mdash; неразличимо от стока (1.61, σ&nbsp;&asymp;&nbsp;0.45); &lt;&nbsp;1.3 &mdash; протокол вредит или сборка сломана, разбор Фазы A и субботний контроль до любых выводов.<br><br><strong>Подан в слот 04.09</strong> (сообщение владельца 06:18 МСК). <strong>Результат: 1.46</strong> (владелец, 04.09 ~14:25 МСК) &mdash; зона 1.3&ndash;2.1 по порогам, записанным до отправки: неотличимо от стока 1.61 при σ&nbsp;&asymp;&nbsp;0.45, вердикта нет. Три боевые точки линии: сток 1.61, v1 1.28, v2 1.46 &mdash; обе добавки в пределах шума, не выше базы. Прогон v2 на 2,2 ч в субботу отменён.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">battle&nbsp;3 · lean = B</span><span class="v-date">05.09 04:39 МСК пуш · бой 05.09</span></div>
+          <span class="badge">Phase B · 1.52 · шум</span>
+        </div>
+        <p class="summary"><strong>Ответ критика (Gemini р.18) перенесён в харнесс.</strong> Словарь на каждом ходу признан роскошью: в бою 1 182 токена на ответ против 480 у эталона. Теперь дифф кадров, убывающую полосу, серию нулевых диффов и слишком короткий план считает харнесс и дописывает в промпт блоками <code>[DIFF]</code> <code>[HUD]</code> <code>[NOTICE]</code> <code>[SHORT]</code>; протокол событийный &mdash; три ключа <code>win / rule / plan</code> только на старте уровня, после нулевого диффа и после проигрыша, и только для вызова с действиями; скрытое мышление включается только на таких ходах (маркер <code>[THINK]</code> в промпте, обёртка <code>build_chat_payload</code>).</p>
+        <ul class="changes">
+          <li>вариант <code>ATLAS_STOCKLAB_HINT=lean</code>: текст 2 792 символа; обёртки <code>_build_user_prompt</code>, <code>_run_python_tool</code>, <code>run_sandboxed_python</code>, <code>build_chat_payload</code></li>
+          <li>v2 по решению владельца 04.09: хелперы в песочнице (<code>grid</code>, <code>cells</code>, <code>objects</code>, <code>find_path</code> с шагом за нажатие, <code>frame_diff</code>, <code>probe</code>, <code>move_until</code>) подставляются в начало каждого python-вызова; проверены внутри настоящей песочницы стока</li>
+          <li>v2: компактный промпт &mdash; 13 стоковых фраз-дублей вырезаны, добавлен <code>[STATE]</code> с таблицей объектов (~610 символов на настоящих кадрах); раньше на это уходил первый python-вызов хода</li>
+          <li>сухой тест обёрток (7 сценариев) чист; дифф на настоящих кадрах Duck: полоса-счётчик найдена в su15/tn36/sp80, сдвиг фигуры в ka59/sp80, 12&ndash;17 мс на кадр</li>
+          <li>страж чист; стоковые ячейки побайтово равны; вариант <code>protocol3</code> (текстовый v3) остался в сборщике как альтернатива</li>
+          <li>leanshort (04.09 20:15 МСК, по замечанию владельца «воплотить всё»): плюс компактный системный промпт &mdash; 5 989 символов / 1 469 токенов вместо 16 979 / 3 801, правила формата tool-call дословно; отдельный кернел <code>arc3-stock-leanshort</code>, вторая рука субботы</li>
+          <li><strong>Под 04→05.09, 25 публичных по 132 мин:</strong> B (lean, мышление всегда) <strong>5.44</strong>; D (короткий системный промпт) 2.55; C (бюджет мышления 256) 0.82; A (мышление только по событиям) 0.25; сток 22.08 &mdash; 3.02. B: 29 уровней, второй уровень в 8 играх, четвёртый в ar25 и ft09. Умолчание lean в сборщике переведено на «мышление всегда»</li>
+          <li><strong>Фаза A v3 (30 мин, 05.09 07:15 МСК):</strong> RHAE 0.67, первый уровень в 4 играх, второй в vc33; 9,3 вызова на игру, мышление включено (медиана 1 524 токена), отказ 1, сборка чистая. Совпадает с подом B на 30-й минуте (5 / 1). За 30 минут второй уровень и не ожидался</li>
+          <li><strong>Бой 05.09: 1.52.</strong> Зона 1.3&ndash;2.1 &mdash; неотличимо от стока 1.61. Перенос с публичных на скрытые: сток 3.02&nbsp;&rarr;&nbsp;1.61 (0.53), lean B 5.44&nbsp;&rarr;&nbsp;1.52 (0.28): прирост +2.4 на публичных дал +0 в бою. Публичные 25 больше не годятся как прокси наших добавок</li>
+          <li><strong>Полигон 05.09 (30 своих игр, 2,2 ч, кернел arc3-stock-lab v10/v11):</strong> сток 22.75, lean B 21.49 (&minus;6%) &mdash; внутри коридора &plusmn;25%, записанного до пуска: надстройка на невиданных играх нейтральна. Уровней 71 против 68, полных побед по 6, но разных игр. База в бою &mdash; чистый сток; дальше абляция по одному компоненту через полигон</li>
+          <li><strong>Полигон 06.09, core (стоковый промпт + loop guard + <code>move_until</code>, кернел arc3-stock-labcore v1, 07:08 МСК):</strong> RHAE <strong>21.70</strong> при стоке 22.75 и lean B 21.49 &mdash; нейтрально по коридору &plusmn;25%. Уровней 78 (сток 71), первый уровень в 18 играх (16), второй в 15 (14), но 189 действий на игру против 153. Гвард сработал 36 раз в 5 играх из 1 349 вызовов; <code>move_until</code> модель не вызвала ни разу. Разброс по играм (tr01 9&rarr;0, gv01 6&rarr;0, cv01 0&rarr;5, ky01 0&rarr;5) больше эффекта любого слоя &mdash; шум полигона между прогонами не измерен. Слой не берём.</li>
+          <li><strong>06.09, находка:</strong> публичная линия Duck с 01.09 работает на <code>Qwen3.8-Flash-Next-NVFP4</code> (125B MoE, 6B активных, MTP-3): кернел keithtyser 6.76 и его копия у Tufa Labs 9.00 на публичных 25 за 2,2 ч при нашем стоке 27B 3.02 (36 и 45 уровней против 19; 148 действий на игру против ~49). Бандл Duck там &mdash; версия 30.06. Сборка <code>notebooks_stockflash</code> (кернел как есть, slug arc3-stock-flash) готова, 7 проверок чисты, не пушена &mdash; владелец: «завтра запушим».</li>
+          <li>не сделано: авто-зонд контролов (тратит 4 действия, в bp35 может убить), карта смертельных клеток, граф состояний</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Критерии записаны до запуска</strong> (суббота 05.09, Фаза A на 25 публичных при 7920 с на игру; контроль &mdash; стоковый прогон 22.08 на тех же условиях: 3.02, первый уровень в 15 играх, второй в 3, 19 уровней): польза &mdash; второй уровень в 5 и более играх, первый в 14 и более; темп &mdash; медиана ответа не больше 600 токенов; вред &mdash; первый уровень меньше чем в 13 играх, отказов больше 10% вызовов или больше 5% ответов без tool-call. Новый контроль не гоняется; пуш lean &mdash; по согласию после сброса квоты; прошёл критерии &mdash; слот 05.09 на него, нет &mdash; повтор чистого стока</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">battle&nbsp;4 · lean v3</span><span class="v-date">05.09 07:15 МСК пуш · Phase A 2,2 ч разобрана 12:20</span></div>
+          <span class="badge phase-a">Phase A · 3.10 · провал по критериям</span>
+        </div>
+        <p class="summary"><strong>Ответ Gemini р.19 воплощён целиком.</strong> Поверх lean B: (1) авто-пробник &mdash; на первом ходу каждого уровня харнесс сам нажимает каждую доступную стрелку по разу и отдаёт модели <code>[CONTROLS]</code> с тем, что и на сколько сдвинулось (до 4 действий на уровень, проигрыш прерывает); (2) хелпер <code>move_to(target)</code> &mdash; фон проходим, остальное стены, BFS и исполнение одним батчем; <code>probe</code> из подсказки убран. Мышление стоковое на каждом ходу. Фаза A 7920 с &mdash; первое измерение этой сборки; Фаза B стоковая.</p>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Критерии до запуска</strong> (критика, против пода B: 5.44, второй уровень в 8 из 17 взявших первый): доля второго уровня среди взявших первый &ge;&nbsp;50% и RHAE &ge;&nbsp;6.5 &mdash; прошёл; &lt;&nbsp;35% или рост проигрышей на старте &mdash; провал. Риск: пробник тратит ходы и в играх с шипами может убить на первом шаге.<br><br><strong>Результат (12:20 МСК):</strong> RHAE 3.10 против 5.44 у B на поде; первый уровень в 18 играх (B 17), второй в 5 (B 8), доля второго среди взявших первый 28% &mdash; ниже порога провала 35%; проигрышей 9 (B 7). Авто-пробник отработал во всех 420 стартах уровней, <code>move_to</code> не вызван ни разу из 709. Новое: первый уровень в ka59 и lf52; потеряно: tn36. Одна точка, Kaggle против пода. Кандидат в бой остаётся battle&nbsp;3 = lean B.</p>
+      </div>
+    </div>
+
   </div>
 
   <footer>
     <span>Источники: <span class="mono">docs/plan_top10_by_3009.md</span>, память сессии, <span class="mono">kaggle competitions submissions</span>.</span>
-    <span>обновлено 30.08.2026</span>
+    <span>обновлено 03.09.2026</span>
   </footer>
 
 </div>

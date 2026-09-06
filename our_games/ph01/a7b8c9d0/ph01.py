@@ -24,6 +24,42 @@ from arcengine import (
 CELL = 4
 GRID = 8
 
+
+# --- pixel helpers, added 03.09 by scripts/cellify_sprites.py ---------------
+# These replace literal pixel indices so the sprite renders at any CELL. The
+# shapes are exactly what the literals drew at CELL == 4, which
+# scripts/frame_fingerprint.py verifies by hashing every frame before and
+# after the rewrite.
+
+def _fill_inner(px, color):
+    """Everything except the one-pixel border."""
+    for _r in range(1, CELL - 1):
+        for _c in range(1, CELL - 1):
+            px[_r][_c] = color
+    return px
+
+
+def _fill_edge(px, side, color):
+    """The middle stretch of one edge -- the part that is not a corner."""
+    span = range(1, CELL - 1) if CELL > 2 else range(CELL)
+    for _i in span:
+        if side == "top":
+            px[0][_i] = color
+        elif side == "bottom":
+            px[CELL - 1][_i] = color
+        elif side == "left":
+            px[_i][0] = color
+        else:
+            px[_i][CELL - 1] = color
+    return px
+
+
+def _fill_row(px, col, color):
+    """The middle rows of one column."""
+    for _r in range(1, CELL - 1):
+        px[_r][col] = color
+    return px
+
 WALL = 9
 CURSOR = 3
 COUNTER = 4
@@ -94,10 +130,8 @@ def _rect(color):
 
 def _pill_px(color):
     px = [[0] * CELL for _ in range(CELL)]
-    for r in (1, 2):
-        for c in (1, 2):
-            px[r][c] = color
-    px[1][0] = px[2][3] = color
+    _fill_inner(px, color)
+    px[1][0] = px[CELL - 2][CELL - 1] = color
     return px
 
 

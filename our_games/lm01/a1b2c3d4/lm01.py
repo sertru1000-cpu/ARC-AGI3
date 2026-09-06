@@ -25,8 +25,8 @@ from arcengine import (
     Sprite,
 )
 
-CELL = 4
-GRID = 14
+CELL = 3
+GRID = 21
 
 WALL = 9
 FLOOR = 0
@@ -37,31 +37,40 @@ EXIT = 3
 # connects to the next one through. Everything else inside the border is wall.
 # start/exit are (col, row).
 LEVELS = [
-    # 6 corridors of 12, alternating ends. Optimal lengths are asserted by
-    # scripts/test_atlas_long_games.py -- do not trust the arithmetic here,
-    # trust the BFS (this file already shipped one hand-counted wrong number).
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[12, 1, 12, 1, 12],
-         start=(1, 1), exit=(12, 11)),
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[1, 12, 1, 12, 1],
-         start=(12, 1), exit=(1, 11)),
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[12, 1, 12, 1, 12],
-         start=(1, 1), exit=(1, 11)),
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[1, 12, 1, 12, 1],
-         start=(1, 11), exit=(12, 1)),
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[12, 1, 12, 1, 12],
-         start=(12, 11), exit=(1, 1)),
-    # 01.09: nine levels, to match the public set's 6-10. lm01 stays FLAT on
-    # purpose -- it is the pure-length control, and a control that also got
-    # harder would stop isolating length from difficulty. Escalation lives in
-    # fr01 and rl01, whose cost is multiplicative in the marks.
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[1, 12, 1, 12, 1],
-         start=(1, 1), exit=(12, 11)),
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[12, 1, 12, 1, 12],
-         start=(12, 1), exit=(12, 11)),
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[1, 12, 1, 12, 1],
-         start=(12, 11), exit=(1, 1)),
-    dict(corridors=[1, 3, 5, 7, 9, 11], turns=[12, 1, 12, 1, 12],
-         start=(1, 11), exit=(12, 1)),
+    # 03.09: retuned to the PUBLIC difficulty curve, and moved to the same
+    # 21x3 board as the generated batch. lm01 used to be nine flat levels of
+    # 65 actions -- deliberately flat, as the pure-length control. Measured
+    # over five runs, it cleared level 1 exactly once and nothing beyond, and
+    # the reason was the same as for the rest of the batch: level 1 cost 65
+    # actions where the public median is 30, so nobody ever got in.
+    #
+    # It stays the control -- one mechanic, no rule to discover, walk to the
+    # exit -- but it now carries the SAME length profile as the games that do
+    # have a rule to discover. That is what makes it a control: the only
+    # difference left between lm01 and gk01 is the discovery burden, not the
+    # walking.
+    #
+    # Every entry below was found by searching corridor count and exit column
+    # against shortest_path_len(), not counted by hand. This file already
+    # shipped one hand-counted baseline of 53 whose true value was 65.
+    dict(corridors=[1, 3], turns=[19],
+         start=(1, 1), exit=(9, 3)),
+    dict(corridors=[1, 3, 5], turns=[1, 19],
+         start=(19, 1), exit=(5, 5)),
+    dict(corridors=[1, 3, 5], turns=[1, 19],
+         start=(19, 1), exit=(8, 5)),
+    dict(corridors=[1, 3, 5], turns=[19, 1],
+         start=(1, 1), exit=(15, 5)),
+    dict(corridors=[1, 3, 5, 7, 9], turns=[1, 19, 1, 19],
+         start=(19, 1), exit=(3, 9)),
+    dict(corridors=[1, 3, 5, 7, 9], turns=[19, 1, 19, 1],
+         start=(1, 1), exit=(1, 9)),
+    dict(corridors=[1, 3, 5, 7, 9], turns=[19, 1, 19, 1],
+         start=(1, 1), exit=(7, 9)),
+    dict(corridors=[1, 3, 5, 7, 9], turns=[1, 19, 1, 19],
+         start=(19, 1), exit=(7, 9)),
+    dict(corridors=[1, 3, 5, 7, 9, 11, 13, 15, 17], turns=[19, 1, 19, 1, 19, 1, 19, 1],
+         start=(1, 1), exit=(4, 17)),
 ]
 
 

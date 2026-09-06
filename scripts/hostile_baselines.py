@@ -55,18 +55,19 @@ def _grid_reach(walls, extra_walls, start, target, grid=8):
 
 
 def guarantees(prefix: str, mod, level_index: int, plan_len: int) -> list[str]:
+    grid = getattr(mod, "GRID", 8)
     """Content guarantees per hostile mechanic; returns violation strings."""
     bad = []
     spec = mod.LEVELS[level_index]
     if prefix == "hc01":
         walls, buttons, start, exit_cell, door = mod._parse(spec)
-        if _grid_reach(walls, {door}, start, exit_cell) is not None:
+        if _grid_reach(walls, {door}, start, exit_cell, grid=grid) is not None:
             bad.append("exit reachable WITHOUT the door (combo bypassable)")
     if prefix == "tr01":
         walls, gates, start, exit_cell = mod._parse(spec)
         # safe route must exist with gates treated as walls, and its length
         # must equal the engine optimum (the optimal plan avoids the trap)
-        safe = _grid_reach(walls, gates, start, exit_cell)
+        safe = _grid_reach(walls, gates, start, exit_cell, grid=grid)
         if safe is None:
             bad.append("no safe route around the gate")
         elif safe != plan_len:
@@ -79,7 +80,7 @@ def guarantees(prefix: str, mod, level_index: int, plan_len: int) -> list[str]:
                 inside = (g[0] + dc, g[1] + dr)
                 if inside in walls or inside == start:
                     continue
-                if _grid_reach(walls, gates | {g}, inside, exit_cell) is None:
+                if _grid_reach(walls, gates | {g}, inside, exit_cell, grid=grid) is None:
                     continue  # this neighbor is dead as required (or is the safe side)
         # dead-pocket proof: at least one gate neighbor must NOT reach the exit
         dead_sides = 0
@@ -88,7 +89,7 @@ def guarantees(prefix: str, mod, level_index: int, plan_len: int) -> list[str]:
                 inside = (g[0] + dc, g[1] + dr)
                 if inside in walls:
                     continue
-                if _grid_reach(walls, gates, inside, exit_cell) is None:
+                if _grid_reach(walls, gates, inside, exit_cell, grid=grid) is None:
                     dead_sides += 1
         if dead_sides == 0:
             bad.append("no dead pocket behind any gate")

@@ -1,12 +1,13 @@
 {
-    "game_id": "sk01-c9d0e1f2",
-    "class_name": "Sk01",
-    "title": "Sokoban",
-    "baseline_actions": [
-        6,
-        20,
-        15,
-        17,
-        29
-    ]
+  "game_id": "sk01-c9d0e1f2",
+  "class_name": "Sk01",
+  "title": "Sokoban",
+  "baseline_actions": [
+    22,
+    35,
+    51,
+    26,
+    52,
+    43
+  ]
 }

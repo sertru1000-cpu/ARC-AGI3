@@ -1,12 +1,16 @@
 {
-    "game_id": "vn01-f4a5b6c7",
-    "class_name": "Vn01",
-    "title": "Visual Noise (hostile pool)",
-    "baseline_actions": [
-        9,
-        13,
-        14,
-        10,
-        16
-    ]
+  "game_id": "vn01-f4a5b6c7",
+  "class_name": "Vn01",
+  "title": "Visual Noise (hostile pool)",
+  "baseline_actions": [
+    22,
+    42,
+    26,
+    115,
+    36,
+    31,
+    8,
+    40,
+    41
+  ]
 }

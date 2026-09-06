@@ -1,12 +1,16 @@
 {
-    "game_id": "sw01-f2a3b4c5",
-    "class_name": "Sw01",
-    "title": "Switches",
-    "baseline_actions": [
-        8,
-        15,
-        12,
-        10,
-        11
-    ]
+  "game_id": "sw01-f2a3b4c5",
+  "class_name": "Sw01",
+  "title": "Switches",
+  "baseline_actions": [
+    19,
+    16,
+    34,
+    42,
+    123,
+    80,
+    14,
+    23,
+    111
+  ]
 }

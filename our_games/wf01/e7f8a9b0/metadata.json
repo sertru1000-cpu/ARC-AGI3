@@ -1,12 +1,16 @@
 {
-    "game_id": "wf01-e7f8a9b0",
-    "class_name": "Wf01",
-    "title": "Wildfire",
-    "baseline_actions": [
-        6,
-        6,
-        7,
-        12,
-        10
-    ]
+  "game_id": "wf01-e7f8a9b0",
+  "class_name": "Wf01",
+  "title": "Wildfire",
+  "baseline_actions": [
+    22,
+    42,
+    26,
+    115,
+    36,
+    31,
+    8,
+    40,
+    41
+  ]
 }

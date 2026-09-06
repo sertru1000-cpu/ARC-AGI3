@@ -26,6 +26,14 @@ from arcengine import (
 CELL = 4
 GRID = 8
 
+
+def _click_cell(data):
+    """Frame pixel -> board cell, for any GRID/CELL the camera can show."""
+    scale = max(1, 64 // (GRID * CELL))
+    off = (64 - GRID * CELL * scale) // 2
+    return ((int(data.get("x", 0)) - off) // (CELL * scale),
+            (int(data.get("y", 0)) - off) // (CELL * scale))
+
 WALL = 9
 BALL = 2
 GOAL = 4
@@ -76,7 +84,7 @@ def _slash_px(orient):
 
 
 def _gear_px(orient):
-    px = [[GEAR_C if (r in (0, 3) or c in (0, 3)) and (r + c) % 2 == 0 else 0
+    px = [[GEAR_C if (r in (0, CELL - 1) or c in (0, CELL - 1)) and (r + c) % 2 == 0 else 0
            for c in range(CELL)] for r in range(CELL)]
     px[1][1] = px[2][2] = GEAR_C
     if orient == 1:
@@ -216,8 +224,7 @@ class Rg01(ARCBaseGame):
             self.complete_action()
             return
         if action == GameAction.ACTION6:
-            x = int(self.action.data.get("x", 0)) // 8
-            y = int(self.action.data.get("y", 0)) // 8
+            x, y = _click_cell(self.action.data)
             if (x, y) == (0, 0):
                 # LAUNCH
                 if simulate(spec, [tuple(p) for p in self._pieces.values()]):

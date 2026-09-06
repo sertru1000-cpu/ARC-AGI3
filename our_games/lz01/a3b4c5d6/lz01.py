@@ -16,8 +16,16 @@ from arcengine import (
     Sprite,
 )
 
-CELL = 4
-GRID = 8
+CELL = 3
+GRID = 21
+
+
+def _click_cell(data):
+    """Frame pixel -> board cell, for any GRID/CELL the camera can show."""
+    scale = max(1, 64 // (GRID * CELL))
+    off = (64 - GRID * CELL * scale) // 2
+    return ((int(data.get("x", 0)) - off) // (CELL * scale),
+            (int(data.get("y", 0)) - off) // (CELL * scale))
 
 WALL = 9
 EMITTER = 4
@@ -29,21 +37,51 @@ BEAM = 4
 # emitter: (col,row,(dx,dy)); mirrors: list of (orient, col, row) with
 # orient 0='/' 1=backslash; targets: list of (col,row); walls: interior.
 LEVELS = [
-    dict(emitter=(0, 1, (1, 0)), walls=[],
-         mirrors=[(0, 1, 1)],
-         targets=[(1, 5)]),
-    dict(emitter=(7, 2, (-1, 0)), walls=[],
-         mirrors=[(0, 3, 2), (1, 4, 5)],
-         targets=[(3, 1)]),
-    dict(emitter=(7, 1, (-1, 0)), walls=[],
-         mirrors=[(1, 6, 2), (1, 4, 1), (0, 4, 4)],
-         targets=[(5, 4)]),
-    dict(emitter=(6, 7, (0, -1)), walls=[],
-         mirrors=[(0, 4, 3), (0, 6, 5), (0, 4, 5)],
-         targets=[(5, 3), (4, 4)]),
-    dict(emitter=(7, 5, (-1, 0)), walls=[],
-         mirrors=[(1, 1, 1), (0, 5, 3), (0, 5, 5), (0, 3, 3)],
-         targets=[(3, 2), (4, 3)]),
+    # 03.09: built by scripts/plant_levels.py -- each level is derived from
+    # a PLANTED solution on the full 64x64 board (GRID 21, CELL 3),
+    # along a real public game's difficulty curve. A random layout could
+    # not carry this mechanic (measured, scripts/probe_regen_fitness.py).
+    # Baseline == mirrors: each mirror's wrong deflection leaves the board without meeting another mirror or the target, so every mirror must be flipped.
+    dict(
+         emitter=(0, 4, (1, 0)),
+         walls=[],
+         mirrors=[(0, 2, 4), (0, 2, 5), (0, 3, 5), (0, 3, 6), (0, 4, 6), (0, 4, 7), (0, 5, 7), (0, 5, 9), (0, 8, 9), (0, 8, 10), (0, 9, 10), (0, 9, 11), (0, 10, 11), (0, 10, 12), (0, 11, 12), (0, 11, 13), (0, 12, 13), (0, 12, 14)],
+         targets=[(15, 14)]),
+    dict(
+         emitter=(0, 2, (1, 0)),
+         walls=[],
+         mirrors=[(0, 2, 2), (0, 2, 3), (0, 3, 3), (0, 3, 4), (0, 4, 4), (0, 4, 5), (0, 7, 5), (0, 7, 6), (0, 8, 6), (0, 8, 8), (0, 9, 8), (0, 9, 9), (0, 10, 9), (0, 10, 10), (0, 11, 10), (0, 11, 11), (0, 12, 11), (0, 12, 12), (0, 13, 12), (0, 13, 13), (0, 14, 13), (0, 14, 14), (0, 15, 14), (0, 15, 15), (0, 16, 15), (0, 16, 16), (0, 17, 16), (0, 17, 17)],
+         targets=[(19, 17)]),
+    dict(
+         emitter=(0, 2, (1, 0)),
+         walls=[],
+         mirrors=[(0, 3, 2), (0, 3, 3), (0, 4, 3), (0, 4, 6), (0, 5, 6), (0, 5, 7), (0, 6, 7), (0, 6, 8), (0, 7, 8), (0, 7, 9), (0, 8, 9), (0, 8, 10), (0, 9, 10), (0, 9, 11), (0, 10, 11), (0, 10, 12), (0, 13, 12), (0, 13, 13)],
+         targets=[(14, 13)]),
+    dict(
+         emitter=(0, 3, (1, 0)),
+         walls=[],
+         mirrors=[(0, 2, 3), (0, 2, 4), (0, 3, 4), (0, 3, 5), (0, 4, 5), (0, 4, 6), (0, 5, 6), (0, 5, 7), (0, 6, 7), (0, 6, 8), (0, 7, 8), (0, 7, 9), (0, 8, 9), (0, 8, 12), (0, 9, 12), (0, 9, 13), (0, 10, 13), (0, 10, 14), (0, 11, 14)],
+         targets=[(11, 16)]),
+    dict(
+         emitter=(0, 2, (1, 0)),
+         walls=[],
+         mirrors=[(0, 2, 2), (0, 2, 3), (0, 3, 3), (0, 3, 4), (0, 4, 4), (0, 4, 5), (0, 5, 5), (0, 5, 6), (0, 6, 6), (0, 6, 7), (0, 7, 7), (0, 7, 9), (0, 8, 9), (0, 8, 10), (0, 9, 10), (0, 9, 11), (0, 10, 11), (0, 10, 12), (0, 11, 12), (0, 11, 13), (0, 13, 13), (0, 13, 14), (0, 14, 14), (0, 14, 15), (0, 15, 15), (0, 15, 16), (0, 16, 16), (0, 16, 17), (0, 17, 17), (0, 17, 18), (0, 18, 18)],
+         targets=[(18, 19)]),
+    dict(
+         emitter=(0, 4, (1, 0)),
+         walls=[],
+         mirrors=[(0, 2, 4), (0, 2, 5), (0, 3, 5), (0, 3, 6), (0, 4, 6), (0, 4, 7), (0, 5, 7), (0, 5, 8), (0, 6, 8), (0, 6, 9), (0, 7, 9), (0, 7, 10), (0, 8, 10), (0, 8, 11), (0, 9, 11), (0, 9, 14), (0, 10, 14), (0, 10, 15), (0, 11, 15), (0, 11, 16), (0, 12, 16), (0, 12, 17), (0, 13, 17)],
+         targets=[(13, 19)]),
+    dict(
+         emitter=(0, 1, (1, 0)),
+         walls=[],
+         mirrors=[(0, 2, 1), (0, 2, 2), (0, 3, 2), (0, 3, 3), (0, 4, 3), (0, 4, 4), (0, 5, 4), (0, 5, 5), (0, 6, 5), (0, 6, 6), (0, 7, 6), (0, 7, 7), (0, 8, 7), (0, 8, 8), (0, 9, 8), (0, 9, 9), (0, 10, 9), (0, 10, 10), (0, 11, 10), (0, 11, 11), (0, 12, 11), (0, 12, 12), (0, 13, 12), (0, 13, 13), (0, 14, 13), (0, 14, 14), (0, 15, 14), (0, 15, 15), (0, 16, 15), (0, 16, 16), (0, 17, 16), (0, 17, 17), (0, 18, 17), (0, 18, 18), (0, 19, 18)],
+         targets=[(19, 19)]),
+    dict(
+         emitter=(0, 1, (1, 0)),
+         walls=[],
+         mirrors=[(0, 2, 1), (0, 2, 2), (0, 5, 2), (0, 5, 3), (0, 6, 3), (0, 6, 4), (0, 7, 4), (0, 7, 5), (0, 8, 5), (0, 8, 6), (0, 9, 6), (0, 9, 7), (0, 12, 7), (0, 12, 8), (0, 13, 8), (0, 13, 10), (0, 15, 10), (0, 15, 11)],
+         targets=[(18, 11)]),
 ]
 
 
@@ -66,9 +104,14 @@ def _target_px(lit):
 
 
 def _beam_px():
+    # the beam is a band through the middle of the cell: the two centre rows
+    # at CELL 4 (as the original drew it), the single centre row when CELL is
+    # odd. The cellify rewrite left a call to a helper this file never had.
     px = [[0] * CELL for _ in range(CELL)]
-    for i in range(CELL):
-        px[1][i] = px[2][i] = BEAM
+    rows = [CELL // 2] if CELL % 2 else [CELL // 2 - 1, CELL // 2]
+    for r in rows:
+        for i in range(CELL):
+            px[r][i] = BEAM
     return px
 
 
@@ -192,8 +235,7 @@ class Lz01(ARCBaseGame):
             self.complete_action()
             return
         if action == GameAction.ACTION6:
-            x = int(self.action.data.get("x", 0)) // 8
-            y = int(self.action.data.get("y", 0)) // 8
+            x, y = _click_cell(self.action.data)
             for i, (o, c, r) in self._orients.items():
                 if (c, r) == (x, y):
                     self._orients[i][0] = 1 - o

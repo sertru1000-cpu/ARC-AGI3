@@ -166,6 +166,7 @@ def main() -> None:
           f"found {len(ids)} -- games went missing")
     missing = []
     short_l1: list[int] = []
+    short_by_game: dict[str, list] = {}
     long_l1: list[int] = []
     for g in ids:
         metas = list((OWN / g).glob("*/metadata.json"))
@@ -180,6 +181,7 @@ def main() -> None:
             long_l1.append(base[0])
         else:
             short_l1.append(base[0])
+            short_by_game[g] = base
     check("every own game carries metadata and baselines", not missing, f"{missing}")
 
     # === 6. the testbed covers BOTH length classes ========================
@@ -188,13 +190,58 @@ def main() -> None:
     # reproduce the failure it was meant to study. The long batch fixes that.
     # Both halves have to stay: without the short games there is no contrast,
     # without the long ones the set is blind to our main failure again.
-    check(f"the original short games are still there (median {statistics.median(short_l1)})",
-          statistics.median(short_l1) < 21,
-          "the short half is gone -- the contrast between length classes is lost")
-    check(f"a long batch covers the 50-80 class ({sorted(long_l1)})",
-          bool(long_l1) and all(50 <= b <= 80 for b in long_l1),
-          "no game reproduces the long-exploration failure, or one drifted "
-          "out of the band -- see scripts/test_atlas_long_games.py")
+    # 03.09 evening: the owner decided to move EVERY game onto the public
+    # curve (26 of 30 rebuilt, scripts/plant_levels.py + regen_short_levels.py),
+    # so the "short half" is gone on purpose. What must hold now is the other
+    # direction: no game may quietly stay on the old 8x8 geometry with a
+    # 6-action first level unless it is one of the four still unconverted.
+    still_short = sorted(g for g, b in short_by_game.items() if b[0] < 15)
+    check(f"games still on the old short geometry: {still_short or 'none'}",
+          set(still_short) <= {"kq01", "ph01", "rg01", "mn01"},
+          "a rebuilt game came back with a 6-action first level")
+    # 03.09: was "level 1 must be 50-80". That band was the top of the public
+    # range, not its middle (median 30), and the batch built to it was never
+    # cleared once in five runs -- so it never exercised the escalation it
+    # existed for. What matters is the SHAPE against the public curve, which
+    # scripts/test_atlas_long_games.py checks level by level.
+    # 03.09: every level of a game must be a DIFFERENT level.
+    #
+    # Nothing checked this and it was quietly false: ky01 shipped nine levels
+    # of which four were distinct, levels 5-9 byte-identical. RHAE weights a
+    # level by its index, so those five carried 35 of the game's 45 total
+    # weight -- an agent that cracked level 5 collected three quarters of the
+    # game by replaying one solution, with nothing left to discover. The same
+    # thing arrived from two directions: a tuner free to pick the same layout
+    # parameters for several levels, and a generator that padded short games
+    # with copies of their last level.
+    #
+    # The baseline check cannot catch this: each duplicate level is
+    # individually correct, its optimum truly proven. The property lives
+    # BETWEEN levels, so it has to be asserted here.
+    import glob as _glob
+    import importlib.util as _ilu
+
+    dupes = []
+    for _md in sorted(_glob.glob(str(OWN / "*" / "*" / "metadata.json"))):
+        _gid = Path(_md).parent.parent.name
+        _py = Path(_md).parent / f"{_gid}.py"
+        try:
+            _sp = _ilu.spec_from_file_location(f"dup_{_gid}", _py)
+            _m = _ilu.module_from_spec(_sp)
+            _sp.loader.exec_module(_m)
+        except Exception:
+            continue
+        _lv = getattr(_m, "LEVELS", None) or getattr(_m, "LAYOUTS", None)
+        if not isinstance(_lv, list) or len(_lv) < 2:
+            continue
+        _uniq = len({repr(_x) for _x in _lv})
+        if _uniq < len(_lv):
+            dupes.append(f"{_gid}: {_uniq} различных из {len(_lv)}")
+    check("в каждой игре все уровни различны", not dupes, "; ".join(dupes))
+
+    check("a long batch follows the public curve (L1 near 30)",
+          len(long_l1) >= 5 and all(24 <= x <= 40 for x in long_l1),
+          f"level-1 baselines: {long_l1}")
 
     if FAILURES:
         print(f"\n{len(FAILURES)} check(s) failed.")

@@ -30,7 +30,21 @@ sys.path.insert(0, str(ROOT / "atlas_src/src/tufa-arc-agi-framework/src"))
 sys.path.insert(0, str(ROOT / "atlas_src/src/ARC3-Inference"))
 
 OWN = ROOT / "our_games"
-BAND = (50, 80)
+# 03.09: this used to be BAND = (50, 80) -- "level 1 must be as long as the
+# public games we fail on". That target was wrong twice over. The public
+# MEDIAN level 1 is 30, not 65 (7-78 is the full range, and 50-80 is its top
+# end), so the batch was built two levels too hard: measured over five runs of
+# the whole testbed, these games were never cleared once, on any level. And a
+# game nobody enters cannot test escalation, which was the batch's whole
+# point.
+#
+# The target is now the public CURVE, not a band on one level: a level-1
+# warm-up near 30, roughly double at level 2, a plateau, a jump at level 5.
+# What is checked is the SHAPE -- absolute values may drift a few actions with
+# the ring geometry, but a flat game is a broken game.
+CURVE_L1 = (24, 40)          # public median 30
+CURVE_L2_RATIO = (1.5, 2.3)  # public 1.8
+CURVE_END_RATIO = (2.0, 4.0)  # public 3.2 from level 1 to level 5
 
 FAILURES: list[str] = []
 
@@ -194,9 +208,17 @@ def main() -> None:
         if not base:
             continue
 
-        check(f"{game}: level 1 baseline {base[0]} is in the {BAND[0]}-{BAND[1]} band",
-              BAND[0] <= base[0] <= BAND[1],
+        check(f"{game}: level 1 baseline {base[0]} near the public median 30",
+              CURVE_L1[0] <= base[0] <= CURVE_L1[1],
               f"got {base[0]} -- this game does not cover the long class")
+        r2 = base[1] / base[0] if len(base) > 1 and base[0] else 0
+        check(f"{game}: level 2 is {r2:.1f}x level 1 (public 1.8x)",
+              CURVE_L2_RATIO[0] <= r2 <= CURVE_L2_RATIO[1],
+              "a level that does not get harder is why the old batch scored zero")
+        rE = max(base) / base[0] if base[0] else 0
+        check(f"{game}: hardest level is {rE:.1f}x level 1 (public 3.2x)",
+              CURVE_END_RATIO[0] <= rE <= CURVE_END_RATIO[1],
+              f"per-level: {base}")
 
         solver = SOLVERS.get(game)
         if solver is None:

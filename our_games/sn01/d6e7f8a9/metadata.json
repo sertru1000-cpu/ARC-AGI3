@@ -1,12 +1,13 @@
 {
-    "game_id": "sn01-d6e7f8a9",
-    "class_name": "Sn01",
-    "title": "Snake Trail",
-    "baseline_actions": [
-        6,
-        8,
-        8,
-        10,
-        10
-    ]
+  "game_id": "sn01-d6e7f8a9",
+  "class_name": "Sn01",
+  "title": "Snake Trail",
+  "baseline_actions": [
+    22,
+    33,
+    51,
+    26,
+    52,
+    49
+  ]
 }
