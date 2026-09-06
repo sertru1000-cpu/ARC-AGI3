@@ -28,7 +28,7 @@ for i in 2 3; do
   $PY scripts/conversion.py "runs/calib_$i"
   if [ "$i" = "2" ]; then
     echo "=== пуш прогона 3 ==="
-    $K kernels push -p notebooks_atlas 2>&1 | tail -1
+    $K kernels push -p kernels/notebooks_atlas 2>&1 | tail -1
   fi
 done
 

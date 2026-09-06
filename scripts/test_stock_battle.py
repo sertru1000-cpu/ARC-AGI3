@@ -24,9 +24,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-NB = ROOT / (sys.argv[1] if len(sys.argv) > 1 else "notebooks_stockbattle") / "submission.ipynb"   # optional: dir name to check
-META = ROOT / "notebooks_stockbattle" / "kernel-metadata.json"
-DUCK = ROOT / "notebooks_duck" / "submission.ipynb"
+NB = ROOT / (sys.argv[1] if len(sys.argv) > 1 else "kernels/notebooks_stockbattle") / "submission.ipynb"   # optional: dir name to check
+META = ROOT / "kernels" / "notebooks_stockbattle" / "kernel-metadata.json"
+DUCK = ROOT / "kernels" / "notebooks_duck" / "submission.ipynb"
 
 fails: list[str] = []
 

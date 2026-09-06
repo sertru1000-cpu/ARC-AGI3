@@ -27,11 +27,11 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC_NB = ROOT / "notebooks_duck" / "submission.ipynb"
+SRC_NB = ROOT / "kernels" / "notebooks_duck" / "submission.ipynb"
 OUT_DIR = ROOT / (os.environ.get("ATLAS_STOCKLAB_OUT", "").strip()
-                  or ("notebooks_stockbattle"
+                  or ("kernels/notebooks_stockbattle"
                       if os.environ.get("ATLAS_STOCKLAB_BATTLE", "0") not in ("0", "", "false", "no")
-                      else "notebooks_stocklab"))
+                      else "kernels/notebooks_stocklab"))
 OUT_NB = OUT_DIR / "submission.ipynb"
 
 # 04.09: ATLAS_STOCKLAB_KERNEL overrides the kernel slug, so a pure-stock
@@ -1055,7 +1055,7 @@ def build() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     OUT_NB.write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    meta = json.loads((ROOT / "notebooks_duck" / "kernel-metadata.json").read_text(encoding="utf-8"))
+    meta = json.loads((ROOT / "kernels" / "notebooks_duck" / "kernel-metadata.json").read_text(encoding="utf-8"))
     meta["id"] = KERNEL_ID
     meta["title"] = KERNEL_ID.split("/")[-1].replace("-", " ")
     # The battle build must NOT mount our dataset. It needs nothing from it

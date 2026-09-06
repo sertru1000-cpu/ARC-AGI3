@@ -63,7 +63,7 @@ def _ok(name: str) -> None:
 
 def main() -> None:
     # === 1. The shipped notebook on disk carries no placeholder ============
-    nb_path = ROOT / "notebooks_atlas" / "submission.ipynb"
+    nb_path = ROOT / "kernels" / "notebooks_atlas" / "submission.ipynb"
     if nb_path.exists():
         nb = json.loads(nb_path.read_text(encoding="utf-8"))
         hits = []

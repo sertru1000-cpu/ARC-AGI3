@@ -3,12 +3,12 @@ as the real submission notebook, but restricted to a handful of specific
 games with a generous per-game runtime cap, for deep manual transcript
 analysis instead of a full 25-game calibration sweep.
 
-Does not touch notebooks_atlas/ (the real submission pipeline) or its Kaggle
-kernel slug -- writes to notebooks_atlas_debug/ under a separate slug so a
+Does not touch kernels/notebooks_atlas/ (the real submission pipeline) or its Kaggle
+kernel slug -- writes to kernels/notebooks_atlas_debug/ under a separate slug so a
 push here can never be confused with (or accidentally overwrite) the real
 arc3-atlas kernel history.
 
-Run scripts/build_atlas_notebook.py first so notebooks_atlas/submission.ipynb
+Run scripts/build_atlas_notebook.py first so kernels/notebooks_atlas/submission.ipynb
 reflects the current atlas_src changes -- this script patches THAT output,
 it does not rebuild from the Duck bundle itself.
 """
@@ -19,15 +19,15 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC_NB = ROOT / "notebooks_atlas" / "submission.ipynb"
-SRC_META = ROOT / "notebooks_atlas" / "kernel-metadata.json"
-OUT_DIR = ROOT / "notebooks_atlas_debug"
+SRC_NB = ROOT / "kernels" / "notebooks_atlas" / "submission.ipynb"
+SRC_META = ROOT / "kernels" / "notebooks_atlas" / "kernel-metadata.json"
+OUT_DIR = ROOT / "kernels" / "notebooks_atlas_debug"
 OUT_NB = OUT_DIR / "submission.ipynb"
 KERNEL_SLUG = "sergueimakarov/arc3-atlas-debug"
 KERNEL_TITLE = "arc3 atlas debug"
 
 # The 3 games picked for the reasoning-pattern deep-dive (see
-# notebooks_colab/atlas_colab_debug.ipynb for the full rationale per game --
+# kernels/notebooks_colab/atlas_colab_debug.ipynb for the full rationale per game --
 # this is the Kaggle-side rerun of the same investigation after Colab's A100
 # turned out too slow/unreliable for an unattended multi-hour session).
 DEBUG_GAME_IDS = [

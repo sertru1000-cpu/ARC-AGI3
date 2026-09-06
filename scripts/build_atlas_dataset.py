@@ -58,12 +58,12 @@ def build() -> None:
     print("explicit per-push go-ahead, then run manually:")
     print(f"  .venv/Scripts/kaggle.exe datasets create -p {BUNDLE_DIR} --dir-mode zip")
     print()
-    print("After that succeeds, in notebooks_duck/submission.ipynb cell 3")
+    print("After that succeeds, in kernels/notebooks_duck/submission.ipynb cell 3")
     print("(DATASET_SOURCES) replace:")
     print(f'  "{OLD_DATASET_REF}"')
     print("with:")
     print(f'  "{DATASET_OWNER}/{DATASET_SLUG}"')
-    print("then rebuild notebooks_atlas via scripts/build_atlas_notebook.py.")
+    print("then rebuild kernels/notebooks_atlas via scripts/build_atlas_notebook.py.")
 
 
 if __name__ == "__main__":

@@ -16,8 +16,8 @@ def _as_bool(raw: str) -> bool:
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC_NB = ROOT / "notebooks_duck" / "submission.ipynb"
-OUT_DIR = ROOT / "notebooks_atlas"
+SRC_NB = ROOT / "kernels" / "notebooks_duck" / "submission.ipynb"
+OUT_DIR = ROOT / "kernels" / "notebooks_atlas"
 OUT_NB = OUT_DIR / "submission.ipynb"
 KERNEL_SLUG = "sergueimakarov/arc3-atlas"
 KERNEL_TITLE = "arc3 atlas"
@@ -805,7 +805,7 @@ def build() -> None:
         json.dumps(nb, indent=1, ensure_ascii=False), encoding="utf-8", newline="\n"
     )
 
-    meta = json.loads((ROOT / "notebooks_duck" / "kernel-metadata.json").read_text(encoding="utf-8"))
+    meta = json.loads((ROOT / "kernels" / "notebooks_duck" / "kernel-metadata.json").read_text(encoding="utf-8"))
     meta["id"] = KERNEL_SLUG
     meta["title"] = KERNEL_TITLE
     meta["dataset_sources"] = [

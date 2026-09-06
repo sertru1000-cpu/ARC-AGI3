@@ -309,6 +309,55 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">stock-flash-kvprobe v1</span><span class="v-date">06.09 23:15 МСК, проба (30 мин на игру)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary"><strong>Проба рычага профиля обслуживания: KV-кэш vLLM 5 &rarr; 9 GiB.</strong> По счётчикам сервера flash v1 запрос ждёт в очереди 121.6 с из 139.7 (87%): KV 5 GiB = 105 202 токена = максимум 3.2 одновременных запроса по 32k при промптах ~20k, при этом до кэша было свободно 12.6 GiB. Кернел = <code>arc3-stock-flash</code> с одной правкой в ячейке профиля (<code>TAAF_VLLM_KV_CACHE_MEMORY_BYTES</code> 5368709120 &rarr; 9663676416) плюс потолок 1800 с на игру только в оффлайн-ветке &mdash; ~40 мин квоты, чтобы поймать OOM до полного прогона.</p>
+        <ul class="changes">
+          <li>полный кандидат <code>arc3-stock-flash-kv</code> собран (та же правка без потолка), не пушен &mdash; ждёт пробы</li>
+          <li>резерв при OOM: 7 GiB; альтернативы без риска памяти &mdash; история 7 &rarr; 4 сообщений, prefix caching</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Критерии записаны до пуска:</strong> проба чиста, если watchdog 0 перезапусков и очередь на запрос по prom &lt; 60 с; полный прогон &mdash; вызовов на игру &ge; 80 (было 54) и парный тест против flash v1 по откалиброванным порогам (побед &minus; поражений &ge; +8 и медиана &ge; +8). Идёт, не разобрана.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">stock-flash-skeptic v1</span><span class="v-date">06.09 22:59 МСК, Phase A (2,2 ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary"><strong>Второй слой над Flash-Next: инъекция скепсиса.</strong> Кернел <code>arc3-stock-flash-skeptic</code> = боевой <code>arc3-stock-flash</code> (17 ячеек из 18) плюс патч в ячейке-хуке, не за гейтом: харнесс считает хэши досок текущего уровня; при возврате в текущее состояние &ge; 3 раз за 40 действий или &ge; 6 возвратах в виденное за окно промпт начинается с жёсткого прерывания («допущение неверно, назови его, проверь взаимоисключающую гипотезу одним действием»), и один этот ответ сэмплируется при temperature 1.2 вместо 0.6. Пауза 10 вызовов, сброс на новом уровне. Ничего не останавливает &mdash; в отличие от exploit.</p>
+        <ul class="changes">
+          <li>ретроспектива по логам flash v1: 15&ndash;20 срабатываний в ~10 играх, sp80 (137 возвратов) и tn36 (142) включены</li>
+          <li>восемь проверок заглушкой: без повторов &mdash; штатно; 3 возврата &mdash; прерывание и 1.2 только на первый ответ; пауза; циклический триггер; кадры другого уровня не считаются; без кадра &mdash; без ошибок; thread-local на игру</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Критерии записаны до пуша</strong> (парный тест против flash v1 = 9.43): польза &mdash; побед &ge; 4, поражений &le; 1, медиана &gt; +10; вред &mdash; поражений &ge; 3 или среднее &lt; 7.0. Особый взгляд: уровни в играх со срабатываниями и отказы после ответов при 1.2. Фаза A идёт, не разобрана.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">stock-flash-exploit v1</span><span class="v-date">06.09 14:39 МСК, Phase A (2,2 ч)</span></div>
+          <span class="badge phase-a">калибровка</span>
+        </div>
+        <p class="summary"><strong>Первый слой над Flash-Next: exploit-режим.</strong> Кернел <code>arc3-stock-flash-exploit</code> = boевой <code>arc3-stock-flash</code> (17 ячеек из 18) плюс патч в ячейке-хуке, не за гейтом: проверка потолка игры дополнена двумя тормозами движка &mdash; ZERO (ни одного уровня к 60% потолка &rarr; стоп) и STALL (уровень не рос 79 мин &rarr; стоп). Остановленная игра сохраняет уровни; освобождённый сервер vLLM достаётся живым играм. Модель ничего не видит.</p>
+        <ul class="changes">
+          <li>основание: в Фазе A flash v1 все 25 игр получили по 52&ndash;56 вызовов (сервер делит поровну), 69% действий &mdash; хвост после последнего уровня, 4 нулевые игры сожгли 1 900 действий</li>
+          <li>проекция по таймлайну flash v1: +226 вызовов, +42% десяти играм, ещё росшим в конце; цена &mdash; su15 L2 на 116-й минуте</li>
+          <li>ручки <code>ATLAS_EXPLOIT_ZERO_FRAC</code> / <code>ATLAS_EXPLOIT_STALL_S</code>; причина остановки в <code>solver_note</code> и строкой <code>[EXPLOIT]</code> в логе</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Критерии записаны до пуша</strong> (парный тест <code>scripts/paired_delta.py</code> против flash v1 = 9.43 по играм): польза &mdash; побед &ge; 4, поражений &le; 1 (ожидаемое &mdash; su15), медиана ненулевых дельт &gt; +10 &rarr; в бой; вред &mdash; поражений &ge; 3 или среднее &lt; 7.0; между &mdash; шум, следующий слой.<br><br><strong>Фаза A разобрана (06.09 22:55 МСК): RHAE 8.09 &mdash; ВРЕД по критериям.</strong> Парный тест против flash v1: побед 6, поражений 13, медиана ненулевых дельт &minus;2.4. Уровней 34 (40), L1 в 15 (21), нулей 10 (4). Механика сработала: остановлено 16 игр (10 ZERO, 6 STALL), 11 живых получили 69 вызовов вместо 54 (+28%) и там дали tr87 1&rarr;5 и lp85 1&rarr;5 уровней. Но ZERO убил 7 игр, бравших L1 в v1 на 22&ndash;77-й минуте, STALL срезал паузы перед уровнем (ar25, ft09, re86); общее число вызовов упало (1 271 против 1 351) &mdash; сервер не единственное узкое место. Слой отклонён.</p>
+      </div>
+    </div>
+
+    <div class="entry">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">stock-flash v1</span><span class="v-date">06.09 07:14 МСК, Phase A (2,2 ч)</span></div>
           <span class="badge phase-a">калибровка</span>
         </div>
@@ -317,7 +366,7 @@
           <li>опора: тот же кернел дал 6.76 (keithtyser, 01.09) и 9.00 (копия у Tufa Labs, 01.09) на публичных 25 против 3.02 нашего стока 27B; 36 и 45 уровней против 19</li>
           <li>семь проверок до пуша чисты: ноутбук равен оригиналу, источники и карта те же, боевая ветка через шлюз, бюджет в обеих ветках, <code>ONLY_RESET_LEVELS=true</code>, наших обёрток нет</li>
         </ul>
-        <p class="score-note" style="margin-top:0.5rem;"><strong>Критерии записаны до пуша:</strong> польза &mdash; RHAE &ge; 5.0 и первый уровень в &ge; 18 играх из 25; провал &mdash; &lt; 4.0 или падение vLLM-сервера; между &mdash; повтор перед боем. При пользе &mdash; слот боя 06.09 из этой версии. Фаза A идёт, не разобрана.</p>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Критерии записаны до пуша:</strong> польза &mdash; RHAE &ge; 5.0 и первый уровень в &ge; 18 играх из 25; провал &mdash; &lt; 4.0 или падение vLLM-сервера; между &mdash; повтор перед боем. При пользе &mdash; слот боя 06.09 из этой версии.<br><br><strong>Фаза A разобрана (06.09 14:20 МСК): RHAE 9.43</strong>, 40 уровней, первый уровень в 21 игре из 25, второй в 9, третий в 5; 175 действий на игру; очередь Kaggle 4 ч 42 мин, прогон 11:56&ndash;14:18; сервер vLLM без перезапусков. Критерии пройдены (&ge; 5.0 и L1 &ge; 18). Три точки конфигурации: 6.76 / 9.00 / 9.43. Нули: g50t, sk48, sp80, tn36. <strong>Пороги боя, записанные до подачи:</strong> &ge; 3.0 &mdash; новая база подтверждена; 2.0&ndash;3.0 &mdash; лучше стока 1.61, перенос слабый, повтор; &lt; 2.0 &mdash; переноса нет, разбор.</p>
       </div>
     </div>
 

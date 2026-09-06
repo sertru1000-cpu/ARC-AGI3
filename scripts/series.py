@@ -172,7 +172,7 @@ def advance() -> None:
             return
     log(f"{nxt['name']}: стражи пройдены")
 
-    r = subprocess.run([str(KAGGLE), "kernels", "push", "-p", str(ROOT / "notebooks_atlas")],
+    r = subprocess.run([str(KAGGLE), "kernels", "push", "-p", str(ROOT / "kernels" / "notebooks_atlas")],
                        capture_output=True, text=True)
     if "successfully pushed" not in (r.stdout or ""):
         log(f"{nxt['name']}: ПУШ НЕ ПРОШЁЛ: {(r.stdout or '').strip()} {(r.stderr or '').strip()}")
