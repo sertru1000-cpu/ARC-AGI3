@@ -110,6 +110,10 @@ def main():
                                         "(перенос оракул-инъекции на стенд)")
     ap.add_argument("--only-hinted", action="store_true",
                     help="слать только те ходы, для которых в JSON есть правило")
+    ap.add_argument("--select-only", action="store_true",
+                    help="ОТБИРАТЬ по JSON, но правило НЕ вставлять — это контрольная сторона. "
+                         "Без этого флага контроль молча превращается во вторую опытную сторону: "
+                         "ошибка допущена 12.09, обе стороны получили одинаковые промпты")
     ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--workers", type=int, default=3)
@@ -135,12 +139,15 @@ def main():
     # Вставка бывает общей (--variant-file) или СВОЕЙ У КАЖДОЙ ИГРЫ (--hints-file).
     # Второе нужно для переноса оракул-инъекции: правило tn36 не имеет смысла для sp80.
     def extra_for(it):
+        if a.select_only:          # контрольная сторона: отбор по JSON, вставки нет
+            return None
         return hints.get(it["game"], common) if hints else common
     sampling = {"temperature": a.temperature, "top_p": a.top_p}
     if a.send_top_k:
         sampling.update({"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}})
 
-    kind = "с правилом каждой игры" if hints else (", со вставкой" if common else "")
+    kind = ("КОНТРОЛЬ (отбор по JSON, вставки нет)" if a.select_only
+            else ("с правилом каждой игры" if hints else (", со вставкой" if common else "")))
     print("шлём %d ходов x %d повторов на %s, модель %s %s"
           % (len(items), a.repeats, a.base_url, a.model, kind))
     jobs = [(it,) for _ in range(a.repeats) for it in items]
