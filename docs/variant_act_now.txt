@@ -1,0 +1,1 @@
+This turn must end in an environment action. Inspect only what you need in order to choose, then finish your code with a call to action([...]). Do not spend this turn purely on printing or measuring the board. If you genuinely cannot choose any action yet, write exactly NO_ACTION_POSSIBLE and give the one missing fact that blocks you.
