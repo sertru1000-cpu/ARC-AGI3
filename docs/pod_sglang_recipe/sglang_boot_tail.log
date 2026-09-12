@@ -1,0 +1,603 @@
+215:/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible
+236:/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible
+---
+    output = super().forward(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/models/qwen3_vl.py", line 1458, in forward
+    hidden_states = general_mm_embed_routine(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/managers/mm_utils.py", line 738, in general_mm_embed_routine
+    hidden_states = language_model(
+                    ^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/models/qwen4_exp.py", line 1754, in forward
+    model_output = super().forward(
+                   ^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/models/qwen4_exp.py", line 1702, in forward
+    hidden_states, residual = layer(
+                              ^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/models/qwen4_exp.py", line 1474, in forward
+    hidden_states = self._run_qwen4_exp_mlp(hidden_states, forward_batch)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/models/qwen4_exp.py", line 1405, in _run_qwen4_exp_mlp
+    hidden_states = self.mlp(hidden_states, forward_batch)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/models/qwen2_moe.py", line 622, in forward
+    final_hidden_states = self._forward_router_experts(hidden_states)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/models/qwen2_moe.py", line 542, in _forward_router_experts
+    return self.experts(hidden_states, topk_output)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/layers/moe/fused_moe_triton/layer.py", line 1458, in forward
+    return self.forward_impl(
+           ^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/layers/moe/fused_moe_triton/layer.py", line 1491, in forward_impl
+    combine_input = self.run_moe_core(
+                    ^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/layers/moe/fused_moe_triton/layer.py", line 1532, in run_moe_core
+    return self.quant_method.apply(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/layers/quantization/modelopt_quant.py", line 2910, in apply
+    return self.runner.run(dispatch_output, quant_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/layers/moe/moe_runner/runner.py", line 147, in run
+    return self.fused_func(dispatch_output, quant_info, self.config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py", line 262, in fused_experts_none_to_flashinfer_cutlass
+    output = _run_flashinfer_cutlass(
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/sglang_src/python/sglang/srt/layers/moe/moe_runner/flashinfer_cutlass.py", line 222, in _run_flashinfer_cutlass
+    output = flashinfer_cutlass_fused_moe(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/flashinfer/api_logging.py", line 2333, in _auto_dump_wrapper
+    return _inner(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/flashinfer/fused_moe/core.py", line 1155, in cutlass_fused_moe
+    return get_cutlass_fused_moe_module(device_arch).cutlass_fused_moe(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/flashinfer/fused_moe/core.py", line 301, in get_cutlass_fused_moe_module
+    module = gen_cutlass_fused_moe_sm120_module(use_fast_build).build_and_load()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/venv_q4/lib/python3.12/site-packages/flashinfer/jit/core.py", line 320, in build_and_load
+    self.build()
+  File "/workspace/venv_q4/lib/python3.12/site-packages/flashinfer/jit/core.py", line 427, in build
+    run_ninja(self.build_dir, self.ninja_path, verbose)
+  File "/workspace/venv_q4/lib/python3.12/site-packages/flashinfer/jit/cpp_ext.py", line 382, in run_ninja
+    raise RuntimeError(msg) from e
+RuntimeError: Ninja build failed. Ninja output:
+ninja: Entering directory `/root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120'
+[1/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_mixed_utils.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cach
+[2/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_tma_warp_specialized_input.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_tma_warp_specialized_input.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_tma_warp_specialized_input.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/ro
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/../include/moe_gemm_kernels.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_tma_warp_specialized_input.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[3/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/fp8_blockscale_gemm_fp8_blockscale_gemm.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/
+[4/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/cutlass_backend_flashinfer_cutlass_fused_moe_binding.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CX
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/cutlass_backend_flashinfer_cutlass_fused_moe_binding.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/cutlass_backend_flashinfer_cutlass_fused_moe_binding.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/layout/matrix.h:44,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/gemm/gemm.h:39,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/include/moe_kernels.h:21,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/fused_moe/cutlass_backend/flashinfer_cutlass_fused_moe_binding.cu:18:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[5/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/cutlass_backend_cutlass_fused_moe_instantiation.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_A
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/cutlass_backend_cutlass_fused_moe_instantiation.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/cutlass_backend_cutlass_fused_moe_instantiation.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/fused_moe/cutlass_backend/cutlass_fused_moe_kernels.cuh:37,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/fused_moe/cutlass_backend/cutlass_fused_moe_instantiation.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[6/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_bf16.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_bf16.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_bf16.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_bf16_bf16.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[7/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_uint8.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/roo
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_uint8.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_uint8.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cach
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_bf16_uint8.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[8/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_uint4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/roo
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_uint4.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_uint4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cach
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_bf16_uint4.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[9/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_uint4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/roo
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_uint4.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_uint4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cach
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp16_uint4.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[10/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_fp4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_fp4.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_fp4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache/
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp16_fp4.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[11/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_fp4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_fp4.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_fp4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache/
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_bf16_fp4.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[12/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp32_fp32.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/roo
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp32_fp32.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp32_fp32.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp32_fp32.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[13/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp4_fp4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp4_fp4.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp4_fp4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache/u
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp4_fp4.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[14/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_uint8.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/ro
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_uint8.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_uint8.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cach
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp16_uint8.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[15/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group0.generated.cuda.o.d -DPy_LIMITED_API=0x03090000 -
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group0.generated.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group0.generated.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCX
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/launchers/../../include/moe_gemm_kernels.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/launchers/moe_gemm_tma_ws_launcher.inl:21,
+                 from /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/generated/cutlass_instantiations/120/gemm_grouped/120/cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group0.generated.cu:1:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[16/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group1.generated.cuda.o.d -DPy_LIMITED_API=0x03090000 -
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group1.generated.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group1.generated.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCX
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/launchers/../../include/moe_gemm_kernels.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/launchers/moe_gemm_tma_ws_launcher.inl:21,
+                 from /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/generated/cutlass_instantiations/120/gemm_grouped/120/cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group1.generated.cu:1:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[17/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_uint4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/roo
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_uint4.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_uint4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp8_uint4.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[18/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_fp8.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_fp8.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_fp8.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache/u
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp8_fp8.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[19/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_fp8.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_fp8.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_bf16_fp8.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache/
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_bf16_fp8.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[20/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group2.generated.cuda.o.d -DPy_LIMITED_API=0x03090000 -
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group2.generated.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/120_cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group2.generated.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCX
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/launchers/../../include/moe_gemm_kernels.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/launchers/moe_gemm_tma_ws_launcher.inl:21,
+                 from /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/generated/cutlass_instantiations/120/gemm_grouped/120/cutlass_kernel_file_gemm_grouped_sm120_M128_BS_group2.generated.cu:1:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[21/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_fp16.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/roo
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_fp16.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp16_fp16.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp16_fp16.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[22/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_fp4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/
+FAILED: [code=1] /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_fp4.cuda.o 
+ /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/moe_gemm_moe_gemm_kernels_fp8_fp4.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root/.cache/u
+In file included from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/extended_data_types.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/builtin.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/dialect.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h:26,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/assert.h:25,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/__cccl_config:15,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__internal/atomic.h:13,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/detail/__config:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/utility:14,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cutlass/fast_math.h:42,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/math.hpp:36,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/numeric/integral_constant.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/container/array.hpp:35,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/int_tuple.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/layout.hpp:34,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor_impl.hpp:45,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cutlass/include/cute/tensor.hpp:33,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch.h:24,
+                 from /root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp8_fp4.cu:17:
+/root/.cache/uv/archive-v0/1Qrsmi7d0YZCw4vc5coPO/flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h:41:8: error: #error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+   41 | #      error "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"
+      |        ^~~~~
+[23/97]  /workspace/venv_q4/lib/python3.12/site-packages/nvidia/cu13/bin/nvcc --generate-dependencies-with-compile -MF /root/.cache/sglang/.cache/flashinfer/0.6.17/120f/cached_ops/fused_moe_120/cutlass_backend_deepgemm_jit_setup.cuda.o.d -DPy_LIMITED_API=0x03090000 -D_GLIBCXX_USE_CXX11_ABI=1 -I/root
+ninja: build stopped: subcommand failed.
+
+
+[2026-09-09 18:47:34] Received sigquit from a child process. It usually means the child failed.
+[2026-09-09 18:47:34] kill_process_tree called: parent_pid=14982, include_parent=True, pid=14982

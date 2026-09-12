@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.sergeimakarov.arc3.push2a2b</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>/Users/sergeimakarov/Projects/ARC-AGI-3/scripts/scheduled_push_2a_2b.sh</string></array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>StartCalendarInterval</key><dict><key>Month</key><integer>9</integer><key>Day</key><integer>12</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>15</integer></dict>
+  <key>StandardOutPath</key><string>/Users/sergeimakarov/Projects/ARC-AGI-3/runs/scheduled_push_launchd.out</string>
+  <key>StandardErrorPath</key><string>/Users/sergeimakarov/Projects/ARC-AGI-3/runs/scheduled_push_launchd.out</string>
+</dict></plist>

@@ -1,0 +1,423 @@
+<meta charset="utf-8">
+<title>Два агента над буфером</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#EFF2F6; --surface:#FFFFFF; --surface-2:#E6EBF1;
+    --ink:#151E28; --ink-2:#4C5967; --ink-3:#77838F;
+    --line:#CFD8E1; --line-soft:#E1E7ED;
+    --play:#15607B;      /* играющий агент */
+    --synth:#A8531D;     /* синтезатор */
+    --ok:#2C6B41; --bad:#9F4130;
+    --play-soft:#DDEAF0; --synth-soft:#F4E5D8; --ok-soft:#DEEBE1; --bad-soft:#F3E0DB;
+    --shadow:0 1px 1px rgba(21,30,40,.05), 0 12px 24px -20px rgba(21,30,40,.5);
+    --display:"Archivo","Arial Narrow",sans-serif;
+    --body:"Source Serif 4",Georgia,serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0F141A; --surface:#161D25; --surface-2:#1E2731;
+      --ink:#E7EDF3; --ink-2:#A7B4C1; --ink-3:#7C8895;
+      --line:#2A343F; --line-soft:#212A34;
+      --play:#5DB4D0; --synth:#DE9257;
+      --ok:#7FC994; --bad:#DD8674;
+      --play-soft:#12303C; --synth-soft:#3A2617; --ok-soft:#17301F; --bad-soft:#341C17;
+      --shadow:0 1px 1px rgba(0,0,0,.4), 0 12px 26px -20px rgba(0,0,0,.9);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0F141A; --surface:#161D25; --surface-2:#1E2731;
+    --ink:#E7EDF3; --ink-2:#A7B4C1; --ink-3:#7C8895;
+    --line:#2A343F; --line-soft:#212A34;
+    --play:#5DB4D0; --synth:#DE9257;
+    --ok:#7FC994; --bad:#DD8674;
+    --play-soft:#12303C; --synth-soft:#3A2617; --ok-soft:#17301F; --bad-soft:#341C17;
+    --shadow:0 1px 1px rgba(0,0,0,.4), 0 12px 26px -20px rgba(0,0,0,.9);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+       font-family:var(--body);font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .page{max-width:1000px;margin:0 auto;padding:56px 24px 88px;display:flex;flex-direction:column;gap:44px}
+
+  h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+  h1{font-size:clamp(34px,5vw,52px);line-height:1.02;font-weight:700}
+  h2{font-size:25px;font-weight:700}
+  h3{font-size:17px;font-weight:600;letter-spacing:.02em}
+  p{margin:0;max-width:68ch}
+  .kicker{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .lede{font-size:19px;color:var(--ink-2);max-width:66ch}
+  header{border-bottom:2px solid var(--ink);padding-bottom:26px;display:flex;flex-direction:column;gap:12px}
+
+  section{display:flex;flex-direction:column;gap:16px}
+  .head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .head .num{font-family:var(--mono);font-size:12px;color:var(--ink-3);letter-spacing:.1em}
+
+  figure{margin:0;background:var(--surface);border:1px solid var(--line-soft);
+         border-radius:4px;padding:22px 20px 16px;box-shadow:var(--shadow);overflow-x:auto}
+  figure svg{display:block;max-width:100%;height:auto;margin:0 auto;color:var(--ink-2)}
+  figcaption{margin-top:14px;font-size:14px;color:var(--ink-3);max-width:70ch}
+
+  code,.mono{font-family:var(--mono);font-size:.86em;background:var(--surface-2);
+             padding:1px 5px;border-radius:3px;color:var(--ink)}
+
+  .rule{background:var(--surface);border-left:4px solid var(--play);padding:18px 22px;
+        display:flex;flex-direction:column;gap:10px}
+  .rule pre{margin:0;overflow-x:auto;font-family:var(--mono);font-size:13.5px;color:var(--ink)}
+  .rule ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15.5px;color:var(--ink-2)}
+
+  table{border-collapse:collapse;width:100%;font-size:14.5px;font-variant-numeric:tabular-nums}
+  caption{text-align:left;font-size:13px;color:var(--ink-3);padding-bottom:9px}
+  th,td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line-soft)}
+  th:first-child,td:first-child{text-align:left;font-family:var(--mono);font-size:13px;white-space:nowrap}
+  thead th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+           color:var(--ink-3);border-bottom:1.5px solid var(--line);font-weight:500}
+  tbody tr.now td{background:var(--play-soft)}
+  .tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line-soft);border-radius:4px;padding:16px 14px}
+
+  .pill{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+        padding:3px 8px;border-radius:2px;white-space:nowrap}
+  .pill.play{background:var(--play-soft);color:var(--play)}
+  .pill.synth{background:var(--synth-soft);color:var(--synth)}
+  .pill.bad{background:var(--bad-soft);color:var(--bad)}
+
+  .legend{display:flex;flex-wrap:wrap;gap:10px 22px;padding:12px 16px;background:var(--surface);
+          border:1px solid var(--line-soft);border-radius:4px;font-size:13.5px;color:var(--ink-2)}
+  .legend span{display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .legend i{width:11px;height:11px;border-radius:50%;flex:none;display:inline-block}
+
+  footer{border-top:1px solid var(--line);padding-top:18px;font-family:var(--mono);
+         font-size:11.5px;color:var(--ink-3);display:flex;flex-direction:column;gap:6px}
+</style>
+
+<div class="page">
+
+<header>
+  <p class="kicker">ARC Prize 2026 · линия «исполняемая модель мира» · 09.09.2026</p>
+  <h1>Два агента над буфером</h1>
+  <p class="lede">Как устроен наш агент с моделью мира: кто ходит, кто пишет программу,
+  кто её принимает и где именно метод упирается сейчас. Все числа — из прогонов на 25 публичных
+  играх по полчаса на игру.</p>
+</header>
+
+<section>
+  <div class="head"><span class="num">00</span><h2>Порядок работы с игрой</h2></div>
+  <p>Схема ниже показывает устройство, а эта лента — время: что за чем происходит от старта
+  кернела до плана. Цвет отмечает, чья это работа: серым движок и харнесс, синим играющий агент,
+  оранжевым синтезатор. Те же цвета работают и на схеме связей ниже.</p>
+
+  <div class="legend">
+    <span><i style="background:var(--ink-3)"></i>движок игры и харнесс</span>
+    <span><i style="background:var(--play)"></i>играющий агент</span>
+    <span><i style="background:var(--synth)"></i>синтезатор модели</span>
+    <span><i style="background:var(--ok)"></i>взятый уровень, приём, план</span>
+    <span><i style="background:var(--bad)"></i>где мы остановились</span>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 940 706" role="img" aria-label="Двенадцать шагов работы с игрой по порядку: старт кернела, первый кадр, промпт, код хода, проверка кода на действие, обрастание кода, ход в движок, отчёт проверки, взятый уровень, пробуждение синтезатора, приём программы, включение плана">
+      <defs>
+        <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 9,5 0,9" style="fill:var(--play)"></polygon>
+        </marker>
+      </defs>
+      <line x1="96" y1="38" x2="96" y2="662" style="stroke:var(--line)" stroke-width="2"></line>
+      <circle cx="96" cy="64" r="13" style="fill:var(--surface); stroke:var(--ink-3)" stroke-width="2"></circle>
+      <text x="96" y="68" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--ink-3)">1</text>
+      <text x="126" y="62" font-size="14.5" style="fill:var(--ink)">Кернел стартует</text>
+      <text x="126" y="80" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">поднимается сервер модели; 25 игр запускаются разом, у каждой свой агент</text>
+      <circle cx="96" cy="116" r="13" style="fill:var(--surface); stroke:var(--ink-3)" stroke-width="2"></circle>
+      <text x="96" y="120" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--ink-3)">2</text>
+      <text x="126" y="114" font-size="14.5" style="fill:var(--ink)">Игра даёт первый кадр</text>
+      <text x="126" y="132" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">доска 64×64 символами, объекты, номер уровня, доступные действия</text>
+      <circle cx="96" cy="168" r="13" style="fill:var(--surface); stroke:var(--play)" stroke-width="2"></circle>
+      <text x="96" y="172" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--play)">3</text>
+      <text x="126" y="166" font-size="14.5" style="fill:var(--ink)">Харнесс собирает промпт</text>
+      <text x="126" y="184" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">стоковый текст Duck плюс наша приставка сверху</text>
+      <circle cx="96" cy="220" r="13" style="fill:var(--surface); stroke:var(--play)" stroke-width="2"></circle>
+      <text x="96" y="224" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--play)">4</text>
+      <text x="126" y="218" font-size="14.5" style="fill:var(--ink)">Модель отвечает кодом хода</text>
+      <text x="126" y="236" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">вызов инструмента: осмотреть доску и вызвать action(...)</text>
+      <circle cx="96" cy="272" r="13" style="fill:var(--surface); stroke:var(--play)" stroke-width="2"></circle>
+      <text x="96" y="276" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--play)">5</text>
+      <text x="126" y="270" font-size="14.5" style="fill:var(--ink)">Обёртка смотрит код ДО исполнения</text>
+      <text x="126" y="288" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">нет действия — ход отклонён, код не исполняется (не больше 2 раз на уровень)</text>
+      <circle cx="96" cy="324" r="13" style="fill:var(--surface); stroke:var(--play)" stroke-width="2"></circle>
+      <text x="96" y="328" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--play)">6</text>
+      <text x="126" y="322" font-size="14.5" style="fill:var(--ink)">Код обрастает</text>
+      <text x="126" y="340" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">впереди помощники и принятая программа, в конец дописана проверка</text>
+      <circle cx="96" cy="376" r="13" style="fill:var(--surface); stroke:var(--ink-3)" stroke-width="2"></circle>
+      <text x="96" y="380" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--ink-3)">7</text>
+      <text x="126" y="374" font-size="14.5" style="fill:var(--ink)">Действие уходит в движок</text>
+      <text x="126" y="392" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">через шлюз возвращается новый кадр; буфер переходов растёт на запись</text>
+      <circle cx="96" cy="428" r="13" style="fill:var(--surface); stroke:var(--play)" stroke-width="2"></circle>
+      <text x="96" y="432" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--play)">8</text>
+      <text x="126" y="426" font-size="14.5" style="fill:var(--ink)">Проверка печатает отчёт</text>
+      <text x="126" y="444" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">он возвращается модели как результат инструмента — это её вход на следующий ход</text>
+      <circle cx="96" cy="480" r="13" style="fill:var(--surface); stroke:var(--ok)" stroke-width="2"></circle>
+      <text x="96" y="484" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--ok)">9</text>
+      <text x="126" y="478" font-size="14.5" style="fill:var(--ink)">Уровень взят</text>
+      <text x="126" y="496" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">счётчик наблюдений обнуляется: доска другая. С этого момента разрешён синтезатор</text>
+      <circle cx="96" cy="532" r="13" style="fill:var(--surface); stroke:var(--synth)" stroke-width="2"></circle>
+      <text x="96" y="536" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--synth)">10</text>
+      <text x="126" y="530" font-size="14.5" style="fill:var(--ink)">Синтезатор просыпается</text>
+      <text x="126" y="548" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">отдельный поток, свой запрос той же модели; ходов игры не тратит</text>
+      <circle cx="96" cy="584" r="13" style="fill:var(--surface); stroke:var(--synth)" stroke-width="2"></circle>
+      <text x="96" y="588" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--synth)">11</text>
+      <text x="126" y="582" font-size="14.5" style="fill:var(--ink)">Программа проверяется</text>
+      <text x="126" y="600" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">принята — подставляется в код агента, у него просят предикат цели</text>
+      <circle cx="96" cy="636" r="13" style="fill:var(--surface); stroke:var(--ok)" stroke-width="2"></circle>
+      <text x="96" y="640" text-anchor="middle" font-size="11.5" style="font-family:var(--mono); fill:var(--ok)">12</text>
+      <text x="126" y="634" font-size="14.5" style="fill:var(--ink)">Включается план</text>
+      <text x="126" y="652" font-size="12" style="font-family:var(--mono); fill:var(--ink-3)">поиск внутри программы ходов не тратит; путь исполняется по шагу</text>
+      <path d="M62 428 L34 428 L34 220 L62 220" fill="none" style="stroke:var(--play)" stroke-width="1.3" marker-end="url(#ar3)"></path>
+      <text x="10" y="324" font-size="11" style="font-family:var(--mono); fill:var(--play)" transform="rotate(-90 22 324)">каждый ход</text>
+      <rect x="640" y="562" width="288" height="44" rx="3" style="fill:var(--bad-soft); stroke:var(--bad)" stroke-width="1"></rect>
+      <text x="784" y="580" text-anchor="middle" font-size="12.5" style="fill:var(--bad)">дальше этого шага мы не заходили</text>
+      <text x="784" y="598" text-anchor="middle" font-size="11" style="font-family:var(--mono); fill:var(--bad)">9 программ вернулись, 0 приняты</text>
+    </svg>
+    <figcaption>Шаги 4–8 повторяются каждый ход до конца отведённого игре времени: полчаса в пробе,
+    132 минуты в бою. Шаги 10–12 включаются только после взятого уровня, и до двенадцатого мы
+    ни разу не дошли.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="head"><span class="num">01</span><h2>Что происходит за один ход</h2></div>
+  <p>Код здесь пишут оба, но разный. В этом харнессе <strong>каждый ход игры — это питон</strong>:
+  играющий агент пишет код хода, где осматривает доску и вызывает <code>action(...)</code>. Модель
+  мира он не пишет вовсе; её пишет <strong>синтезатор</strong> — отдельный поток, который читает
+  тот же буфер наблюдений, отвечает программой из <code>state_of</code> и <code>predict</code>
+  и ходов игры не тратит. Единственное, что играющий агент добавляет от себя, — предикат цели
+  в одну строку, и только после взятого уровня.</p>
+
+  <figure>
+    <svg viewBox="0 0 980 520" role="img" aria-label="Схема хода: играющий агент обращается к серверу vLLM, получает вызов инструмента, харнесс оборачивает код помощниками, подставленной программой и проверкой, песочница исполняет действия через шлюз, буфер переходов растёт; синтезатор в фоне берёт тот же буфер, просит у сервера программу и отдаёт её харнессу после приёма">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 9,5 0,9" fill="currentColor"></polygon>
+        </marker>
+        <marker id="ar-play" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 9,5 0,9" style="fill:var(--play)"></polygon>
+        </marker>
+        <marker id="ar-synth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 9,5 0,9" style="fill:var(--synth)"></polygon>
+        </marker>
+      </defs>
+
+      <!-- сервер -->
+      <rect x="380" y="16" width="220" height="62" rx="3" stroke="currentColor" stroke-width="1" style="fill:var(--surface-2)"></rect>
+      <text x="490" y="40" text-anchor="middle" font-size="14" font-weight="600" fill="currentColor" style="font-family:var(--display)">сервер vLLM</text>
+      <text x="490" y="60" text-anchor="middle" font-size="11.5" fill="currentColor" style="font-family:var(--mono)">8 мест на 25 игр</text>
+
+      <!-- играющий агент: колонка слева -->
+      <rect x="40" y="120" width="300" height="300" rx="3" fill="none" stroke-width="1.5" style="stroke:var(--play)"></rect>
+      <text x="56" y="142" font-size="11" letter-spacing="1.4" style="fill:var(--play); font-family:var(--mono)">ИГРАЮЩИЙ АГЕНТ</text>
+
+      <rect x="62" y="156" width="256" height="46" rx="2" stroke-width="1" style="fill:var(--play-soft); stroke:var(--play)"></rect>
+      <text x="190" y="175" text-anchor="middle" font-size="12.5" fill="currentColor">промпт: приставка харнесса</text>
+      <text x="190" y="192" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">набор → цель → план</text>
+
+      <rect x="62" y="224" width="256" height="40" rx="2" stroke="currentColor" stroke-width="1" style="fill:var(--surface)"></rect>
+      <text x="190" y="243" text-anchor="middle" font-size="12.5" fill="currentColor">код ХОДА: осмотр и action(...)</text>
+      <text x="190" y="259" text-anchor="middle" font-size="10.5" fill="currentColor" style="font-family:var(--mono)">модель мира тут не пишется</text>
+
+      <rect x="62" y="286" width="256" height="56" rx="2" stroke="currentColor" stroke-width="1" style="fill:var(--surface)"></rect>
+      <text x="190" y="306" text-anchor="middle" font-size="12.5" fill="currentColor">харнесс оборачивает код</text>
+      <text x="190" y="325" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">помощники + программа + проверка</text>
+
+      <rect x="62" y="364" width="256" height="40" rx="2" stroke="currentColor" stroke-width="1" style="fill:var(--surface)"></rect>
+      <text x="190" y="389" text-anchor="middle" font-size="12.5" fill="currentColor">песочница: action(...) → шлюз</text>
+
+      <!-- стрелки внутри колонки -->
+      <line x1="190" y1="202" x2="190" y2="222" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"></line>
+      <line x1="190" y1="264" x2="190" y2="284" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"></line>
+      <line x1="190" y1="342" x2="190" y2="362" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"></line>
+
+      <!-- к серверу и обратно -->
+      <path d="M318 178 L430 178 L430 82" fill="none" stroke-width="1.4" marker-end="url(#ar-play)" style="stroke:var(--play)"></path>
+      <text x="336" y="170" font-size="11" style="fill:var(--play); font-family:var(--mono)">запрос хода</text>
+      <path d="M470 82 L470 244 L322 244" fill="none" stroke-width="1.4" marker-end="url(#ar-play)" style="stroke:var(--play)"></path>
+      <text x="478" y="140" font-size="11" style="fill:var(--play); font-family:var(--mono)">ответ</text>
+
+      <!-- буфер -->
+      <rect x="640" y="286" width="300" height="118" rx="3" stroke="currentColor" stroke-width="1" style="fill:var(--surface-2)"></rect>
+      <text x="790" y="312" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor" style="font-family:var(--display)">буфер переходов</text>
+      <text x="790" y="333" text-anchor="middle" font-size="12.5" fill="currentColor">до → действие → после</text>
+      <text x="790" y="354" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">только текущий уровень</text>
+      <text x="790" y="375" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">растёт ТОЛЬКО от ходов</text>
+
+      <path d="M318 384 L640 350" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"></path>
+      <text x="400" y="378" font-size="11" fill="currentColor" style="font-family:var(--mono)">каждое действие</text>
+
+      <!-- синтезатор -->
+      <rect x="640" y="120" width="300" height="130" rx="3" fill="none" stroke-width="1.5" style="stroke:var(--synth)"></rect>
+      <text x="656" y="142" font-size="11" letter-spacing="1.4" style="fill:var(--synth); font-family:var(--mono)">СИНТЕЗАТОР · ФОН</text>
+      <text x="790" y="168" text-anchor="middle" font-size="12.5" fill="currentColor">код МОДЕЛИ: state_of и predict</text>
+      <rect x="662" y="182" width="256" height="52" rx="2" stroke-width="1" style="fill:var(--synth-soft); stroke:var(--synth)"></rect>
+      <text x="790" y="201" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">условия пуска: уровень взят,</text>
+      <text x="790" y="217" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">≥6 переходов, ≤2 пустых ответа,</text>
+      <text x="790" y="230" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">свободен 1 из 4 слотов</text>
+
+      <path d="M790 286 L790 252" fill="none" stroke-width="1.4" marker-end="url(#ar-synth)" style="stroke:var(--synth)"></path>
+      <text x="800" y="272" font-size="11" style="fill:var(--synth); font-family:var(--mono)">читает</text>
+
+      <path d="M662 150 L560 150 L560 82" fill="none" stroke-width="1.4" marker-end="url(#ar-synth)" style="stroke:var(--synth)"></path>
+      <text x="566" y="112" font-size="11" style="fill:var(--synth); font-family:var(--mono)">свой запрос</text>
+
+      <!-- приём и хендофф -->
+      <rect x="380" y="440" width="220" height="58" rx="3" stroke-width="1.5" style="fill:var(--surface); stroke:var(--ok)"></rect>
+      <text x="490" y="462" text-anchor="middle" font-size="14" font-weight="600" style="fill:var(--ok); font-family:var(--display)">приём: wm_check</text>
+      <text x="490" y="482" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">песочница без права ходить</text>
+
+      <path d="M700 404 L620 440" fill="none" stroke-width="1.4" marker-end="url(#ar-synth)" style="stroke:var(--synth)"></path>
+      <text x="628" y="424" font-size="11" style="fill:var(--synth); font-family:var(--mono)">программа</text>
+
+      <path d="M380 468 L190 468 L190 406" fill="none" stroke-width="1.6" marker-end="url(#ar)" style="stroke:var(--ok)"></path>
+      <text x="206" y="462" font-size="11" style="fill:var(--ok); font-family:var(--mono)">принята → подставляется в код хода</text>
+    </svg>
+    <figcaption>Ход игры идёт слева; синтезатор справа работает параллельно и ходов не тратит.
+    Принятая программа возвращается в игру подстановкой в начало кода следующего хода — только
+    определения, вызовы вырезаются разбором синтаксиса.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="head"><span class="num">02</span><h2>Кто принимает программу</h2></div>
+  <p>Никакая модель. Приём делает наш код, детерминированно, одним условием — оно взято из статьи
+  OPINE-World, раздел 3.3.</p>
+
+  <div class="rule">
+    <pre>admitted = total &gt;= 1 and checked == total and correct == total and unstable is None</pre>
+    <ul>
+      <li>каждый записанный переход воспроизведён точно, сравнение по значению состояния, которое задаёт сама программа;</li>
+      <li>непокрытый переход — отказ: <code>predict</code> вернул None, действие попадает в <code>not_covered</code>;</li>
+      <li><code>predict</code> прогоняется дважды на каждом переходе: расхождение означает скрытое состояние, планировать нельзя;</li>
+      <li>переход, взявший уровень, показывает уже новую доску — он проверяется отдельно, предикатом цели.</li>
+    </ul>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 900 250" role="img" aria-label="Проверка программы: каждый переход из буфера подаётся в predict дважды, результат сравнивается с реальным состоянием после хода; четыре исхода — принято, контрпример, непокрыто, нестабильно">
+      <rect x="20" y="86" width="150" height="70" rx="3" stroke="currentColor" style="fill:var(--surface-2)"></rect>
+      <text x="95" y="112" text-anchor="middle" font-size="12.5" fill="currentColor">переход из буфера</text>
+      <text x="95" y="133" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">до · действие · после</text>
+
+      <rect x="230" y="86" width="170" height="70" rx="3" stroke="currentColor" style="fill:var(--surface)"></rect>
+      <text x="315" y="112" text-anchor="middle" font-size="12.5" fill="currentColor">predict(до, действие)</text>
+      <text x="315" y="133" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">два прогона</text>
+
+      <rect x="460" y="86" width="150" height="70" rx="3" stroke="currentColor" style="fill:var(--surface)"></rect>
+      <text x="535" y="118" text-anchor="middle" font-size="12.5" fill="currentColor">сравнение</text>
+      <text x="535" y="137" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">по значению</text>
+
+      <line x1="170" y1="121" x2="228" y2="121" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar2)"></line>
+      <line x1="400" y1="121" x2="458" y2="121" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar2)"></line>
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 9,5 0,9" fill="currentColor"></polygon>
+        </marker>
+      </defs>
+
+      <rect x="680" y="20" width="200" height="42" rx="2" style="fill:var(--ok-soft); stroke:var(--ok)"></rect>
+      <text x="780" y="46" text-anchor="middle" font-size="12.5" style="fill:var(--ok)">всё сошлось → принята</text>
+
+      <rect x="680" y="76" width="200" height="42" rx="2" style="fill:var(--bad-soft); stroke:var(--bad)"></rect>
+      <text x="780" y="102" text-anchor="middle" font-size="12.5" style="fill:var(--bad)">расхождение → контрпример</text>
+
+      <rect x="680" y="132" width="200" height="42" rx="2" style="fill:var(--bad-soft); stroke:var(--bad)"></rect>
+      <text x="780" y="152" text-anchor="middle" font-size="12.5" style="fill:var(--bad)">None → непокрыто</text>
+      <text x="780" y="168" text-anchor="middle" font-size="10.5" style="fill:var(--bad); font-family:var(--mono)">так падали 7 программ из 9</text>
+
+      <rect x="680" y="188" width="200" height="42" rx="2" style="fill:var(--bad-soft); stroke:var(--bad)"></rect>
+      <text x="780" y="214" text-anchor="middle" font-size="12.5" style="fill:var(--bad)">прогоны разошлись → скрытое состояние</text>
+
+      <path d="M610 110 L650 110 L650 41 L678 41" fill="none" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar2)"></path>
+      <path d="M610 121 L660 121 L660 97 L678 97" fill="none" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar2)"></path>
+      <path d="M610 132 L660 132 L660 153 L678 153" fill="none" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar2)"></path>
+      <path d="M610 143 L650 143 L650 209 L678 209" fill="none" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar2)"></path>
+    </svg>
+    <figcaption>Четыре исхода проверки. В прогоне версии 11 синтезатор вернул девять настоящих
+    программ, и семь из них вышли третьим выходом: <code>predict</code> возвращал None на всех
+    переходах.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="head"><span class="num">03</span><h2>Три узких места подряд</h2></div>
+  <p>Каждое следующее открывалось после починки предыдущего. Первые два закрыты, третье — там,
+  где мы стоим сейчас.</p>
+
+  <figure>
+    <svg viewBox="0 0 940 210" role="img" aria-label="Три узких места: бюджет ходов, пропускная способность сервера и приём программы; первые два закрыты, третье открыто">
+      <line x1="40" y1="104" x2="900" y2="104" stroke-width="2" style="stroke:var(--line)"></line>
+
+      <circle cx="150" cy="104" r="9" style="fill:var(--ok)"></circle>
+      <text x="150" y="66" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor" style="font-family:var(--display)">бюджет ходов</text>
+      <text x="150" y="46" text-anchor="middle" font-size="11" style="fill:var(--ink-3); font-family:var(--mono)">v5</text>
+      <text x="150" y="140" text-anchor="middle" font-size="12.5" fill="currentColor">роли делились по ходам</text>
+      <text x="150" y="159" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">действий 7 вместо 14</text>
+      <text x="150" y="180" text-anchor="middle" font-size="11" style="fill:var(--ok); font-family:var(--mono)">закрыто</text>
+
+      <circle cx="470" cy="104" r="9" style="fill:var(--ok)"></circle>
+      <text x="470" y="66" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor" style="font-family:var(--display)">пропускная способность</text>
+      <text x="470" y="46" text-anchor="middle" font-size="11" style="fill:var(--ink-3); font-family:var(--mono)">v7 · v8 · v10</text>
+      <text x="470" y="140" text-anchor="middle" font-size="12.5" fill="currentColor">длинный ответ отнимал ходы у всех игр</text>
+      <text x="470" y="159" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">запросов 226 против 314 у базы</text>
+      <text x="470" y="180" text-anchor="middle" font-size="11" style="fill:var(--ok); font-family:var(--mono)">закрыто в v11: 312 запросов</text>
+
+      <circle cx="800" cy="104" r="9" style="fill:var(--bad)"></circle>
+      <text x="800" y="66" text-anchor="middle" font-size="15" font-weight="600" style="fill:var(--bad); font-family:var(--display)">приём программы</text>
+      <text x="800" y="46" text-anchor="middle" font-size="11" style="fill:var(--ink-3); font-family:var(--mono)">v11 · сейчас</text>
+      <text x="800" y="140" text-anchor="middle" font-size="12.5" fill="currentColor">9 программ вернулись, 0 приняты</text>
+      <text x="800" y="159" text-anchor="middle" font-size="11" fill="currentColor" style="font-family:var(--mono)">37% действий — клики по 64×64</text>
+      <text x="800" y="180" text-anchor="middle" font-size="11" style="fill:var(--bad); font-family:var(--mono)">открыто</text>
+    </svg>
+    <figcaption>Пропускная способность была узким местом и перестала им быть: в версии 11 темп
+    вернулся к базовому, а приём так и остался нулевым.</figcaption>
+  </figure>
+
+  <div class="tablewrap">
+    <table>
+      <caption>25 публичных игр, потолок 30 минут на игру. База — полный прогон, обрезанный на той же отметке.</caption>
+      <thead>
+        <tr><th>прогон</th><th>запросов</th><th>очередь</th><th>генерация</th><th>действий</th><th>уровень 1</th><th>RHAE</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>база</td><td>314</td><td>121.6 с</td><td>1436</td><td>29.1</td><td>13 / 25</td><td>3.32</td></tr>
+        <tr><td>v10</td><td>226</td><td>137.0 с</td><td>1974</td><td>9.7</td><td>4 / 25</td><td>0.58</td></tr>
+        <tr class="now"><td>v11</td><td>312</td><td>122.7 с</td><td>1640</td><td>23.9</td><td>11 / 25</td><td>1.32</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Генерация считается в токенах на запрос. Версия 10 писала программы прямо в игровых ходах,
+  поэтому ответ удлинялся и запросов становилось меньше — это и есть механизм, которым слой
+  отнимал уровни у всех игр сразу.</p>
+</section>
+
+<section>
+  <div class="head"><span class="num">04</span><h2>Где метод упирается сегодня</h2></div>
+  <p>В шести играх из одиннадцати, где синтезатор вообще мог работать, почти все действия —
+  клики мышью с координатами: <span class="mono">lp85</span>, <span class="mono">r11l</span>,
+  <span class="mono">vc33</span> и <span class="mono">s5i5</span> по 100%,
+  <span class="mono">lf52</span> 94%, <span class="mono">sb26</span> 88%. Точный приём требует,
+  чтобы программа предсказала последствие клика в любой из 4096 точек доски. Из шести-двадцати
+  наблюдений это невыводимо, и <code>predict</code> честно возвращает None — а правило приёма
+  считает это отказом.</p>
+  <p>Отсюда развилка. Либо метод сужается до игр со стрелками, где действий пять-шесть и правило
+  выводимо, и тогда он про шесть-семь игр из двадцати пяти. Либо меняется само правило приёма для
+  кликов: принимать программу, верную на покрытых переходах и честно молчащую на остальных, и
+  планировать только там, где она знает. Второе ближе к замыслу статьи, но это уже другая версия,
+  а не правка.</p>
+</section>
+
+<footer>
+  <span>источники: runs/flash_wm_v10, runs/flash_wm_v11, docs/base30_flash_v1_h115.json, scripts/wm_probe_report.py</span>
+  <span>правило приёма: scripts/wm_helpers_v9.py · схема хода: kernels/notebooks_stockflash_wm12/cell13.py</span>
+</footer>
+
+</div>
