@@ -78,6 +78,11 @@ def main() -> None:
     open(os.path.join(out, "cell15.py"), "w", encoding="utf-8").write(cell)
     json.dump(nb, open(os.path.join(out, "submission.ipynb"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     meta = json.load(open("kernels/notebooks_stockflash_park/kernel-metadata.json"))
+    # 12.09: прежний слаг arc3-stock-flash-park застрял в очереди и удалён по слову владельца;
+    # застрявший слаг не оживает, поэтому замер уезжает под своим собственным новым слагом,
+    # а боевая сборка паркинга своего слага больше не делит с ним.
+    meta["id"] = "sergueimakarov/arc3-park-gate"
+    meta["title"] = "arc3 park gate"
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
     compile(code, "c15", "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
     diff = [i for i in range(18) if "".join(nb["cells"][i]["source"]) != "".join(src["cells"][i]["source"])]
