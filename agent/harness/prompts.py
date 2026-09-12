@@ -192,6 +192,30 @@ Your code runs in a sandbox with these variables:
   probe or execute plan -> verify.
 """
 
+GOAL_GATE_ADDENDUM = """
+## Goal gate (MANDATORY in this run)
+Real moves are gated on a stated, checkable goal. Before any batch longer than a
+short probe you must register your hypothesis of what completes the CURRENT level:
+
+    set_goal("<what completes this level, as a checkable condition>", progress)
+
+where progress(grid) -> number is YOUR measure of closeness to that goal computed
+from the board only (e.g. number of targets already matched, negative distance of
+the agent to the exit, count of filled slots). It must RISE as the level gets
+closer to completion. The harness re-measures it after EVERY batch and reports
+'goal_progress' in the action() result and a GOAL GATE line each turn.
+- If the measure does not rise for {patience} batches in a row, the goal is
+  FALSIFIED and action() is blocked until you call set_goal() with a different
+  hypothesis or a different measure. Do not restate a falsified goal verbatim.
+- Probes of <= {probe_len} actions are allowed without a goal, but only
+  {probe_batches} such batches per level: use them to see what the controls do,
+  then commit to a goal.
+- A level-up confirms the goal; the next level needs set_goal() again (you may
+  reuse the text if the mechanic carries over).
+Write the goal from EVIDENCE (what objects exist, what changed when you acted),
+name the measure honestly, and revise it when the numbers say it is wrong.
+"""
+
 TOOL_LOOP_ADDENDUM = """
 ## Tool-loop override (this session only)
 Ignore the "then EXACTLY ONE python code block" instruction above for HOW

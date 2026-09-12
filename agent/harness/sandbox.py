@@ -210,6 +210,22 @@ class Sandbox:
     # (round 2, 21.08: once the hatch opened, Flash flooded 800 actions).
     gate_escape_attempts: int = field(
         default_factory=lambda: int(os.getenv("MY_AGENT_VERIFY_GATE_ATTEMPTS", "3")))
+    # ── ворота цели (12.09): «сформулировать и проверить цель до хода» ──
+    # Слово владельца после дозового прогона: лишние ходы уходят в круг, потому что
+    # модель не знает, куда идти. Ворота требуют до action() зарегистрировать
+    # гипотезу цели уровня вместе с ИЗМЕРИТЕЛЕМ прогресса progress(grid) -> число;
+    # обвязка сама считает измеритель до и после каждой пачки ходов и после
+    # goal_patience пачек без роста объявляет гипотезу опровергнутой — модель обязана
+    # назвать другую. Короткие пробы без цели разрешены, но их число ограничено.
+    goal_gate: bool = field(default_factory=lambda: os.getenv("MY_AGENT_GOAL_GATE", "0") == "1")
+    goal_patience: int = field(default_factory=lambda: int(os.getenv("MY_AGENT_GOAL_PATIENCE", "3")))
+    goal_probe_len: int = field(default_factory=lambda: int(os.getenv("MY_AGENT_GOAL_PROBE_LEN", "2")))
+    goal_probe_batches: int = field(default_factory=lambda: int(os.getenv("MY_AGENT_GOAL_PROBE_BATCHES", "4")))
+    goal: dict | None = None
+    goal_probes_used: int = 0
+    goal_log: list = field(default_factory=list)
+    goal_stats: dict = field(default_factory=lambda: {"set": 0, "rejected": 0, "blocked": 0,
+                                                       "falsified": 0, "confirmed": 0, "probes": 0})
 
     # ── state fed from the agent ──────────────────────────────────────────
     def update_frame(self, frame_data: Any, action_name: str | None = None,
@@ -221,6 +237,12 @@ class Sandbox:
         self.previous = self.current
         self.step_counter += 1 if action_name else 0
         view = FrameView(grid, self.step_counter, int(frame_data.levels_completed or 0))
+        if self.previous is not None and view.level > self.previous.level:
+            if self.goal is not None and not self.goal.get("closed"):
+                self.goal["closed"] = "confirmed"; self.goal_stats["confirmed"] += 1
+                self.goal_log.append(self.goal)
+            self.goal = None
+            self.goal_probes_used = 0
         self.current = view
         if action_name:
             name = FROM_ENGINE.get(action_name, action_name)
@@ -547,6 +569,58 @@ class Sandbox:
             self.last_verify = {"accuracy": out["accuracy"], "tested": tested}
         return out
 
+    def _set_goal(self, text: Any, progress: Any = None) -> dict:
+        """Регистрация гипотезы цели уровня с измерителем прогресса (ворота цели)."""
+        text = str(text or "").strip()
+        if len(text) < 8:
+            self.goal_stats["rejected"] += 1
+            raise ValueError("set_goal(text, progress): text must state what completes this level "
+                             "as a checkable condition (at least a short sentence)")
+        if not callable(progress):
+            self.goal_stats["rejected"] += 1
+            raise ValueError("set_goal(text, progress): progress must be a function progress(grid) -> number "
+                             "that RISES as the board gets closer to the goal (e.g. count of matched targets)")
+        if self.current is None:
+            raise RuntimeError("no current frame")
+        try:
+            v = progress(self.current.grid.copy())
+            v = float(v)
+        except Exception as exc:  # noqa: BLE001
+            self.goal_stats["rejected"] += 1
+            raise ValueError(f"progress(grid) raised or returned a non-number on the current board: {exc!r}")
+        lvl = self.current.level
+        for g in self.goal_log:
+            if g.get("level") == lvl and g.get("closed") == "falsified" and g["text"] == text:
+                self.goal_stats["rejected"] += 1
+                raise ValueError("this exact goal was already falsified on this level (its progress measure did not "
+                                 "move in %d batches: %s). State a DIFFERENT hypothesis or a different measure."
+                                 % (self.goal_patience, g["values"][-6:]))
+        if self.goal is not None and not self.goal.get("closed"):
+            self.goal["closed"] = "replaced"; self.goal_log.append(self.goal)
+        self.goal = {"text": text, "progress": progress, "level": lvl, "values": [v], "no_progress": 0,
+                     "batches": 0, "set_step": self.step_counter, "closed": None}
+        self.goal_stats["set"] += 1
+        return {"ok": True, "level": lvl, "progress_now": v,
+                "note": "action() is open; progress is re-measured after every batch and reported to you"}
+
+    def goal_status(self) -> str:
+        if not self.goal_gate:
+            return ""
+        g = self.goal
+        if g is None:
+            return ("GOAL GATE: no goal registered for this level. Before real moves call "
+                    "set_goal('<what completes this level>', progress) where progress(grid) returns a number that "
+                    "rises as you approach the goal. Probes of <= %d actions without a goal: %d of %d used."
+                    % (self.goal_probe_len, self.goal_probes_used, self.goal_probe_batches))
+        vals = g["values"]
+        tail = ", ".join("%g" % x for x in vals[-6:])
+        if g.get("closed") == "falsified":
+            return ("GOAL GATE: goal '%s' is FALSIFIED — its own progress measure did not rise in %d batches "
+                    "(values %s). action() is blocked until you call set_goal() with a different hypothesis or measure."
+                    % (g["text"][:120], self.goal_patience, tail))
+        return ("GOAL GATE: goal '%s' | progress values %s | batches without progress %d/%d"
+                % (g["text"][:120], tail, g["no_progress"], self.goal_patience))
+
     def verify_gate_open(self) -> bool:
         """Long action() batches unlock at decent accuracy or honest effort."""
         if self.last_verify is None:
@@ -598,6 +672,27 @@ class Sandbox:
         # the new level's (different) layout: pure waste, quantifiable in
         # today's stand data (e.g. vc33: 800 actions in 54 turns, levels=0).
         level_at_batch_start = self.current.level if self.current is not None else 0
+        # Ворота цели: без зарегистрированной цели — только короткие пробы, и их мало.
+        if self.goal_gate:
+            g = self.goal
+            if g is not None and g.get("closed") == "falsified":
+                self.goal_stats["blocked"] += 1
+                raise RuntimeError(self.goal_status())
+            if g is None:
+                if len(acts) <= self.goal_probe_len and self.goal_probes_used < self.goal_probe_batches:
+                    self.goal_probes_used += 1; self.goal_stats["probes"] += 1
+                else:
+                    self.goal_stats["blocked"] += 1
+                    raise RuntimeError(
+                        "action() blocked by the goal gate: %s. Formulate the level goal from what you have "
+                        "seen (objects, what moved, what the level-1 screen looked like) and register it with "
+                        "set_goal(text, progress) in THIS code block, then act." % self.goal_status())
+        goal_before = None
+        if self.goal is not None and not self.goal.get("closed"):
+            try:
+                goal_before = float(self.goal["progress"](self.current.grid.copy()))
+            except Exception:  # noqa: BLE001
+                goal_before = None
         result: dict = {}
         for spec in acts:
             if self._cancelled:
@@ -652,6 +747,27 @@ class Sandbox:
                 result["level_completed"] = True
                 break  # new level = different layout; remaining actions in
                        # this batch would fire blind against it (Duck parity)
+        # Замер цели после пачки: рост измерителя = прогресс; иначе копится терпение.
+        g = self.goal
+        if g is not None and not g.get("closed") and self.current is not None and result:
+            try:
+                after_v = float(g["progress"](self.current.grid.copy()))
+            except Exception as exc:  # noqa: BLE001
+                after_v = None
+                result["goal_progress"] = {"error": f"progress(grid) failed after the batch: {exc!r}"}
+            if after_v is not None:
+                g["values"].append(after_v); g["batches"] += 1
+                delta = None if goal_before is None else after_v - goal_before
+                if delta is not None and delta > 0:
+                    g["no_progress"] = 0
+                else:
+                    g["no_progress"] += 1
+                result["goal_progress"] = {"before": goal_before, "after": after_v, "delta": delta,
+                                           "no_progress_batches": g["no_progress"]}
+                if g["no_progress"] >= self.goal_patience:
+                    g["closed"] = "falsified"; self.goal_stats["falsified"] += 1
+                    self.goal_log.append(g)
+                    result["goal_progress"]["falsified"] = True
         return result
 
     def _refresh_scope(self, scope: dict) -> None:
@@ -692,6 +808,7 @@ class Sandbox:
             "reachable": reachable,
             "objects": objects,
             "verify_theory": self._verify_theory,
+            "set_goal": self._set_goal,
             "plan_with_theory": self._plan_with_theory,
             "transition_count": len(self.transition_log),
             "result": None,

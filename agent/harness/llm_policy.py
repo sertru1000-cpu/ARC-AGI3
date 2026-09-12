@@ -171,6 +171,11 @@ class LLMPolicy:
             self.trace = TraceWriter(self.game_id)
         level = self.sandbox.current.level if self.sandbox.current else 0
         system_content = SYSTEM_PROMPT + (TOOL_LOOP_ADDENDUM if self.tool_loop_steps > 0 else "")
+        if getattr(self.sandbox, "goal_gate", False):
+            from .prompts import GOAL_GATE_ADDENDUM
+            system_content += GOAL_GATE_ADDENDUM.format(
+                patience=self.sandbox.goal_patience, probe_len=self.sandbox.goal_probe_len,
+                probe_batches=self.sandbox.goal_probe_batches)
         self.messages = [
             {"role": "system", "content": system_content},
             {
@@ -284,6 +289,8 @@ class LLMPolicy:
             self.sandbox.budget_left(), self.sandbox.valid_actions,
             self.sandbox.actions_on_current_level(), wm_status,
         )
+        if getattr(self.sandbox, "goal_gate", False):
+            content += "\n\n" + self.sandbox.goal_status()
         self.messages.append({
             "role": "assistant",
             "content": "(forced probe — stall threshold reached; harness took over for one action)",
@@ -294,7 +301,7 @@ class LLMPolicy:
         if self.trace:
             self.trace.write({
                 "turn": self.turns, "reply": None, "code": code, "forced": True,
-                "sandbox_output": res.output, "sandbox_error": res.error,
+                "sandbox_output": res.output, "sandbox_error": res.error, "goal": (self.sandbox.goal or {}).get("text"), "goal_values": list((self.sandbox.goal or {}).get("values", []))[-6:], "goal_stats": dict(getattr(self.sandbox, "goal_stats", {})),
                 "actions_executed": res.actions_executed, "interrupted": res.interrupted,
                 "level": level, "budget_left": self.sandbox.budget_left(),
                 "valid_actions": list(self.sandbox.valid_actions),
@@ -404,7 +411,7 @@ class LLMPolicy:
                 self.trace.write({
                     "turn": self.turns, "reply": content, "code": code, "tool_loop_round": round_no,
                     "world_model": self.sandbox.memo.get("world_model"),
-                    "sandbox_output": res.output, "sandbox_error": res.error,
+                    "sandbox_output": res.output, "sandbox_error": res.error, "goal": (self.sandbox.goal or {}).get("text"), "goal_values": list((self.sandbox.goal or {}).get("values", []))[-6:], "goal_stats": dict(getattr(self.sandbox, "goal_stats", {})),
                     "actions_executed": res.actions_executed, "interrupted": res.interrupted,
                     "level": level, "budget_left": self.sandbox.budget_left(),
                     "valid_actions": list(self.sandbox.valid_actions),
@@ -528,6 +535,12 @@ class LLMPolicy:
             self.sandbox.actions_on_current_level(),
             wm_status,
         )
+        if getattr(self.sandbox, "goal_gate", False):
+            # Слово владельца 12.09: напоминать цель уровня явно и первой строкой, и требовать
+            # от модели сверить с ней последний результат до нового кода.
+            content = (self.sandbox.goal_status()
+                       + "\nBefore writing code: in the WORLD_MODEL 'goal:' line restate the level goal "
+                         "and say whether the last result SUPPORTS or CONTRADICTS it.\n\n" + content)
         if self.stall_turns >= 2:
             content += "\n\n" + NUDGE_NO_ACTION
         # Structural enforcement: enough facts + gate still closed -> demand a
@@ -571,7 +584,7 @@ class LLMPolicy:
                 "world_model": self.sandbox.memo.get("world_model"),
                 "code": code,
                 "sandbox_output": res.output,
-                "sandbox_error": res.error,
+                "sandbox_error": res.error, "goal": (self.sandbox.goal or {}).get("text"), "goal_values": list((self.sandbox.goal or {}).get("values", []))[-6:], "goal_stats": dict(getattr(self.sandbox, "goal_stats", {})),
                 "actions_executed": res.actions_executed,
                 "interrupted": res.interrupted,
                 "level": level,
