@@ -30,6 +30,8 @@ import os
 SLUG = "sergueimakarov/arc3-stock-flash-goal"
 PATIENCE, PROBE_LEN, PROBE_BATCHES = 3, 2, 4
 REJECT_AFTER, RESET_AFTER = 2, 5   # вызовов без новой цели после опровержения: отказ исполнять осмотр / сброс в режим проб
+BATTLE_GATE = True                 # слово владельца 12.09 23:30: ворота идут в бой; Фаза A -- дымовая проба 25 мин
+PROBE_CAP_S = 1500.0
 
 HELPERS = r'''
 import json as _gj
@@ -85,7 +87,7 @@ CELL = r'''
 # set_goal(text, progress_code); обвязка считает измеритель после каждой пачки и после
 # %(patience)d вызовов с ходами без роста объявляет гипотезу опровергнутой (измеритель исполняет ОБВЯЗКА: в песочнице нет exec). Пробы <= %(probe_len)d ходов без цели --
 # не больше %(probe_batches)d на уровень. Состояние живёт на агенте, в песочницу подставляется литералом.
-# Только оффлайн: боевая ветка не тронута.
+# v5: ворота включены и в бою (BATTLE_GATE); вне боя потолок игры %(probe_cap)s с -- дымовая проба.
 # =====================================================================
 import re as _gre, json as _gjson
 import inference.agent.tool_agent as _wta
@@ -133,6 +135,8 @@ def _g_status(st):
             %% (st["text"][:120], vals, st.get("no_progress", 0), _GOAL_PATIENCE))
 
 if not TRUE_SUBMISSION:
+    bm.solver.max_runtime_s_per_game = %(probe_cap)s    # дымовая проба вне боя; в бою -- штатные 7920 с
+if %(battle_gate)s or not TRUE_SUBMISSION:
     # Маркеры разбираются из СЫРОГО stdout песочницы, до того как обвязка завернёт его в JSON
     # (в JSON они экранированы и регулярные выражения по строкам их не видят -- дефект v1, 12.09 20:25).
     # Перехват потокобезопасный: 28 игр идут в потоках, run_sandboxed_python и _run_python_tool -- один поток.
@@ -287,14 +291,16 @@ if not TRUE_SUBMISSION:
     _wta.ToolAgent._run_python_tool = _g_run
     print("GOAL GATE: set_goal(text, progress_code) до ходов; терпение %(patience)d пачек, пробы <= %(probe_len)d ходов x %(probe_batches)d. "
           "ПОРОГИ против базы 10.25: польза -- победы-поражения >= +8 и медиана >= +8; вред -- <= -6. "
-          "Механизм: set_goal хотя бы раз в >= 20 играх, доля вызовов с ходом >= 77%%, генерация 1400-1600. "
-          "v4: протокол целиком только при пустой/опровергнутой цели; повторная регистрация живой цели игнорируется.", flush=True)
+          "Механизм: set_goal хотя бы раз в >= 20 играх, доля вызовов с ходом >= 77%%%%, генерация 1400-1600. "
+          "v4: протокол целиком только при пустой/опровергнутой цели; повторная регистрация живой цели игнорируется. "
+          "v5: режим %%s." %% ("БОЙ, ворота включены" if TRUE_SUBMISSION else "проба 25 мин"), flush=True)
 '''
 
 
 def build_cell() -> str:
     return CELL % {"patience": PATIENCE, "probe_len": PROBE_LEN, "probe_batches": PROBE_BATCHES, "helpers": HELPERS,
-                   "reject_after": REJECT_AFTER, "reset_after": RESET_AFTER}
+                   "reject_after": REJECT_AFTER, "reset_after": RESET_AFTER,
+                   "battle_gate": "True" if BATTLE_GATE else "False", "probe_cap": repr(PROBE_CAP_S)}
 
 
 def main() -> None:
@@ -328,6 +334,7 @@ def main() -> None:
     print("ok   изменена только ячейка 15:", diff == [15])
     print("ok   патч после стокового soft_end и до запуска прогона:", 0 < code.find(anchor) < patch_at < code.find("await bm.run("))
     print("ok   терпение %d, пробы <= %d ходов x %d; после опровержения: отказ исполнять осмотр с %d-го вызова, сброс в пробы после %d" % (PATIENCE, PROBE_LEN, PROBE_BATCHES, REJECT_AFTER, RESET_AFTER))
+    print("ok   ворота в бою:", BATTLE_GATE, "| потолок пробы вне боя:", PROBE_CAP_S, "с; в бою штатный")
     print("ok   слаг для пуша:", meta["id"])
     print("ok   компилируется; размер ноутбука %.0f КБ, предел 1 МБ: %s" % (size / 1024, size < 1_000_000))
 

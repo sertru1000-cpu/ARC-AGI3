@@ -47,13 +47,19 @@ compile(cell, "cell15", "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
 check(True, "ячейка компилируется")
 
 orig_prompt, orig_run, orig_sandbox = wta.ToolAgent._build_user_prompt, wta.ToolAgent._run_python_tool, wta.run_sandboxed_python
-ns = {"TRUE_SUBMISSION": True}
+class _BM:  # заглушка bm.solver для строки потолка
+    class solver:
+        max_runtime_s_per_game = 7920.0
+ns = {"TRUE_SUBMISSION": True, "bm": _BM}
 exec(cell, ns)
-check(wta.ToolAgent._build_user_prompt is orig_prompt and wta.ToolAgent._run_python_tool is orig_run
-      and wta.run_sandboxed_python is orig_sandbox, "TRUE_SUBMISSION=True: классы и песочница Duck не тронуты")
+check(wta.ToolAgent._build_user_prompt is not orig_prompt and wta.ToolAgent._run_python_tool is not orig_run,
+      "TRUE_SUBMISSION=True: ворота установлены и в бою (v5, слово владельца)")
+check(_BM.solver.max_runtime_s_per_game == 7920.0, "TRUE_SUBMISSION=True: потолок игры штатный, проба 25 мин не применена")
+wta.ToolAgent._build_user_prompt, wta.ToolAgent._run_python_tool, wta.run_sandboxed_python = orig_prompt, orig_run, orig_sandbox
 
-ns = {"TRUE_SUBMISSION": False}
+ns = {"TRUE_SUBMISSION": False, "bm": _BM}
 exec(cell, ns)
+check(_BM.solver.max_runtime_s_per_game == 1500.0, "TRUE_SUBMISSION=False: потолок игры 1500 с (проба 25 мин)")
 check(wta.ToolAgent._build_user_prompt is not orig_prompt and wta.ToolAgent._run_python_tool is not orig_run
       and wta.run_sandboxed_python is not orig_sandbox, "TRUE_SUBMISSION=False: три обёртки установлены")
 HELPERS = ns["_GOAL_HELPERS"]
