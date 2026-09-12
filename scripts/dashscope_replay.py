@@ -57,9 +57,18 @@ def message_for(m, extra=None):
         {"type": "image_url", "image_url": {"url": png(unpack_board(m["board"]))}}]}
 
 
-def call(url, key, model, item, extra, sampling, max_tokens, timeout):
-    msgs = [message_for(m) for m in item["messages"][:-1]]
-    msgs.append(message_for(item["messages"][-1], extra))
+def call(url, key, model, item, extra, sampling, max_tokens, timeout, keep_turns=0):
+    src = item["messages"]
+    if keep_turns > 0:
+        # система + последние K троек (пользователь, ассистент, инструмент) + текущий ход.
+        # Роли в нагрузке чередуются строго: system, (user, assistant, tool)*, user.
+        head, body, last = src[0], src[1:-1], src[-1]
+        body = body[-3 * keep_turns:] if keep_turns * 3 < len(body) else body
+        while body and body[0]["role"] != "user":
+            body = body[1:]
+        src = [head] + body + [last]
+    msgs = [message_for(m) for m in src[:-1]]
+    msgs.append(message_for(src[-1], extra))
     body = {"model": model, "messages": msgs, "tools": item["tools"],
             "tool_choice": "auto", "stream": False, "max_tokens": max_tokens, **sampling}
     req = urllib.request.Request(
@@ -95,6 +104,9 @@ def call(url, key, model, item, extra, sampling, max_tokens, timeout):
             "out": usage.get("completion_tokens"), "returned_code": bool(calls), "acts": acts,
             "code": code,
             "code_head": code.strip().splitlines()[0][:90] if code.strip() else "",
+            # текст сохраняем ЦЕЛИКОМ: усечение до 90 знаков 12.09 дало ложный вывод, будто модель
+            # не выполнила часть требований — на деле они были дальше по тексту и просто не сохранились
+            "text": (msg.get("content") or "").strip(),
             "text_head": (msg.get("content") or "").strip()[:90]}
 
 
@@ -110,6 +122,9 @@ def main():
                                         "(перенос оракул-инъекции на стенд)")
     ap.add_argument("--only-hinted", action="store_true",
                     help="слать только те ходы, для которых в JSON есть правило")
+    ap.add_argument("--keep-turns", type=int, default=0,
+                    help="оставить в истории только последние K ходов (проверка гипотезы «токсичной "
+                         "истории» из раунда 28); 0 — история целиком")
     ap.add_argument("--select-only", action="store_true",
                     help="ОТБИРАТЬ по JSON, но правило НЕ вставлять — это контрольная сторона. "
                          "Без этого флага контроль молча превращается во вторую опытную сторону: "
@@ -153,7 +168,7 @@ def main():
     jobs = [(it,) for _ in range(a.repeats) for it in items]
     res = []
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
-        for r in pool.map(lambda j: call(a.base_url, key, a.model, j[0], extra_for(j[0]), sampling, a.max_tokens, a.timeout), jobs):
+        for r in pool.map(lambda j: call(a.base_url, key, a.model, j[0], extra_for(j[0]), sampling, a.max_tokens, a.timeout, a.keep_turns), jobs):
             res.append(r)
             if r["ok"]:
                 print("  %-6s %5s вх / %5s вых | %-9s | %.0f с | %s"
