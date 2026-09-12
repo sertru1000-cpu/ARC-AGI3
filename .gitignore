@@ -43,3 +43,4 @@ kernels/notebooks_student/submission.ipynb
 # копия полигона, раскладывается scripts/push_dataset.sh перед пушем датасета
 atlas_src/our_games/
 own_games_dataset/
+docs/artifacts/transcripts_*.html
