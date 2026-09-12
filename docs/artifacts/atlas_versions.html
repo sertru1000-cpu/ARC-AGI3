@@ -335,8 +335,26 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
-          <div class="v-label"><span class="v-num">3 &middot; нагрузка боя на знакомых играх</span><span class="v-date">пуш 12.09 05:50 МСК &middot; версия 2 arc3-stock-flash-wm12 &middot; ~4.7 ч</span></div>
-          <span class="badge pending">запущено &middot; Фаза A идёт</span>
+          <div class="v-label"><span class="v-num">дозовый замер вызовов</span><span class="v-date">собрано 12.09 &middot; пуш версией 3 в arc3-stock-flash-sched &middot; ~4.7 ч</span></div>
+          <span class="badge pending">к пушу</span>
+        </div>
+        <p class="summary"><strong>Те же 25 игр и то же время на игру, но вдвое меньше соседей по серверу: конкурентность 28 &rarr; 13.</strong> Единственный рычаг, который реально меняет число вызовов на игру, и первый наш замер этой связи намеренной дозой.</p>
+        <ul class="changes">
+          <li>повод &mdash; побочная доза в пункте 3: во второй волне играли 22 игры вместо 28, вызовов на игру стало больше на 18% (57.1 против 48.2), ходов столько же (136.6 против 135.6), пачка короче (2.39 против 2.81), а балл выше (9.13 против 5.51; парно 14/4, p = 0.031)</li>
+          <li>меняется одна строка вне боя; боевая ветка (конкурентность 28, потолок 7920 с) не тронута &mdash; проверено исполнением патча в обоих режимах</li>
+          <li>25 игр при 13 местах = две волны по 132 минуты; каждая игра получает штатное время, но делит сервер с 12 соседями вместо 27</li>
+          <li><strong>встроенный контроль:</strong> обе волны идут при ОДИНАКОВОЙ дозе, поэтому разница между ними проверяет альтернативное объяснение (прогретый сервер, а не вызовы); порог &mdash; неразличимо, |побед&minus;поражений| &le; 6</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>18 проверок, все прошли.</strong> Ворота механизма: вызовов на игру &ge; 95 (база 55.6), отдача сервера 890&ndash;908 тыс. токенов в час &plusmn;5%, генерация 1400&ndash;1500, <strong>ходов на игру 130&ndash;180, то есть НЕ вдвое</strong> &mdash; это и есть проверяемый закон. Пороги балла против базы 10.25: польза при (побед&minus;поражений) &ge; +8 и медиане &ge; +8, вред при &le; &minus;6. В бой не переносится: там 110 игр получают свои ~51 вызов при любой конкурентности.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">3 &middot; нагрузка боя на знакомых играх</span><span class="v-date">12.09 03:44&ndash;08:08 &middot; версия 2 arc3-stock-flash-wm12 &middot; 4.4 ч</span></div>
+          <span class="badge regress">7.10 &middot; расписание невиновно</span>
         </div>
         <p class="summary"><strong>25 публичных игр × 2 прохода под боевой раскладкой</strong> (28 мест, 132 мин): расписание или сложность приватных игр создаёт перенос 0.36.</p>
         <ul class="changes"><li>по первоисточнику TAAF: все 50 копий одним списком солверу — очередь из 22 запусков</li><li>средний балл одного запуска — scripts/passes_run_score.py (итог харнесса при проходах &gt; 1 завышен)</li></ul>
@@ -348,8 +366,8 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
-          <div class="v-label"><span class="v-num">4 &middot; потолок 4 часа + паркинг</span><span class="v-date">пуш 12.09 05:50 МСК &middot; версия 2 arc3-stock-flash-park &middot; Фаза A 4.5 ч</span></div>
-          <span class="badge pending">запущено &middot; Фаза A идёт</span>
+          <div class="v-label"><span class="v-num">4 &middot; потолок 4 часа + паркинг</span><span class="v-date">12.09 03:43&ndash;06:19 &middot; версия 2 arc3-stock-flash-park &middot; 2.6 ч вместо 4.5</span></div>
+          <span class="badge regress">7.24 &middot; поле вымерло к 155-й минуте</span>
         </div>
         <p class="summary"><strong>Берёт ли живая игра уровни после 132-й минуты и помогает ли ей парковка застрявших.</strong> Потолок 14400 с, парковка после 100 ходов без нового уровня (как в бою). В Фазе A очереди нет &mdash; поток запаркованных достаётся живым.</p>
         <ul class="changes">
