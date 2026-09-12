@@ -132,38 +132,40 @@ check(err and "already FALSIFIED" in err, "та же цель дословно �
 out, err = run(g2, "set_goal('reach column 10 with the 5-cell', 'def progress(frame): return frame.grid[5].index(5)')")
 check(err is None, "новая формулировка принята")
 
-# --- обёртка _run_python_tool: разбор маркеров, перенос на агент, вырезание, статистика
+# --- обёртка _run_python_tool: маркеры берутся из СЫРОГО stdout песочницы (в ответе они уже в JSON)
 agent = types.SimpleNamespace()
 captured = {}
+fake_stdout = {"text": '[[GOAL_SET]] {"text": "reach col 10", "code": "def progress(frame): return 1", "value": 1.0}\n'
+                       'hello\n[[GOAL_BATCH]] {"after": 1.0, "no_progress": 1, "falsified": false}\n'}
+
+
+def fake_sandbox(**kw):
+    captured["code"] = kw["code"]
+    return {"stdout": fake_stdout["text"], "action_results": []}
 
 
 def fake_run(self, state_path, arguments):
-    captured["code"] = arguments["code"]
-    return wta._ToolDispatchResult(content='[[GOAL_SET]] {"text": "reach col 10", "code": "def progress(frame): return 1", "value": 1.0}\n'
-                                           'hello\n[[GOAL_BATCH]] {"after": 1.0, "no_progress": 1, "falsified": false}\n', step_executed=True)
+    res = wta.run_sandboxed_python(code=arguments["code"], timeout_seconds=1, initial_state={}, action_handler=None)
+    return wta._ToolDispatchResult(json.dumps({"tool": "python", "stdout": res["stdout"]}, indent=2), step_executed=True)
 
 
+ns["_g_orig_sandbox"] = fake_sandbox
 ns["_g_orig_run"] = fake_run
 out = wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(1)"})
 check("_GOAL = {" in captured["code"] and captured["code"].rstrip().endswith("print(1)"), "помощники подставлены перед кодом модели")
 st = agent._goal_state
-check(st["text"] == "reach col 10" and st["values"] == [1.0, 1.0] and st["no_progress"] == 1, "состояние цели перенесено на агент из маркеров")
-check("[[GOAL_" not in out.content and "hello" in out.content, "маркеры вырезаны из ответа инструмента, остальное на месте")
+check(st["text"] == "reach col 10" and st["values"] == [1.0, 1.0] and st["no_progress"] == 1, "состояние цели перенесено на агент из сырого stdout")
+check("[[GOAL_" not in out.content and "hello" in out.content, "маркеры вырезаны до JSON-обёртки, остальное на месте")
 check(ns["_goal_stats"]["set"] == 1 and ns["_goal_stats"]["batches"] == 1, "статистика: set=1, batches=1")
-captured.clear()
+captured.clear(); fake_stdout["text"] = "nothing\n"
 wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(2)"})
 lit = ast.literal_eval(captured["code"].split("_GOAL = ", 1)[1].splitlines()[0])
 check(lit["text"] == "reach col 10" and lit["values"] == [1.0, 1.0], "на следующий вызов состояние подставлено литералом")
-
-
-def fake_run_fals(self, state_path, arguments):
-    return wta._ToolDispatchResult(content='[[GOAL_BATCH]] {"after": 1.0, "no_progress": 3, "falsified": true}\n', step_executed=True)
-
-
-ns["_g_orig_run"] = fake_run_fals
+fake_stdout["text"] = '[[GOAL_BATCH]] {"after": 1.0, "no_progress": 3, "falsified": true}\n'
 wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "action(['UP'])"})
 check(st["closed"] == "falsified" and st["falsified_texts"] == ["reach col 10"] and ns["_goal_stats"]["falsified"] == 1,
       "опровержение перенесено на агент, текст запомнен")
+wta.run_sandboxed_python = ns["_g_orig_sandbox"] if False else wta.run_sandboxed_python
 
 # --- обёртка промпта: протокол + статус перед стоковым текстом; смена уровня сбрасывает цель
 ns["_g_orig_prompt"] = lambda self, action_num, *a, **k: "STOCK PROMPT"

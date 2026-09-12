@@ -149,6 +149,29 @@ def _g_status(st):
             %% (st["text"][:120], vals, st.get("no_progress", 0), _GOAL_PATIENCE))
 
 if not TRUE_SUBMISSION:
+    # Маркеры разбираются из СЫРОГО stdout песочницы, до того как обвязка завернёт его в JSON
+    # (в JSON они экранированы и регулярные выражения по строкам их не видят -- дефект v1, 12.09 20:25).
+    # Перехват потокобезопасный: 28 игр идут в потоках, run_sandboxed_python и _run_python_tool -- один поток.
+    import threading as _gthr
+    _g_tls = _gthr.local()
+    _g_orig_sandbox = _wta.run_sandboxed_python
+    def _g_sandbox(*a, **k):
+        res = _g_orig_sandbox(*a, **k)
+        try:
+            text = str(res.get("stdout", "") or "")
+            ev = {"set": [], "probe": 0, "batch": []}
+            for m in _gre.finditer(r"\[\[GOAL_SET\]\] (\{.*\})", text):
+                ev["set"].append(_gjson.loads(m.group(1)))
+            ev["probe"] = text.count("[[GOAL_PROBE]]")
+            for m in _gre.finditer(r"\[\[GOAL_BATCH\]\] (\{.*\})", text):
+                ev["batch"].append(_gjson.loads(m.group(1)))
+            res["stdout"] = _gre.sub(r"^\[\[GOAL_[A-Z]+\]\].*$\n?", "", text, flags=_gre.M)
+            _g_tls.events = ev
+        except Exception as _e:
+            print("[GOAL] сбой разбора stdout: %%r" %% (_e,), flush=True)
+        return res
+    _wta.run_sandboxed_python = _g_sandbox
+
     _g_orig_prompt = _wta.ToolAgent._build_user_prompt
     def _g_prompt(self, action_num, *args, **kwargs):
         text = _g_orig_prompt(self, action_num, *args, **kwargs)
@@ -181,17 +204,16 @@ if not TRUE_SUBMISSION:
         arguments["code"] = (_GOAL_HELPERS %% {"state": repr(lit), "patience": _GOAL_PATIENCE,
                                               "probe_len": _GOAL_PROBE_LEN, "probe_batches": _GOAL_PROBE_BATCHES}
                              + "\n" + code)
+        _g_tls.events = None
         out = _g_orig_run(self, state_path, arguments)
         try:
-            text = getattr(out, "content", "") or ""
-            for m in _gre.finditer(r"\[\[GOAL_SET\]\] (\{.*\})", text):
-                d = _gjson.loads(m.group(1))
+            ev = getattr(_g_tls, "events", None) or {"set": [], "probe": 0, "batch": []}
+            for d in ev["set"]:
                 st.update({"text": d["text"], "code": d["code"], "closed": None, "values": [d["value"]], "no_progress": 0})
                 _goal_stats["set"] += 1
-            st["probes_used"] = st.get("probes_used", 0) + text.count("[[GOAL_PROBE]]")
-            _goal_stats["probes"] += text.count("[[GOAL_PROBE]]")
-            for m in _gre.finditer(r"\[\[GOAL_BATCH\]\] (\{.*\})", text):
-                d = _gjson.loads(m.group(1))
+            st["probes_used"] = st.get("probes_used", 0) + int(ev["probe"])
+            _goal_stats["probes"] += int(ev["probe"])
+            for d in ev["batch"]:
                 st["values"] = (st.get("values") or []) + [d["after"]]
                 st["no_progress"] = int(d["no_progress"])
                 _goal_stats["batches"] += 1
@@ -201,13 +223,8 @@ if not TRUE_SUBMISSION:
                     st["closed"] = "falsified"
                     st["falsified_texts"] = list(st.get("falsified_texts") or []) + [st.get("text", "")]
                     _goal_stats["falsified"] += 1
+            text = getattr(out, "content", "") or ""
             _goal_stats["blocked"] += text.count("GOAL GATE: action() blocked") + text.count("is FALSIFIED -- its own")
-            cleaned = _gre.sub(r"^\[\[GOAL_[A-Z]+\]\].*$\n?", "", text, flags=_gre.M)
-            if cleaned != text:
-                try:
-                    out.content = cleaned
-                except Exception:
-                    out = _wta._ToolDispatchResult(content=cleaned, step_executed=getattr(out, "step_executed", True))
             if _goal_stats["turns"] %% 50 == 0:
                 print("[GOAL] " + _gjson.dumps(_goal_stats), flush=True)
         except Exception as _e:
