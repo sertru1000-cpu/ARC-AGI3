@@ -106,6 +106,10 @@ def main():
     ap.add_argument("--limit", type=int, default=3, help="сколько записанных ходов послать")
     ap.add_argument("--repeats", type=int, default=1, help="повторов каждого хода (сэмплирование шумное)")
     ap.add_argument("--variant-file", help="файл с текстом, который дописывается к последнему сообщению")
+    ap.add_argument("--hints-file", help="JSON «игра -> правило»: каждой игре дописывается СВОЁ "
+                                        "(перенос оракул-инъекции на стенд)")
+    ap.add_argument("--only-hinted", action="store_true",
+                    help="слать только те ходы, для которых в JSON есть правило")
     ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--workers", type=int, default=3)
@@ -122,18 +126,27 @@ def main():
         raise SystemExit("нет ключа: export DASHSCOPE_API_KEY=... (в репозиторий и в переписку он не попадает)")
 
     d = json.loads(lzma.open(a.payload).read().decode("utf-8"))
-    items = d["items"][:a.limit]
-    extra = Path(a.variant_file).read_text(encoding="utf-8") if a.variant_file else None
+    items = d["items"]
+    hints = json.loads(Path(a.hints_file).read_text(encoding="utf-8")) if a.hints_file else {}
+    if a.only_hinted:
+        items = [it for it in items if it["game"] in hints]
+    items = items[:a.limit]
+    common = Path(a.variant_file).read_text(encoding="utf-8") if a.variant_file else None
+    # Вставка бывает общей (--variant-file) или СВОЕЙ У КАЖДОЙ ИГРЫ (--hints-file).
+    # Второе нужно для переноса оракул-инъекции: правило tn36 не имеет смысла для sp80.
+    def extra_for(it):
+        return hints.get(it["game"], common) if hints else common
     sampling = {"temperature": a.temperature, "top_p": a.top_p}
     if a.send_top_k:
         sampling.update({"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}})
 
-    print("шлём %d ходов x %d повторов на %s, модель %s%s"
-          % (len(items), a.repeats, a.base_url, a.model, ", со вставкой" if extra else ""))
+    kind = "с правилом каждой игры" if hints else (", со вставкой" if common else "")
+    print("шлём %d ходов x %d повторов на %s, модель %s %s"
+          % (len(items), a.repeats, a.base_url, a.model, kind))
     jobs = [(it,) for _ in range(a.repeats) for it in items]
     res = []
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
-        for r in pool.map(lambda j: call(a.base_url, key, a.model, j[0], extra, sampling, a.max_tokens, a.timeout), jobs):
+        for r in pool.map(lambda j: call(a.base_url, key, a.model, j[0], extra_for(j[0]), sampling, a.max_tokens, a.timeout), jobs):
             res.append(r)
             if r["ok"]:
                 print("  %-6s %5s вх / %5s вых | %-9s | %.0f с | %s"
