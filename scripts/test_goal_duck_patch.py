@@ -172,6 +172,30 @@ check(lit["text"] == "reach col 10" and lit["values"][-1] == 4.0, "состоя�
 check(ns["_goal_stats"]["set"] == 2 and ns["_goal_stats"]["falsified"] == 1 and ns["_goal_stats"]["batches"] == 4 and ns["_goal_stats"].get("rejected") == 1,
       "статистика: set=2, rejected=1, batches=4, falsified=1")
 
+# --- ступени после опровержения: требование в этом вызове, отказ исполнять осмотр, сброс в пробы
+st["closed"] = "falsified"; st["since_fals"] = 0; st["fals_codes"] = ["def progress(frame): return frame.grid[5].index(5)"]
+check("MUST call set_goal" in ns["_g_status"](st) and "IN THIS CODE BLOCK" in ns["_g_status"](st), "ступень 1: статус требует set_goal в этом вызове")
+fake_stdout["text"] = "inspect\n"
+r1 = wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(current_frame.ascii)"})
+r2 = wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(current_frame.ascii)"})
+check(r1.step_executed and r2.step_executed and st["since_fals"] == 2, "первые 2 вызова без новой цели исполняются (счётчик 2)")
+r3 = wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(current_frame.ascii)"})
+check((not r3.step_executed) and "not executed" in r3.content and ns["_goal_stats"]["inspect_refused"] == 1, "ступень 2: третий вызов без set_goal не исполняется")
+for _ in range(3):
+    r = wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(1)"})
+check(st["closed"] is None and st["text"] == "" and st["probes_used"] == 0 and ns["_goal_stats"]["gate_reset"] == 1 and r.step_executed,
+      "ступень 3: после 5 отказов ворота сброшены в режим проб, вызов исполнен")
+# А: другой измеритель — сравнение с опровергнутыми в обвязке
+st["fals_codes"] = ["def progress(frame): return frame.grid[5].index(5)"]
+fake_stdout["text"] = '[[GOAL_SET]] {"text": "reach col 10 again", "code": "def progress(frame): return frame.grid[5].index(5) + 0"}\n'
+wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "set_goal(1,2)"})
+check(st["text"] == "" and "same measure under a new name" in st["rejected"] and ns["_goal_stats"]["same_measure"] == 1,
+      "А: измеритель с тем же числом на текущей доске отвергнут")
+fake_stdout["text"] = '[[GOAL_SET]] {"text": "count filled holes", "code": "def progress(frame): return 100 + frame.grid[5].index(5)"}\n'
+wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "set_goal(1,2)"})
+check(st["text"] == "count filled holes" and st["values"] == [104.0], "А: измеритель с другим числом принят")
+st["closed"] = "falsified"; st["falsified_texts"] = ["reach col 10"]
+
 # --- обёртка промпта
 ns["_g_orig_prompt"] = lambda self, action_num, *a, **k: "STOCK PROMPT"
 text = wta.ToolAgent._build_user_prompt(agent, 5, current_frame=types.SimpleNamespace(level=0))

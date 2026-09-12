@@ -29,6 +29,7 @@ import os
 
 SLUG = "sergueimakarov/arc3-stock-flash-goal"
 PATIENCE, PROBE_LEN, PROBE_BATCHES = 3, 2, 4
+REJECT_AFTER, RESET_AFTER = 2, 5   # вызовов без новой цели после опровержения: отказ исполнять осмотр / сброс в режим проб
 
 HELPERS = r'''
 import json as _gj
@@ -86,9 +87,11 @@ import re as _gre, json as _gjson
 import inference.agent.tool_agent as _wta
 
 _GOAL_PATIENCE, _GOAL_PROBE_LEN, _GOAL_PROBE_BATCHES = %(patience)d, %(probe_len)d, %(probe_batches)d
+_GOAL_REJECT_AFTER, _GOAL_RESET_AFTER = %(reject_after)d, %(reset_after)d
 _GOAL_HELPERS = %(helpers)r
 _goal_stats = {"games": 0, "turns": 0, "acted": 0, "set": 0, "blocked": 0, "probes": 0,
-               "batches": 0, "progress": 0, "falsified": 0, "confirmed": 0, "levels": 0}
+               "batches": 0, "progress": 0, "falsified": 0, "confirmed": 0, "levels": 0,
+               "rejected": 0, "same_measure": 0, "inspect_refused": 0, "gate_reset": 0}
 
 _GOAL_PROTOCOL = (
     "GOAL GATE (mandatory): real moves are gated on a stated, checkable level goal. Before any batch longer than a short probe, "
@@ -105,7 +108,7 @@ def _g_st(agent):
     st = getattr(agent, "_goal_state", None)
     if st is None:
         st = {"text": "", "code": "", "closed": None, "values": [], "no_progress": 0,
-              "probes_used": 0, "falsified_texts": [], "level": None, "rejected": ""}
+              "probes_used": 0, "falsified_texts": [], "level": None, "rejected": "", "since_fals": 0, "fals_codes": []}
         agent._goal_state = st
         _goal_stats["games"] += 1
     return st
@@ -117,8 +120,11 @@ def _g_status(st):
                 %% (_GOAL_PROBE_LEN, st.get("probes_used", 0), _GOAL_PROBE_BATCHES, rej))
     vals = ", ".join("%%g" %% v for v in (st.get("values") or [])[-6:])
     if st.get("closed") == "falsified":
+        k = int(st.get("since_fals", 0))
         return ("GOAL GATE STATUS: goal %%r is FALSIFIED -- its progress measure did not rise in %%d calls with moves (values %%s). "
-                "action() is blocked until set_goal() with a different hypothesis or measure." %% (st["text"][:120], _GOAL_PATIENCE, vals))
+                "You MUST call set_goal(text, progress_code) with a DIFFERENT MEASURE (one that reads a different number on the "
+                "current board) IN THIS CODE BLOCK; code without set_goal is not executed after %%d such turns (%%d so far)."
+                %% (st["text"][:120], _GOAL_PATIENCE, vals, _GOAL_REJECT_AFTER, k))
     return ("GOAL GATE STATUS: your goal: %%r | progress values %%s | calls with moves and no progress %%d/%%d"
             %% (st["text"][:120], vals, st.get("no_progress", 0), _GOAL_PATIENCE))
 
@@ -170,7 +176,7 @@ if not TRUE_SUBMISSION:
                 if st.get("text") and st.get("closed") is None:
                     _goal_stats["confirmed"] += 1
                 st.update({"text": "", "code": "", "closed": None, "values": [], "no_progress": 0,
-                           "probes_used": 0, "falsified_texts": [], "rejected": ""})
+                           "probes_used": 0, "falsified_texts": [], "rejected": "", "since_fals": 0, "fals_codes": []})
             if lv is not None:
                 st["level"] = lv
             return _GOAL_PROTOCOL + "\n" + _g_status(st) + "\n\n" + text
@@ -185,6 +191,24 @@ if not TRUE_SUBMISSION:
         _goal_stats["turns"] += 1
         if "action(" in code:
             _goal_stats["acted"] += 1
+        if st.get("closed") == "falsified":
+            if "set_goal(" not in code:
+                st["since_fals"] = int(st.get("since_fals", 0)) + 1
+                if st["since_fals"] > _GOAL_RESET_AFTER:
+                    # предохранитель: модель не формулирует -- ворота в режим проб, игра не умирает
+                    st.update({"text": "", "code": "", "closed": None, "values": [], "no_progress": 0,
+                               "probes_used": 0, "since_fals": 0, "rejected": ""})
+                    _goal_stats["gate_reset"] += 1
+                elif st["since_fals"] > _GOAL_REJECT_AFTER:
+                    _goal_stats["inspect_refused"] += 1
+                    return _wta._ToolDispatchResult(
+                        content=_gjson.dumps({"error": "GOAL GATE: not executed. Your goal is FALSIFIED and this code block "
+                                              "has no set_goal(). Register a new goal with a DIFFERENT measure in the same "
+                                              "block as your next moves. (%%d turns without a new goal; after %%d the gate "
+                                              "resets to probe mode.)" %% (st["since_fals"], _GOAL_RESET_AFTER)}, indent=2),
+                        step_executed=False)
+            else:
+                st["since_fals"] = 0
         lit = {k: st.get(k) for k in ("text", "code", "closed", "values", "no_progress", "probes_used", "falsified_texts")}
         arguments = dict(arguments or {})
         arguments["code"] = (_GOAL_HELPERS %% {"state": repr(lit), "patience": _GOAL_PATIENCE,
@@ -203,7 +227,21 @@ if not TRUE_SUBMISSION:
             for d in ev["set"]:
                 try:
                     v = _g_measure(d["code"], frame)
-                    st.update({"text": d["text"], "code": d["code"], "closed": None, "values": [v], "no_progress": 0, "rejected": ""})
+                    same = None
+                    for fc in st.get("fals_codes") or []:
+                        try:
+                            if abs(_g_measure(fc, frame) - v) < 1e-9:
+                                same = fc; break
+                        except Exception:
+                            continue
+                    if same is not None:
+                        st.update({"text": "", "code": "", "closed": None, "values": [], "no_progress": 0,
+                                   "rejected": "your new measure reads the same value (%%g) on the current board as a FALSIFIED one -- "
+                                               "it is the same measure under a new name; define progress from a DIFFERENT observable "
+                                               "(other objects, other relation, other count) and call set_goal again" %% v})
+                        _goal_stats["same_measure"] += 1
+                        continue
+                    st.update({"text": d["text"], "code": d["code"], "closed": None, "values": [v], "no_progress": 0, "rejected": "", "since_fals": 0})
                     _goal_stats["set"] += 1
                 except Exception as _e:
                     st.update({"text": "", "code": "", "closed": None, "values": [], "no_progress": 0,
@@ -223,6 +261,8 @@ if not TRUE_SUBMISSION:
                     if st["no_progress"] >= _GOAL_PATIENCE:
                         st["closed"] = "falsified"
                         st["falsified_texts"] = list(st.get("falsified_texts") or []) + [st.get("text", "")]
+                        st["fals_codes"] = list(st.get("fals_codes") or []) + [st.get("code", "")]
+                        st["since_fals"] = 0
                         _goal_stats["falsified"] += 1
                 except Exception as _e:
                     st["rejected"] = "progress(frame) failed after your moves: %%r" %% (_e,)
@@ -241,7 +281,8 @@ if not TRUE_SUBMISSION:
 
 
 def build_cell() -> str:
-    return CELL % {"patience": PATIENCE, "probe_len": PROBE_LEN, "probe_batches": PROBE_BATCHES, "helpers": HELPERS}
+    return CELL % {"patience": PATIENCE, "probe_len": PROBE_LEN, "probe_batches": PROBE_BATCHES, "helpers": HELPERS,
+                   "reject_after": REJECT_AFTER, "reset_after": RESET_AFTER}
 
 
 def main() -> None:
@@ -274,7 +315,7 @@ def main() -> None:
     size = os.path.getsize(os.path.join(out, "submission.ipynb"))
     print("ok   изменена только ячейка 15:", diff == [15])
     print("ok   патч после стокового soft_end и до запуска прогона:", 0 < code.find(anchor) < patch_at < code.find("await bm.run("))
-    print("ok   терпение %d, пробы <= %d ходов x %d" % (PATIENCE, PROBE_LEN, PROBE_BATCHES))
+    print("ok   терпение %d, пробы <= %d ходов x %d; после опровержения: отказ исполнять осмотр с %d-го вызова, сброс в пробы после %d" % (PATIENCE, PROBE_LEN, PROBE_BATCHES, REJECT_AFTER, RESET_AFTER))
     print("ok   слаг для пуша:", meta["id"])
     print("ok   компилируется; размер ноутбука %.0f КБ, предел 1 МБ: %s" % (size / 1024, size < 1_000_000))
 
