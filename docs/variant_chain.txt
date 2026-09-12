@@ -1,0 +1,5 @@
+A verified mechanic for this game is given above. Before any code, answer these three lines exactly:
+RESTATE: <the given mechanic in your own words, one line>
+AGREE: <yes / no / conflicts with my current hypothesis, and why, one line>
+NEXT: <the single action you will now take, and which part of the mechanic it follows>
+Then write the code that performs that action.
