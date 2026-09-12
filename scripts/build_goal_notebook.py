@@ -49,6 +49,10 @@ def set_goal(text, progress_code):
     if text in (_GOAL.get("falsified_texts") or []):
         raise ValueError("this exact goal was already FALSIFIED on this level (its measure did not rise in %%d calls with moves); "
                          "state a DIFFERENT hypothesis or a different measure" %% _GOAL_PATIENCE)
+    if _GOAL.get("text") and _GOAL.get("closed") is None and not _GOAL.get("stalled"):
+        print("[[GOAL_DUP]]")
+        return {"ok": False, "ignored": True, "note": "a live goal is already registered (%%r) and its measure is still moving; "
+                "re-registration is ignored -- act on the current goal. It can be replaced only after it is falsified or stalls." %% _GOAL.get("text")}
     _GOAL.update({"text": text, "code": progress_code, "closed": None})
     print("[[GOAL_SET]] " + _gj.dumps({"text": text, "code": progress_code}))
     return {"ok": True, "note": "goal registered; action() is open. The harness validates progress(frame) and measures it after every call with moves; see GOAL GATE STATUS next turn"}
@@ -91,7 +95,7 @@ _GOAL_REJECT_AFTER, _GOAL_RESET_AFTER = %(reject_after)d, %(reset_after)d
 _GOAL_HELPERS = %(helpers)r
 _goal_stats = {"games": 0, "turns": 0, "acted": 0, "set": 0, "blocked": 0, "probes": 0,
                "batches": 0, "progress": 0, "falsified": 0, "confirmed": 0, "levels": 0,
-               "rejected": 0, "same_measure": 0, "inspect_refused": 0, "gate_reset": 0}
+               "rejected": 0, "same_measure": 0, "inspect_refused": 0, "gate_reset": 0, "dup_ignored": 0}
 
 _GOAL_PROTOCOL = (
     "GOAL GATE (mandatory): real moves are gated on a stated, checkable level goal. Before any batch longer than a short probe, "
@@ -101,7 +105,7 @@ _GOAL_PROTOCOL = (
     "call with moves and shows the values in GOAL GATE STATUS. If it does not rise for %(patience)d calls with moves in a row the goal is "
     "FALSIFIED and action() is blocked until set_goal() with a different hypothesis or measure. Probes of <= %(probe_len)d actions without "
     "a goal: at most %(probe_batches)d per level. A level-up confirms the goal; the next level needs set_goal() again. "
-    "Write the goal from EVIDENCE and say in your reasoning whether the last result SUPPORTS or CONTRADICTS it."
+    "Write the goal from EVIDENCE. Register it ONCE: while it is live and its measure rises, further set_goal() calls are ignored."
 )
 
 def _g_st(agent):
@@ -139,11 +143,12 @@ if not TRUE_SUBMISSION:
         res = _g_orig_sandbox(*a, **k)
         try:
             text = str(res.get("stdout", "") or "")
-            ev = {"set": [], "probe": 0, "batch": 0}
+            ev = {"set": [], "probe": 0, "batch": 0, "dup": 0}
             for m in _gre.finditer(r"\[\[GOAL_SET\]\] (\{.*\})", text):
                 ev["set"].append(_gjson.loads(m.group(1)))
             ev["probe"] = text.count("[[GOAL_PROBE]]")
             ev["batch"] = text.count("[[GOAL_BATCH]]")
+            ev["dup"] = text.count("[[GOAL_DUP]]")
             res["stdout"] = _gre.sub(r"^\[\[GOAL_[A-Z]+\]\].*$\n?", "", text, flags=_gre.M)
             _g_tls.events = ev
         except Exception as _e:
@@ -179,6 +184,10 @@ if not TRUE_SUBMISSION:
                            "probes_used": 0, "falsified_texts": [], "rejected": "", "since_fals": 0, "fals_codes": []})
             if lv is not None:
                 st["level"] = lv
+            # Сокращение 12.09 23:30: полный протокол только когда он нужен (цели нет / опровергнута);
+            # при живой цели -- одна строка статуса. Рассуждение о цели каждый ход не требуется.
+            if st.get("text") and st.get("closed") is None:
+                return _g_status(st) + "\n\n" + text
             return _GOAL_PROTOCOL + "\n" + _g_status(st) + "\n\n" + text
         except Exception:
             return text
@@ -210,6 +219,7 @@ if not TRUE_SUBMISSION:
             else:
                 st["since_fals"] = 0
         lit = {k: st.get(k) for k in ("text", "code", "closed", "values", "no_progress", "probes_used", "falsified_texts")}
+        lit["stalled"] = bool(st.get("no_progress", 0) >= 1)
         arguments = dict(arguments or {})
         arguments["code"] = (_GOAL_HELPERS %% {"state": repr(lit), "patience": _GOAL_PATIENCE,
                                               "probe_len": _GOAL_PROBE_LEN, "probe_batches": _GOAL_PROBE_BATCHES}
@@ -217,7 +227,8 @@ if not TRUE_SUBMISSION:
         _g_tls.events = None
         out = _g_orig_run(self, state_path, arguments)
         try:
-            ev = getattr(_g_tls, "events", None) or {"set": [], "probe": 0, "batch": 0}
+            ev = getattr(_g_tls, "events", None) or {"set": [], "probe": 0, "batch": 0, "dup": 0}
+            _goal_stats["dup_ignored"] = _goal_stats.get("dup_ignored", 0) + int(ev.get("dup", 0))
             frame = None
             if ev["set"] or ev["batch"]:
                 try:
@@ -276,7 +287,8 @@ if not TRUE_SUBMISSION:
     _wta.ToolAgent._run_python_tool = _g_run
     print("GOAL GATE: set_goal(text, progress_code) до ходов; терпение %(patience)d пачек, пробы <= %(probe_len)d ходов x %(probe_batches)d. "
           "ПОРОГИ против базы 10.25: польза -- победы-поражения >= +8 и медиана >= +8; вред -- <= -6. "
-          "Механизм: set_goal хотя бы раз в >= 20 играх, доля вызовов с ходом >= 77%%, генерация 1400-1600.", flush=True)
+          "Механизм: set_goal хотя бы раз в >= 20 играх, доля вызовов с ходом >= 77%%, генерация 1400-1600. "
+          "v4: протокол целиком только при пустой/опровергнутой цели; повторная регистрация живой цели игнорируется.", flush=True)
 '''
 
 

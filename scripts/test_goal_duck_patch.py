@@ -196,6 +196,20 @@ wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "set_goal(1,2)"})
 check(st["text"] == "count filled holes" and st["values"] == [104.0], "А: измеритель с другим числом принят")
 st["closed"] = "falsified"; st["falsified_texts"] = ["reach col 10"]
 
+# --- v4: регистрация один раз; протокол целиком только при пустой/опровергнутой цели
+env5, g5 = make_env({**empty, "text": "live goal here", "code": "def progress(frame): return 1", "closed": None, "values": [1, 2], "stalled": False})
+out, err = run(g5, "r = set_goal('another goal text', 'def progress(frame): return 5'); print(r.get('ignored'))")
+check(err is None and "[[GOAL_DUP]]" in out and "True" in out and "[[GOAL_SET]]" not in out, "v4: повторный set_goal при живой растущей цели игнорируется (маркер DUP, без SET)")
+env6, g6 = make_env({**empty, "text": "live goal here", "code": "def progress(frame): return 1", "closed": None, "values": [1, 1], "stalled": True})
+out, err = run(g6, "set_goal('another goal text', 'def progress(frame): return 5')")
+check(err is None and "[[GOAL_SET]]" in out, "v4: при застывшем измерителе замена цели разрешена")
+st_live = {"text": "live", "code": "def progress(frame): return 1", "closed": None, "values": [1, 2], "no_progress": 0, "probes_used": 0, "falsified_texts": [], "level": 0, "rejected": "", "since_fals": 0, "fals_codes": []}
+agent2 = types.SimpleNamespace(_goal_state=st_live)
+ns["_g_orig_prompt"] = lambda self, action_num, *a, **k: "STOCK PROMPT"
+text = wta.ToolAgent._build_user_prompt(agent2, 3, current_frame=types.SimpleNamespace(level=0))
+check(text.startswith("GOAL GATE STATUS: your goal") and "GOAL GATE (mandatory)" not in text and text.endswith("STOCK PROMPT"), "v4: при живой цели -- одна строка статуса без протокола")
+check("SUPPORTS or CONTRADICTS" not in ns["_GOAL_PROTOCOL"], "v4: требование рассуждать о цели каждый ход убрано")
+
 # --- обёртка промпта
 ns["_g_orig_prompt"] = lambda self, action_num, *a, **k: "STOCK PROMPT"
 text = wta.ToolAgent._build_user_prompt(agent, 5, current_frame=types.SimpleNamespace(level=0))
