@@ -81,22 +81,42 @@ check(p0.startswith("STOCK action_num=3"), "стоковая часть пром
 check("Cross-game notes" in p0, "статический словарь механик выдан")
 check("So far in this run" not in p0, "динамическая сводка молчит, пока фактов нет")
 
-# --- регистрация взятых уровней: три факта от трёх игр ---
+# --- регистрация взятых уровней: четыре факта от четырёх игр ---
 ag._build_user_prompt(10, previous_step_summary={"level_transition": True, "executed_actions": ["UP"]})
 ag2 = solver.HarnessSolver._make_analyzer(None, game("sp80"), 1, "LOCAL")
 ag2._build_user_prompt(11, previous_step_summary={"level_transition": True, "executed_actions": ["LEFT", "SPACE"]})
 ag3 = solver.HarnessSolver._make_analyzer(None, game("lf52"), 2, "LOCAL")
 ag3._build_user_prompt(12, previous_step_summary={"level_transition": True,
                                                   "executed_actions": ["MOUSE(row=4, col=7)"]})
+ag4 = solver.HarnessSolver._make_analyzer(None, game("ls20"), 3, "LOCAL")
+ag4._build_user_prompt(13, previous_step_summary={"level_transition": True, "executed_actions": ["RIGHT"]})
 xg = ns["_xg"]
-check(len(xg["levels"]) == 3, "записаны три взятия уровня: %d" % len(xg["levels"]))
-check(xg["games_scored"] == {"tn36", "sp80", "lf52"}, "учтены три разные игры: %s" % sorted(xg["games_scored"]))
+check(len(xg["levels"]) == 4, "записаны четыре взятия уровня: %d" % len(xg["levels"]))
+check(xg["games_scored"] == {"tn36", "sp80", "lf52", "ls20"},
+      "учтены четыре разные игры: %s" % sorted(xg["games_scored"]))
+check(all(isinstance(x, tuple) and len(x) == 2 for x in xg["levels"]),
+      "факт хранится вместе с игрой-источником (иначе не отфильтровать свои)")
 
+# ГЛАВНОЕ: игра не должна получать собственные факты — при двух проходах она встречается дважды
 p1 = ag._build_user_prompt(20)
 check("So far in this run" in p1, "после порога динамическая сводка выдана")
-check("3 levels were completed across 3 games" in p1, "сводка считает уровни и игры верно")
+check("3 levels were completed across 3 games" in p1,
+      "СВОИ факты исключены: tn36 видит 3 чужих уровня из 4 записанных")
 check("arrow 1" in p1 and "space 1" in p1 and "mouse 1" in p1,
       "типы действий разнесены верно (стрелка/SPACE/мышь): %s" % p1.splitlines()[-1][:120])
+check("arrow 2" not in p1, "собственная стрелка tn36 в её сводку не попала")
+
+p_sp = ag2._build_user_prompt(21)
+check("3 levels were completed across 3 games" in p_sp,
+      "то же и для sp80: своё исключено, чужих трое")
+
+# игра, у которой чужих фактов меньше порога, сводки не получает
+ag5 = solver.HarnessSolver._make_analyzer(None, game("zz99"), 4, "LOCAL")
+xg["levels"] = [("zz99", "UP"), ("zz99", "UP"), ("zz99", "SPACE"), ("zz99", "LEFT")]
+p_zz = ag5._build_user_prompt(22)
+check("So far in this run" not in p_zz,
+      "игра со ВСЕМИ фактами своими сводки не получает (нечего переносить)")
+xg["levels"] = [("tn36", "UP"), ("sp80", "SPACE"), ("lf52", "MOUSE(row=4, col=7)"), ("ls20", "RIGHT")]
 
 # --- конец игры отмечается ---
 ag._build_user_prompt(21, previous_step_summary={"game_over": True, "executed_actions": []})

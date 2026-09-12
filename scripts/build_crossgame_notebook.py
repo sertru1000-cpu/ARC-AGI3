@@ -83,16 +83,18 @@ _xg = {"lock": _xt.Lock(), "levels": [], "games_done": set(), "games_scored": se
 
 def _xg_note(gid, action_name):
     with _xg["lock"]:
-        _xg["levels"].append(str(action_name or "?"))
+        _xg["levels"].append((gid, str(action_name or "?")))
         _xg["games_scored"].add(gid)
 
 
-def _xg_digest():
-    """Короткая сводка накопленного. Возвращает пустую строку, пока фактов мало."""
+def _xg_digest(for_gid):
+    """Сводка того, что узнали ДРУГИЕ игры. Собственные факты исключаются: при двух проходах
+    та же игра встречается дважды, и без фильтра её первый проход подсказывал бы второму —
+    это была бы подсказка самой себе, а не перенос между играми."""
     with _xg["lock"]:
-        levels = list(_xg["levels"])
-        scored = len(_xg["games_scored"])
-        done = len(_xg["games_done"])
+        levels = [name for gid, name in _xg["levels"] if gid != for_gid]
+        scored = len({gid for gid, _ in _xg["levels"] if gid != for_gid})
+        done = len([g for g in _xg["games_done"] if g != for_gid])
     if len(levels) < _XG_MIN_FACTS:
         return ""
     kinds = {"arrow": 0, "space": 0, "mouse": 0, "other": 0}
@@ -144,7 +146,7 @@ if not TRUE_SUBMISSION:
             if _XG_STATIC:
                 block.append(_XG_PRIOR)
             if _XG_DYNAMIC:
-                d = _xg_digest()
+                d = _xg_digest(gid)
                 if d:
                     block.append(d)
             if not block:
