@@ -70,12 +70,24 @@ ok(r.error and "FALSIFIED" in r.error, "после опровержения acti
 r = sb.run_code("set_goal('move the 5-cell to column 10', lambda g: int(np.argmax(g[5])))")
 ok(r.error and "already falsified" in r.error, "та же цель дословно повторно отвергнута")
 r = sb.run_code("set_goal('reach column 10 with the 5-cell (measure: column index)', lambda g: int(np.argmax(g[5])))")
-ok(r.error is None, "новая формулировка принята")
+ok(r.error and "same measure under a new name" in r.error, "А: новая формулировка с ТЕМ ЖЕ измерителем отвергнута")
+r = sb.run_code("set_goal('reach column 10 with the 5-cell (measure: column index)', lambda g: 100 + int(np.argmax(g[5])))")
+ok(r.error is None, "А: другой измеритель (другое число на текущей доске) принят")
 r = sb.run_code("for _ in range(3):\n    r = action(['RIGHT','RIGHT','RIGHT'])\n    if r.get('level_completed'): break\nprint(r.get('level_completed'), r['level'])")
 ok("True 1" in (r.output or ""), "уровень взят (пачки по 3 — старые ворота теории режут длиннее): " + (r.output or "").strip()[:40] + str(r.error or "")[-80:])
 ok(sb.goal is None and sb.goal_stats["confirmed"] == 1 and sb.goal_probes_used == 0, "цель подтверждена, сброшена, пробы обнулены")
 r = sb.run_code("action(['RIGHT','RIGHT','RIGHT'])")
 ok(r.error and "goal gate" in r.error, "на новом уровне длинная пачка снова требует цель")
+# В: лимит ходов на гипотезу
+os.environ["MY_AGENT_GOAL_MOVES"] = "4"
+env3, sb3 = make()
+ok(sb3.goal_moves_cap == 4, "В: лимит ходов на гипотезу включён через MY_AGENT_GOAL_MOVES=4")
+r = sb3.run_code("set_goal('move the 5-cell to column 10', lambda g: int(np.argmax(g[5])))")
+r = sb3.run_code("r = action(['UP','UP','UP']); print(r['goal_progress']['moves_without_progress'])")
+ok("3" in (r.output or "") and sb3.goal.get("closed") is None, "В: 3 хода без роста -- ещё не опровергнута")
+r = sb3.run_code("r = action(['UP','UP']); print(r['goal_progress'].get('falsified'))")
+ok("True" in (r.output or ""), "В: 5 ходов без роста при лимите 4 -- опровергнута по лимиту ходов раньше терпения пачек")
+os.environ["MY_AGENT_GOAL_MOVES"] = "0"
 os.environ["MY_AGENT_GOAL_GATE"] = "0"
 env2, sb2 = make()
 ok(not sb2.goal_gate and sb2.goal_status() == "", "с выключенными воротами поведение прежнее, статус пуст")

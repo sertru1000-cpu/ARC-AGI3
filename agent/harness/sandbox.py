@@ -221,6 +221,9 @@ class Sandbox:
     goal_patience: int = field(default_factory=lambda: int(os.getenv("MY_AGENT_GOAL_PATIENCE", "3")))
     goal_probe_len: int = field(default_factory=lambda: int(os.getenv("MY_AGENT_GOAL_PROBE_LEN", "2")))
     goal_probe_batches: int = field(default_factory=lambda: int(os.getenv("MY_AGENT_GOAL_PROBE_BATCHES", "4")))
+    # В (12.09 вечер): бюджет ходов на гипотезу -- после стольких ходов без роста измерителя цель
+    # опровергается, даже если пачек было меньше goal_patience. 0 = выключено.
+    goal_moves_cap: int = field(default_factory=lambda: int(os.getenv("MY_AGENT_GOAL_MOVES", "0")))
     goal: dict | None = None
     goal_probes_used: int = 0
     goal_log: list = field(default_factory=list)
@@ -595,10 +598,27 @@ class Sandbox:
                 raise ValueError("this exact goal was already falsified on this level (its progress measure did not "
                                  "move in %d batches: %s). State a DIFFERENT hypothesis or a different measure."
                                  % (self.goal_patience, g["values"][-6:]))
+        # А (12.09 вечер): круг гипотез -- модель меняет слова, оставляя измеритель. Новый измеритель
+        # обязан давать на ТЕКУЩЕЙ доске другое число, чем каждый опровергнутый на этом уровне;
+        # иначе это та же мера под другим именем.
+        for g in self.goal_log:
+            if g.get("level") != lvl or g.get("closed") != "falsified":
+                continue
+            try:
+                old_v = float(g["progress"](self.current.grid.copy()))
+            except Exception:  # noqa: BLE001
+                continue
+            if abs(old_v - v) < 1e-9:
+                self.goal_stats["rejected"] += 1
+                self.goal_stats["same_measure"] = self.goal_stats.get("same_measure", 0) + 1
+                raise ValueError("your new progress measure gives the same value (%g) on the current board as the "
+                                 "FALSIFIED goal %r -- it is the same measure under a new name. That measure did not move "
+                                 "in %d batches; define progress from a DIFFERENT observable (other objects, other "
+                                 "relation, other count) so that it reads a different number now." % (v, g["text"][:80], self.goal_patience))
         if self.goal is not None and not self.goal.get("closed"):
             self.goal["closed"] = "replaced"; self.goal_log.append(self.goal)
         self.goal = {"text": text, "progress": progress, "level": lvl, "values": [v], "no_progress": 0,
-                     "batches": 0, "set_step": self.step_counter, "closed": None}
+                     "batches": 0, "set_step": self.step_counter, "closed": None, "moves_since_progress": 0}
         self.goal_stats["set"] += 1
         return {"ok": True, "level": lvl, "progress_now": v,
                 "note": "action() is open; progress is re-measured after every batch and reported to you"}
@@ -618,8 +638,9 @@ class Sandbox:
             return ("GOAL GATE: goal '%s' is FALSIFIED — its own progress measure did not rise in %d batches "
                     "(values %s). action() is blocked until you call set_goal() with a different hypothesis or measure."
                     % (g["text"][:120], self.goal_patience, tail))
-        return ("GOAL GATE: goal '%s' | progress values %s | batches without progress %d/%d"
-                % (g["text"][:120], tail, g["no_progress"], self.goal_patience))
+        cap = (" | moves without progress %d/%d" % (g.get("moves_since_progress", 0), self.goal_moves_cap)) if self.goal_moves_cap else ""
+        return ("GOAL GATE: goal '%s' | progress values %s | batches without progress %d/%d%s"
+                % (g["text"][:120], tail, g["no_progress"], self.goal_patience, cap))
 
     def verify_gate_open(self) -> bool:
         """Long action() batches unlock at decent accuracy or honest effort."""
@@ -688,6 +709,7 @@ class Sandbox:
                         "seen (objects, what moved, what the level-1 screen looked like) and register it with "
                         "set_goal(text, progress) in THIS code block, then act." % self.goal_status())
         goal_before = None
+        step_at_batch_start = self.step_counter
         if self.goal is not None and not self.goal.get("closed"):
             try:
                 goal_before = float(self.goal["progress"](self.current.grid.copy()))
@@ -758,13 +780,15 @@ class Sandbox:
             if after_v is not None:
                 g["values"].append(after_v); g["batches"] += 1
                 delta = None if goal_before is None else after_v - goal_before
+                executed = self.step_counter - step_at_batch_start
                 if delta is not None and delta > 0:
-                    g["no_progress"] = 0
+                    g["no_progress"] = 0; g["moves_since_progress"] = 0
                 else:
-                    g["no_progress"] += 1
+                    g["no_progress"] += 1; g["moves_since_progress"] = g.get("moves_since_progress", 0) + executed
                 result["goal_progress"] = {"before": goal_before, "after": after_v, "delta": delta,
-                                           "no_progress_batches": g["no_progress"]}
-                if g["no_progress"] >= self.goal_patience:
+                                           "no_progress_batches": g["no_progress"],
+                                           "moves_without_progress": g["moves_since_progress"]}
+                if g["no_progress"] >= self.goal_patience or (self.goal_moves_cap and g["moves_since_progress"] >= self.goal_moves_cap):
                     g["closed"] = "falsified"; self.goal_stats["falsified"] += 1
                     self.goal_log.append(g)
                     result["goal_progress"]["falsified"] = True

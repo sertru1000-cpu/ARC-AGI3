@@ -204,9 +204,13 @@ from the board only (e.g. number of targets already matched, negative distance o
 the agent to the exit, count of filled slots). It must RISE as the level gets
 closer to completion. The harness re-measures it after EVERY batch and reports
 'goal_progress' in the action() result and a GOAL GATE line each turn.
-- If the measure does not rise for {patience} batches in a row, the goal is
-  FALSIFIED and action() is blocked until you call set_goal() with a different
-  hypothesis or a different measure. Do not restate a falsified goal verbatim.
+- If the measure does not rise for {patience} batches in a row (or for the
+  move budget shown in the GOAL GATE line), the goal is FALSIFIED and action()
+  is blocked until you call set_goal() with a DIFFERENT MEASURE: the new
+  progress(grid) must read a different number on the current board than the
+  falsified one (the harness checks this). Rewording the same goal or the same
+  count is rejected -- switch to a different observable: other objects, another
+  relation, another mechanic (e.g. selecting a different piece by clicking it).
 - Probes of <= {probe_len} actions are allowed without a goal, but only
   {probe_batches} such batches per level: use them to see what the controls do,
   then commit to a goal.
