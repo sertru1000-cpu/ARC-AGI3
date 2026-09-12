@@ -1,0 +1,6 @@
+Cross-game notes (verified on other games of this same benchmark, not on this one):
+- A level completes on an acting move, not on an inspection call: in every solved case we recorded it was an arrow key, SPACE, or a click on a confirm control outside the puzzle area.
+- A changed board does not mean a useful move. Progress meters and budget bars along the edges change on almost every action; in one game 367 of 561 moves changed only such a bar and nothing in the play area. Separate edge/HUD changes from play-area changes before concluding that an action did something.
+- A strip of cells below or beside the play area is usually a control panel or a progress meter rather than part of the puzzle.
+- Control positions move between levels of the same game: re-locate the controls after every level transition instead of reusing coordinates that worked before.
+- If many moves pass with no level gained, the hypothesis class is wrong, not the coordinates: across games, once a run went 100 moves without a level, only one game in nine ever gained another one. Change what you believe the controls ARE, not where you click.

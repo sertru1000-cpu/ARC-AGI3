@@ -27,6 +27,7 @@ import argparse
 import json
 import lzma
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -86,9 +87,13 @@ def call(url, key, model, item, extra, sampling, max_tokens, timeout):
         except Exception:  # noqa: BLE001
             pass
     usage = resp.get("usage") or {}
+    # ВАЖНО: «вернула код» и «сделала ход» — разные вещи. Первая проба это смешивала, и выдача
+    # показывала «ход» у ответов, которые лишь печатали доску. Ход = вызов action() внутри кода.
+    acts = bool(re.search(r"(?<![A-Za-z_])action\s*\(", code))
     return {"game": item["game"], "ok": True, "seconds": round(time.time() - t0, 1),
             "finish": ch.get("finish_reason"), "in": usage.get("prompt_tokens"),
-            "out": usage.get("completion_tokens"), "acted": bool(calls),
+            "out": usage.get("completion_tokens"), "returned_code": bool(calls), "acts": acts,
+            "code": code,
             "code_head": code.strip().splitlines()[0][:90] if code.strip() else "",
             "text_head": (msg.get("content") or "").strip()[:90]}
 
@@ -131,8 +136,9 @@ def main():
         for r in pool.map(lambda j: call(a.base_url, key, a.model, j[0], extra, sampling, a.max_tokens, a.timeout), jobs):
             res.append(r)
             if r["ok"]:
-                print("  %-6s %5s вх / %5s вых | %s | %.0f с | %s"
-                      % (r["game"], r["in"], r["out"], "ход" if r["acted"] else "осмотр",
+                print("  %-6s %5s вх / %5s вых | %-9s | %.0f с | %s"
+                      % (r["game"], r["in"], r["out"],
+                         "ДЕЙСТВИЕ" if r["acts"] else ("осмотр" if r["returned_code"] else "без кода"),
                          r["seconds"], r["code_head"] or r["text_head"]))
             else:
                 print("  %-6s СБОЙ: %s" % (r["game"], r["error"]))
@@ -145,8 +151,10 @@ def main():
     tout = sum(r["out"] or 0 for r in ok)
     cost = (tin * PRICE_IN + tout * PRICE_OUT) / 1e6
     print()
-    print("ответов %d из %d; генерация в среднем %.0f токенов; ходом ответили %.0f%%"
-          % (len(ok), len(res), tout / len(ok), 100 * sum(r["acted"] for r in ok) / len(ok)))
+    print("ответов %d из %d; генерация в среднем %.0f токенов" % (len(ok), len(res), tout / len(ok)))
+    print("кодом ответили %.0f%%, из них ДЕЙСТВИЕМ (вызов action) — %.0f%% от всех ответов"
+          % (100 * sum(r["returned_code"] for r in ok) / len(ok),
+             100 * sum(r["acts"] for r in ok) / len(ok)))
     print("токенов: %d входных, %d выходных" % (tin, tout))
     print("стоимость: %.3f юаня (~$%.3f); результаты в %s" % (cost, cost * CNY_USD, a.out))
 
