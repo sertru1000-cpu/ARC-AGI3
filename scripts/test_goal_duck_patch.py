@@ -1,20 +1,23 @@
 """Проверки ворот цели для Duck на НАСТОЯЩИХ классах бандла (без модели, без движка).
 
 Проверяется то, что может сломаться и чего не видно глазами:
-  * помощники, подставляемые в код модели, исполняются в песочнице-подобном окружении: без цели
-    пробы <= 2 ходов проходят (и только 4), длинная пачка блокируется; set_goal с исполняемым
-    измерителем открывает action(); измеритель считается до/после; после 3 пачек без роста
-    цель опровергнута и action() закрыт; та же цель дословно отвергается;
-  * обёртка _run_python_tool разбирает маркеры из stdout, переносит состояние на агент, вырезает
-    маркеры из ответа инструмента, считает статистику;
-  * обёртка _build_user_prompt ставит протокол и статус ПЕРЕД стоковым текстом и не меняет его;
-  * смена уровня подтверждает цель и сбрасывает состояние;
+  * помощники в песочнице БЕЗ exec (в песочнице Duck его нет): без цели пробы <= 2 ходов проходят
+    (и только 4), длинная пачка блокируется; set_goal печатает маркер и открывает action(); после
+    опровержения action() закрыт; та же цель дословно отвергается;
+  * обёртка песочницы берёт маркеры из СЫРОГО stdout (в ответе они уже в JSON) и вырезает их;
+  * обёртка _run_python_tool исполняет измеритель В ОБВЯЗКЕ на текущем кадре: регистрация с
+    негодным измерителем отклоняется с пояснением; после вызова с ходами значение дописывается,
+    3 вызова без роста -> опровержение, текст запомнен; статистика;
+  * обёртка _build_user_prompt ставит протокол и статус ПЕРЕД стоковым текстом; смена уровня
+    подтверждает цель и сбрасывает состояние;
   * боевая ветка (TRUE_SUBMISSION) не тронута; ячейка компилируется.
 
 usage:  .venv/bin/python scripts/test_goal_duck_patch.py --bundle <путь к бандлу keithtyser>
 """
 import argparse
 import ast
+import contextlib
+import io
 import json
 import sys
 import types
@@ -43,49 +46,45 @@ cell = open(a.cell, encoding="utf-8").read()
 compile(cell, "cell15", "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
 check(True, "ячейка компилируется")
 
-# --- боевая ветка не тронута
-orig_prompt, orig_run = wta.ToolAgent._build_user_prompt, wta.ToolAgent._run_python_tool
+orig_prompt, orig_run, orig_sandbox = wta.ToolAgent._build_user_prompt, wta.ToolAgent._run_python_tool, wta.run_sandboxed_python
 ns = {"TRUE_SUBMISSION": True}
 exec(cell, ns)
-check(wta.ToolAgent._build_user_prompt is orig_prompt and wta.ToolAgent._run_python_tool is orig_run,
-      "TRUE_SUBMISSION=True: классы Duck не тронуты")
+check(wta.ToolAgent._build_user_prompt is orig_prompt and wta.ToolAgent._run_python_tool is orig_run
+      and wta.run_sandboxed_python is orig_sandbox, "TRUE_SUBMISSION=True: классы и песочница Duck не тронуты")
 
-# --- оффлайн: обёртки встали
 ns = {"TRUE_SUBMISSION": False}
 exec(cell, ns)
-check(wta.ToolAgent._build_user_prompt is not orig_prompt and wta.ToolAgent._run_python_tool is not orig_run,
-      "TRUE_SUBMISSION=False: обе обёртки установлены")
+check(wta.ToolAgent._build_user_prompt is not orig_prompt and wta.ToolAgent._run_python_tool is not orig_run
+      and wta.run_sandboxed_python is not orig_sandbox, "TRUE_SUBMISSION=False: три обёртки установлены")
 HELPERS = ns["_GOAL_HELPERS"]
+check("exec(" not in HELPERS and "eval(" not in HELPERS and "compile(" not in HELPERS, "помощники не используют exec/eval/compile (их нет в песочнице)")
 
 
-# --- помощники в окружении, похожем на песочницу Duck
+# --- помощники в окружении, похожем на песочницу Duck (без exec в builtins)
 class Frame:
     def __init__(self, col, level=0):
         self.grid = [[0] * 64 for _ in range(64)]; self.grid[5][col] = 5; self.level = level
         self.ascii = "\n".join("".join("%x" % v for v in row) for row in self.grid)
 
 
+import builtins as _b  # noqa: E402
+
+
 def make_env(state):
-    env = {"col": 0, "level": 0, "calls": []}
-    g = {"__builtins__": __builtins__}
-    g["current_frame"] = Frame(0)
+    env = {"col": 0, "level": 0}
+    safe = {k: getattr(_b, k) for k in ("isinstance", "len", "str", "print", "ValueError", "RuntimeError", "dict", "list", "float", "int", "__import__")}
+    g = {"__builtins__": safe, "current_frame": Frame(0)}
 
     def action(actions):
         acts = actions if isinstance(actions, list) else [actions]
-        env["calls"].append(list(acts))
         for act in acts:
             if act == "RIGHT":
                 env["col"] += 1
-            if env["col"] >= 10 and env["level"] == 0:
-                env["level"] = 1; env["col"] = 0
         g["current_frame"] = Frame(env["col"], env["level"])
         return {"executed": True, "level": env["level"], "board_changed": True}
     g["action"] = action
     exec(HELPERS % {"state": repr(state), "patience": 3, "probe_len": 2, "probe_batches": 4}, g)
     return env, g
-
-
-import io, contextlib  # noqa: E402
 
 
 def run(g, code):
@@ -113,30 +112,22 @@ out, err = run(g, "set_goal('x', 'def progress(frame): return 0')")
 check(err and "checkable condition" in err, "короткий текст цели отвергнут")
 out, err = run(g, "set_goal('move the 5-cell to column 10', lambda f: 0)")
 check(err and "SOURCE STRING" in err, "измеритель не строкой отвергнут")
-out, err = run(g, "set_goal('move the 5-cell to column 10', 'def progress(frame): return frame.grid[5].index(5)')")
-check(err is None and "[[GOAL_SET]]" in out, "цель с измерителем принята, маркер напечатан")
-state_after_set = json.loads(out.split("[[GOAL_SET]] ")[1].splitlines()[0])
-check(state_after_set["value"] == 1.0, "значение измерителя при регистрации = 1 (после одной пробы RIGHT)")
-out, err = run(g, "r = action(['RIGHT','RIGHT']); print(r['goal_progress'])")
-check(err is None and "'delta': 2.0" in out and "[[GOAL_BATCH]]" in out, "после пачки delta=2, маркер пачки напечатан")
-for _ in range(3):
-    out, err = run(g, "r = action(['UP','UP']); print(r['goal_progress'])")
-check("'falsified': True" in out, "3 пачки без роста -> цель опровергнута")
-out, err = run(g, "action(['RIGHT'])")
-check(err and "FALSIFIED" in err, "после опровержения action() закрыт")
+out, err = run(g, "r = set_goal('move the 5-cell to column 10', 'def progress(frame): return frame.grid[5].index(5)'); print(r['ok'])")
+check(err is None and "[[GOAL_SET]]" in out, "цель принята в песочнице, маркер напечатан")
+out, err = run(g, "r = action(['RIGHT','RIGHT']); print(r['goal_note'])")
+check(err is None and "[[GOAL_BATCH]]" in out and "measured by the harness" in out, "после регистрации пачка проходит, маркер пачки напечатан")
+env2, g2 = make_env({**empty, "text": "reach col 10", "code": "def progress(frame): return 1", "closed": "falsified", "values": [1, 1, 1, 1]})
+out, err = run(g2, "action(['RIGHT'])")
+check(err and "FALSIFIED" in err, "с опровергнутой целью в состоянии action() закрыт")
+env3, g3 = make_env({**empty, "falsified_texts": ["move the 5-cell to column 10"]})
+out, err = run(g3, "set_goal('move the 5-cell to column 10', 'def progress(frame): return 0')")
+check(err and "already FALSIFIED" in err, "та же цель дословно отвергается (перенос через литерал)")
 
-# --- состояние переносится литералом: новый вызов с falsified_texts отвергает ту же цель
-env2, g2 = make_env({**empty, "falsified_texts": ["move the 5-cell to column 10"]})
-out, err = run(g2, "set_goal('move the 5-cell to column 10', 'def progress(frame): return frame.grid[5].index(5)')")
-check(err and "already FALSIFIED" in err, "та же цель дословно отвергается в новом вызове (перенос через литерал)")
-out, err = run(g2, "set_goal('reach column 10 with the 5-cell', 'def progress(frame): return frame.grid[5].index(5)')")
-check(err is None, "новая формулировка принята")
-
-# --- обёртка _run_python_tool: маркеры берутся из СЫРОГО stdout песочницы (в ответе они уже в JSON)
+# --- обёртки обвязки: маркеры из сырого stdout; измеритель исполняется в обвязке
 agent = types.SimpleNamespace()
 captured = {}
-fake_stdout = {"text": '[[GOAL_SET]] {"text": "reach col 10", "code": "def progress(frame): return 1", "value": 1.0}\n'
-                       'hello\n[[GOAL_BATCH]] {"after": 1.0, "no_progress": 1, "falsified": false}\n'}
+fake_stdout = {"text": ""}
+frame_now = {"f": Frame(1)}
 
 
 def fake_sandbox(**kw):
@@ -151,34 +142,46 @@ def fake_run(self, state_path, arguments):
 
 ns["_g_orig_sandbox"] = fake_sandbox
 ns["_g_orig_run"] = fake_run
-out = wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(1)"})
-check("_GOAL = {" in captured["code"] and captured["code"].rstrip().endswith("print(1)"), "помощники подставлены перед кодом модели")
-st = agent._goal_state
-check(st["text"] == "reach col 10" and st["values"] == [1.0, 1.0] and st["no_progress"] == 1, "состояние цели перенесено на агент из сырого stdout")
-check("[[GOAL_" not in out.content and "hello" in out.content, "маркеры вырезаны до JSON-обёртки, остальное на месте")
-check(ns["_goal_stats"]["set"] == 1 and ns["_goal_stats"]["batches"] == 1, "статистика: set=1, batches=1")
-captured.clear(); fake_stdout["text"] = "nothing\n"
-wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(2)"})
-lit = ast.literal_eval(captured["code"].split("_GOAL = ", 1)[1].splitlines()[0])
-check(lit["text"] == "reach col 10" and lit["values"] == [1.0, 1.0], "на следующий вызов состояние подставлено литералом")
-fake_stdout["text"] = '[[GOAL_BATCH]] {"after": 1.0, "no_progress": 3, "falsified": true}\n'
-wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "action(['UP'])"})
-check(st["closed"] == "falsified" and st["falsified_texts"] == ["reach col 10"] and ns["_goal_stats"]["falsified"] == 1,
-      "опровержение перенесено на агент, текст запомнен")
-wta.run_sandboxed_python = ns["_g_orig_sandbox"] if False else wta.run_sandboxed_python
+wta.load_runtime_state = lambda p: (frame_now["f"], [])
+wta._ascii_frame_view_payload = lambda f: {"grid": f.grid, "ascii": f.ascii, "level": f.level, "step": 0, "shape": [64, 64]}
 
-# --- обёртка промпта: протокол + статус перед стоковым текстом; смена уровня сбрасывает цель
+fake_stdout["text"] = '[[GOAL_SET]] {"text": "reach col 10", "code": "def progress(frame): return frame.grid[5].index(5)"}\nhello\n'
+out = wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "print(1)"})
+st = agent._goal_state
+check("_GOAL = {" in captured["code"] and captured["code"].rstrip().endswith("print(1)"), "помощники подставлены перед кодом модели")
+check(st["text"] == "reach col 10" and st["values"] == [1.0], "регистрация: измеритель исполнен обвязкой на текущем кадре, значение 1")
+check("[[GOAL_" not in out.content and "hello" in out.content, "маркеры вырезаны до JSON-обёртки, остальное на месте")
+
+fake_stdout["text"] = '[[GOAL_SET]] {"text": "bad measure goal", "code": "def progress(frame): return frame.nope"}\n'
+wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "x"})
+check(st["text"] == "" and "failed on the current board" in st["rejected"], "негодный измеритель отклонён с пояснением, цели нет")
+check("REJECTED" in ns["_g_status"](st), "статус показывает причину отклонения")
+
+fake_stdout["text"] = '[[GOAL_SET]] {"text": "reach col 10", "code": "def progress(frame): return frame.grid[5].index(5)"}\n'
+wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "x"})
+frame_now["f"] = Frame(4)
+fake_stdout["text"] = "[[GOAL_BATCH]] {\"n\": 3}\n"
+wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "action(['RIGHT']*3)"})
+check(st["values"] == [1.0, 4.0] and st["no_progress"] == 0, "после вызова с ходами значение измерено обвязкой: 1 -> 4, рост")
+for _ in range(3):
+    wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "action(['UP'])"})
+check(st["closed"] == "falsified" and st["falsified_texts"] == ["reach col 10"] and st["no_progress"] == 3,
+      "3 вызова с ходами без роста -> опровергнута, текст запомнен")
+lit = ast.literal_eval(captured["code"].split("_GOAL = ", 1)[1].splitlines()[0])
+check(lit["text"] == "reach col 10" and lit["values"][-1] == 4.0, "состояние подставляется в код литералом")
+check(ns["_goal_stats"]["set"] == 2 and ns["_goal_stats"]["falsified"] == 1 and ns["_goal_stats"]["batches"] == 4 and ns["_goal_stats"].get("rejected") == 1,
+      "статистика: set=2, rejected=1, batches=4, falsified=1")
+
+# --- обёртка промпта
 ns["_g_orig_prompt"] = lambda self, action_num, *a, **k: "STOCK PROMPT"
-f1 = types.SimpleNamespace(level=0)
-text = wta.ToolAgent._build_user_prompt(agent, 5, current_frame=f1)
+text = wta.ToolAgent._build_user_prompt(agent, 5, current_frame=types.SimpleNamespace(level=0))
 check(text.endswith("STOCK PROMPT") and text.startswith("GOAL GATE (mandatory)") and "FALSIFIED" in text,
       "промпт: протокол и статус (опровергнута) перед стоковым текстом")
-f2 = types.SimpleNamespace(level=1)
-text = wta.ToolAgent._build_user_prompt(agent, 6, current_frame=f2)
+text = wta.ToolAgent._build_user_prompt(agent, 6, current_frame=types.SimpleNamespace(level=1))
 check(st["text"] == "" and st["closed"] is None and st["falsified_texts"] == [] and "no goal registered" in text,
       "смена уровня: состояние сброшено, статус «цели нет»")
 check(ns["_goal_stats"]["levels"] == 1, "уровень засчитан в статистике")
 
-wta.ToolAgent._build_user_prompt, wta.ToolAgent._run_python_tool = orig_prompt, orig_run
+wta.ToolAgent._build_user_prompt, wta.ToolAgent._run_python_tool, wta.run_sandboxed_python = orig_prompt, orig_run, orig_sandbox
 print("\nИТОГ: %d сбоев" % len(fails) if fails else "\nВСЕ ПРОВЕРКИ ПРОШЛИ")
 sys.exit(1 if fails else 0)

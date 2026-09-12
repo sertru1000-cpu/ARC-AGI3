@@ -35,38 +35,28 @@ import json as _gj
 _GOAL = %(state)s
 _GOAL_PATIENCE, _GOAL_PROBE_LEN, _GOAL_PROBE_BATCHES = %(patience)d, %(probe_len)d, %(probe_batches)d
 
-def _goal_eval(frame):
-    _ns = {}
-    exec(_GOAL["code"], _ns)
-    return float(_ns["progress"](frame))
-
 def set_goal(text, progress_code):
-    """Register the level goal (checkable sentence) and a progress measure: Python source defining
-    `def progress(frame) -> number` (frame.grid = list of rows of ints, frame.ascii, frame.level) that RISES
-    as the board gets closer to the goal."""
+    # Register the level goal (checkable sentence) and a progress measure: Python SOURCE defining
+    # `def progress(frame) -> number` (frame.grid = rows of ints, frame.ascii, frame.level) that RISES
+    # as the board gets closer to the goal. The harness validates and measures it after this call.
     text = str(text or "").strip()
     if len(text) < 8:
         raise ValueError("set_goal(text, progress_code): text must state what completes this level as a checkable condition")
     if not isinstance(progress_code, str) or "def progress" not in progress_code:
         raise ValueError("set_goal(text, progress_code): progress_code must be a Python SOURCE STRING defining "
                          "`def progress(frame) -> number` computed from the board only; it must RISE as you approach the goal")
-    _ns = {}
-    try:
-        exec(progress_code, _ns); _v = float(_ns["progress"](current_frame))
-    except Exception as _e:
-        raise ValueError("progress(frame) failed on the current board: %%r" %% (_e,))
     if text in (_GOAL.get("falsified_texts") or []):
-        raise ValueError("this exact goal was already FALSIFIED on this level (its measure did not rise in %%d batches); "
+        raise ValueError("this exact goal was already FALSIFIED on this level (its measure did not rise in %%d calls with moves); "
                          "state a DIFFERENT hypothesis or a different measure" %% _GOAL_PATIENCE)
-    _GOAL.update({"text": text, "code": progress_code, "closed": None, "values": [_v], "no_progress": 0})
-    print("[[GOAL_SET]] " + _gj.dumps({"text": text, "code": progress_code, "value": _v}))
-    return {"ok": True, "progress_now": _v, "note": "action() is open; progress is re-measured after every batch and reported in the result"}
+    _GOAL.update({"text": text, "code": progress_code, "closed": None})
+    print("[[GOAL_SET]] " + _gj.dumps({"text": text, "code": progress_code}))
+    return {"ok": True, "note": "goal registered; action() is open. The harness validates progress(frame) and measures it after every call with moves; see GOAL GATE STATUS next turn"}
 
 _goal_orig_action = action
 def action(actions):
     _acts = actions if isinstance(actions, list) else [actions]
     if _GOAL.get("closed") == "falsified":
-        raise RuntimeError("GOAL GATE: goal %%r is FALSIFIED -- its own progress measure did not rise in %%d batches (values %%s). "
+        raise RuntimeError("GOAL GATE: goal %%r is FALSIFIED -- its own progress measure did not rise in %%d calls with moves (values %%s). "
                            "Call set_goal() with a DIFFERENT hypothesis or measure before acting." %% (_GOAL.get("text"), _GOAL_PATIENCE, _GOAL.get("values")))
     if not _GOAL.get("text"):
         if len(_acts) <= _GOAL_PROBE_LEN and _GOAL.get("probes_used", 0) < _GOAL_PROBE_BATCHES:
@@ -76,27 +66,10 @@ def action(actions):
         raise RuntimeError("GOAL GATE: action() blocked -- no goal registered for this level (probes of <= %%d actions without a goal: "
                            "%%d of %%d used). Formulate the level goal from what you have seen and call "
                            "set_goal(text, progress_code) in THIS code block, then act." %% (_GOAL_PROBE_LEN, _GOAL.get("probes_used", 0), _GOAL_PROBE_BATCHES))
-    try:
-        _before = _goal_eval(current_frame)
-    except Exception:
-        _before = None
     _res = _goal_orig_action(actions)
-    try:
-        _after = _goal_eval(current_frame)
-    except Exception as _e:
-        if isinstance(_res, dict):
-            _res["goal_progress"] = {"error": "progress(frame) failed after the batch: %%r" %% (_e,)}
-        return _res
-    _delta = None if _before is None else _after - _before
-    _GOAL["no_progress"] = 0 if (_delta is not None and _delta > 0) else _GOAL.get("no_progress", 0) + 1
-    _GOAL["values"] = (_GOAL.get("values") or []) + [_after]
-    _fals = _GOAL["no_progress"] >= _GOAL_PATIENCE
-    if _fals:
-        _GOAL["closed"] = "falsified"
+    print("[[GOAL_BATCH]] " + _gj.dumps({"n": len(_acts)}))
     if isinstance(_res, dict):
-        _res["goal_progress"] = {"before": _before, "after": _after, "delta": _delta,
-                                 "no_progress_batches": _GOAL["no_progress"], "falsified": _fals}
-    print("[[GOAL_BATCH]] " + _gj.dumps({"after": _after, "no_progress": _GOAL["no_progress"], "falsified": _fals}))
+        _res["goal_note"] = "progress is measured by the harness after this call; see GOAL GATE STATUS next turn"
     return _res
 '''
 
@@ -105,7 +78,7 @@ CELL = r'''
 # ВОРОТА ЦЕЛИ (12.09): «сформулировать и проверить цель до хода».
 # До ходов модель регистрирует гипотезу цели уровня и измеритель прогресса
 # set_goal(text, progress_code); обвязка считает измеритель после каждой пачки и после
-# %(patience)d пачек без роста объявляет гипотезу опровергнутой. Пробы <= %(probe_len)d ходов без цели --
+# %(patience)d вызовов с ходами без роста объявляет гипотезу опровергнутой (измеритель исполняет ОБВЯЗКА: в песочнице нет exec). Пробы <= %(probe_len)d ходов без цели --
 # не больше %(probe_batches)d на уровень. Состояние живёт на агенте, в песочницу подставляется литералом.
 # Только оффлайн: боевая ветка не тронута.
 # =====================================================================
@@ -122,7 +95,7 @@ _GOAL_PROTOCOL = (
     "call set_goal(\"<what completes this level>\", progress_code) where progress_code is a Python source string defining "
     "`def progress(frame) -> number` (frame.grid = rows of ints, frame.ascii, frame.level) that RISES as the board gets closer "
     "to the goal (e.g. count of matched targets, filled slots, negative distance to the exit). The harness re-measures it after every "
-    "batch and reports 'goal_progress' in the action() result. If it does not rise for %(patience)d batches in a row the goal is "
+    "call with moves and shows the values in GOAL GATE STATUS. If it does not rise for %(patience)d calls with moves in a row the goal is "
     "FALSIFIED and action() is blocked until set_goal() with a different hypothesis or measure. Probes of <= %(probe_len)d actions without "
     "a goal: at most %(probe_batches)d per level. A level-up confirms the goal; the next level needs set_goal() again. "
     "Write the goal from EVIDENCE and say in your reasoning whether the last result SUPPORTS or CONTRADICTS it."
@@ -132,20 +105,21 @@ def _g_st(agent):
     st = getattr(agent, "_goal_state", None)
     if st is None:
         st = {"text": "", "code": "", "closed": None, "values": [], "no_progress": 0,
-              "probes_used": 0, "falsified_texts": [], "level": None}
+              "probes_used": 0, "falsified_texts": [], "level": None, "rejected": ""}
         agent._goal_state = st
         _goal_stats["games"] += 1
     return st
 
 def _g_status(st):
     if not st.get("text"):
-        return ("GOAL GATE STATUS: no goal registered for this level. Probes of <= %%d actions without a goal: %%d of %%d used."
-                %% (_GOAL_PROBE_LEN, st.get("probes_used", 0), _GOAL_PROBE_BATCHES))
+        rej = (" LAST set_goal REJECTED: " + st["rejected"]) if st.get("rejected") else ""
+        return ("GOAL GATE STATUS: no goal registered for this level. Probes of <= %%d actions without a goal: %%d of %%d used.%%s"
+                %% (_GOAL_PROBE_LEN, st.get("probes_used", 0), _GOAL_PROBE_BATCHES, rej))
     vals = ", ".join("%%g" %% v for v in (st.get("values") or [])[-6:])
     if st.get("closed") == "falsified":
-        return ("GOAL GATE STATUS: goal %%r is FALSIFIED -- its progress measure did not rise in %%d batches (values %%s). "
+        return ("GOAL GATE STATUS: goal %%r is FALSIFIED -- its progress measure did not rise in %%d calls with moves (values %%s). "
                 "action() is blocked until set_goal() with a different hypothesis or measure." %% (st["text"][:120], _GOAL_PATIENCE, vals))
-    return ("GOAL GATE STATUS: your goal: %%r | progress values %%s | batches without progress %%d/%%d"
+    return ("GOAL GATE STATUS: your goal: %%r | progress values %%s | calls with moves and no progress %%d/%%d"
             %% (st["text"][:120], vals, st.get("no_progress", 0), _GOAL_PATIENCE))
 
 if not TRUE_SUBMISSION:
@@ -159,18 +133,30 @@ if not TRUE_SUBMISSION:
         res = _g_orig_sandbox(*a, **k)
         try:
             text = str(res.get("stdout", "") or "")
-            ev = {"set": [], "probe": 0, "batch": []}
+            ev = {"set": [], "probe": 0, "batch": 0}
             for m in _gre.finditer(r"\[\[GOAL_SET\]\] (\{.*\})", text):
                 ev["set"].append(_gjson.loads(m.group(1)))
             ev["probe"] = text.count("[[GOAL_PROBE]]")
-            for m in _gre.finditer(r"\[\[GOAL_BATCH\]\] (\{.*\})", text):
-                ev["batch"].append(_gjson.loads(m.group(1)))
+            ev["batch"] = text.count("[[GOAL_BATCH]]")
             res["stdout"] = _gre.sub(r"^\[\[GOAL_[A-Z]+\]\].*$\n?", "", text, flags=_gre.M)
             _g_tls.events = ev
         except Exception as _e:
             print("[GOAL] сбой разбора stdout: %%r" %% (_e,), flush=True)
         return res
     _wta.run_sandboxed_python = _g_sandbox
+
+    def _g_frame(state_path):
+        """Текущий кадр для измерителя: те же поля, что видит модель (grid, ascii, level, step, shape)."""
+        frame, _hist = _wta.load_runtime_state(state_path)
+        pl = _wta._ascii_frame_view_payload(frame) or {}
+        import types as _gtypes
+        return _gtypes.SimpleNamespace(grid=pl.get("grid"), ascii=pl.get("ascii", ""), level=pl.get("level"),
+                                        step=pl.get("step"), shape=pl.get("shape"))
+
+    def _g_measure(code, frame):
+        ns = {}
+        exec(code, ns)
+        return float(ns["progress"](frame))
 
     _g_orig_prompt = _wta.ToolAgent._build_user_prompt
     def _g_prompt(self, action_num, *args, **kwargs):
@@ -184,7 +170,7 @@ if not TRUE_SUBMISSION:
                 if st.get("text") and st.get("closed") is None:
                     _goal_stats["confirmed"] += 1
                 st.update({"text": "", "code": "", "closed": None, "values": [], "no_progress": 0,
-                           "probes_used": 0, "falsified_texts": []})
+                           "probes_used": 0, "falsified_texts": [], "rejected": ""})
             if lv is not None:
                 st["level"] = lv
             return _GOAL_PROTOCOL + "\n" + _g_status(st) + "\n\n" + text
@@ -207,22 +193,39 @@ if not TRUE_SUBMISSION:
         _g_tls.events = None
         out = _g_orig_run(self, state_path, arguments)
         try:
-            ev = getattr(_g_tls, "events", None) or {"set": [], "probe": 0, "batch": []}
+            ev = getattr(_g_tls, "events", None) or {"set": [], "probe": 0, "batch": 0}
+            frame = None
+            if ev["set"] or ev["batch"]:
+                try:
+                    frame = _g_frame(state_path)
+                except Exception as _e:
+                    print("[GOAL] кадр не прочитан: %%r" %% (_e,), flush=True)
             for d in ev["set"]:
-                st.update({"text": d["text"], "code": d["code"], "closed": None, "values": [d["value"]], "no_progress": 0})
-                _goal_stats["set"] += 1
+                try:
+                    v = _g_measure(d["code"], frame)
+                    st.update({"text": d["text"], "code": d["code"], "closed": None, "values": [v], "no_progress": 0, "rejected": ""})
+                    _goal_stats["set"] += 1
+                except Exception as _e:
+                    st.update({"text": "", "code": "", "closed": None, "values": [], "no_progress": 0,
+                               "rejected": "progress(frame) failed on the current board: %%r -- fix it and call set_goal again" %% (_e,)})
+                    _goal_stats["rejected"] = _goal_stats.get("rejected", 0) + 1
             st["probes_used"] = st.get("probes_used", 0) + int(ev["probe"])
             _goal_stats["probes"] += int(ev["probe"])
-            for d in ev["batch"]:
-                st["values"] = (st.get("values") or []) + [d["after"]]
-                st["no_progress"] = int(d["no_progress"])
-                _goal_stats["batches"] += 1
-                if st["no_progress"] == 0:
-                    _goal_stats["progress"] += 1
-                if d.get("falsified"):
-                    st["closed"] = "falsified"
-                    st["falsified_texts"] = list(st.get("falsified_texts") or []) + [st.get("text", "")]
-                    _goal_stats["falsified"] += 1
+            if ev["batch"] and st.get("text") and st.get("closed") is None and frame is not None:
+                try:
+                    v = _g_measure(st["code"], frame)
+                    prev = (st.get("values") or [None])[-1]
+                    st["no_progress"] = 0 if (prev is not None and v > prev) else st.get("no_progress", 0) + 1
+                    st["values"] = (st.get("values") or []) + [v]
+                    _goal_stats["batches"] += 1
+                    if st["no_progress"] == 0:
+                        _goal_stats["progress"] += 1
+                    if st["no_progress"] >= _GOAL_PATIENCE:
+                        st["closed"] = "falsified"
+                        st["falsified_texts"] = list(st.get("falsified_texts") or []) + [st.get("text", "")]
+                        _goal_stats["falsified"] += 1
+                except Exception as _e:
+                    st["rejected"] = "progress(frame) failed after your moves: %%r" %% (_e,)
             text = getattr(out, "content", "") or ""
             _goal_stats["blocked"] += text.count("GOAL GATE: action() blocked") + text.count("is FALSIFIED -- its own")
             if _goal_stats["turns"] %% 50 == 0:
