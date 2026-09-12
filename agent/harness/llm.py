@@ -252,6 +252,12 @@ class OpenAICompatLLM(LLMBackend):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        # 12.09: облачный шлюз (Model Studio) рвёт любой запрос ровно через 300 с, а сильные
+        # модели думают дольше -- бюджет на думание задаётся окружением, по умолчанию выключен.
+        tb = os.getenv("LLM_THINKING_BUDGET", "").strip()
+        if tb:
+            payload["enable_thinking"] = True
+            payload["thinking_budget"] = int(tb)
         data = self._request(payload)
         # AI Studio's compat layer may omit `content` entirely when thinking
         # consumed the whole budget; Vertex sends null. Vertex can also return
