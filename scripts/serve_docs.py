@@ -51,6 +51,8 @@ pre{background:var(--surface);border:1px solid var(--rule);border-radius:8px;pad
 GROUPS = [
     ("Промпты для Gemini", lambda p: p.name.startswith("gemini_prompt")),
     ("Ответы Gemini", lambda p: p.name.startswith("gemini_round") and p.suffix == ".md"),
+    ("Промпты для ChatGPT", lambda p: p.name.startswith("chatgpt_prompt")),
+    ("Ответы ChatGPT", lambda p: p.name.startswith("chatgpt_round") and p.suffix == ".md"),
     ("План и беклог", lambda p: p.name.startswith(("plan_", "improvement_", "public_line"))),
     ("Разборы и дизайн", lambda p: True),
 ]
