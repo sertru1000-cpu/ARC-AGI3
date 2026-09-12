@@ -366,6 +366,25 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">оракул-инъекция</span><span class="v-date">собрано 12.09 &middot; НЕ пушено &middot; слаг arc3-stock-flash-loop</span></div>
+          <span class="badge pending">собрано, ждёт слова</span>
+        </div>
+        <p class="summary"><strong>Застрявшей игре выдаётся ОДНО правило управления, написанное человеком.</strong> Разводит два объяснения, от которых зависит вся оставшаяся повестка: модель не умеет <em>находить</em> правила игры &mdash; или не умеет <em>планировать</em> даже с готовым.</p>
+        <ul class="changes">
+          <li>выдаётся только схема управления (что делают действия, чем засчитывается уровень), не решение: цель, узор и порядок ходов модель ищет сама</li>
+          <li><strong>каждое правило восстановлено из настоящей успешной траектории в наших журналах</strong>, с указанием прогона и хода; выдуманное правило превратило бы замер в проверку моей формулировки</li>
+          <li>цели &mdash; 9 игр, застрявших в базе на 0&ndash;1 уровне (tn36, sk48, sp80, g50t, lf52, cn04, bp35, wa30, ls20); остальные 16 не тронуты и служат внутренним контролем</li>
+          <li>инъекция включается с 50-го хода: до него промпт побайтово стоковый, то есть меряется «модель уже застряла, ей дают правило»</li>
+          <li>шов &mdash; <code>HarnessSolver._make_analyzer</code>, единственное место создания агента; штатный <code>analyzer_factory</code> не годится (вызывается без <code>local_server</code>, агент ушёл бы мимо локального сервера)</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>24 проверки на настоящем <code>HarnessSolver</code>, все прошли.</strong> Пороги: взятых уровней в девяти целевых играх &gt; 9 (в базе 5) при неизменных контрольных &mdash; правило усваивается, работать надо над добычей гипотез; 5&ndash;9 &mdash; неразличимо; меньше 5 &mdash; подсказка мешает. Механизм: строк <code>[ORACLE]</code> ровно 9, по одной на целевую игру. Цена ~2.2 ч квоты.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">4-бис &middot; паркинг с запретом ранней парковки</span><span class="v-date">пуш 12.09 &middot; версия 3 arc3-stock-flash-park &middot; до 4.7 ч</span></div>
           <span class="badge pending">к пушу</span>
         </div>
