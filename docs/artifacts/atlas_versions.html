@@ -335,6 +335,24 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">три слоя без выходных токенов: lvfact / reset / explore</span><span class="v-date">собраны 13.09 10:45 &middot; слаги arc3-stock-flash-lvfact, -reset, -explore &middot; по ~2.2 ч каждый</span></div>
+          <span class="badge pending">к пушу</span>
+        </div>
+        <p class="summary"><strong>Общая посылка после дозы и ворот:</strong> слой оправдан, только если меняет качество решения за ход, не удлиняя ответ. Все три работают на входе или в обвязке и не просят у модели ни одного лишнего токена.</p>
+        <ul class="changes">
+          <li><strong>lvfact</strong> &mdash; при переходе на новый уровень обвязка сообщает, чем был взят предыдущий: завершивший ход, последние 8 ходов, число ходов, доска перед завершением (полный текст один раз, дальше строка). Повод: уровень 1 берут 21/25, уровень 2 &mdash; 9; слот «заметки между уровнями» модель заполняет в 0.3%.</li>
+          <li><strong>reset</strong> &mdash; после 100 ходов на уровне без взятия обвязка сама делает RESET уровня (взятые сохраняются) и кладёт во вход сводку: гистограмма ходов, различных досок, возвратов в виденное; не больше 2 на уровень; не амнезия &mdash; история цела.</li>
+          <li><strong>explore</strong> &mdash; тот же признак, но вместо сброса обвязка без модели пробует каждую стрелку по 3 раза и кликает центры объектов, которых ещё не кликали (&le; 16), и кладёт отчёт «что меняло доску» во вход; не больше 2 на уровень.</li>
+          <li>сборка <code>scripts/build_lvfact_reset_notebook.py</code>, 36 проверок на настоящем ToolAgent (<code>scripts/test_lvfact_reset_patch.py</code>); только оффлайн; сброс/исследование выполняются ПОСЛЕ ходов модели, чтобы следующий промпт видел итог вместе со сводкой.</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска</strong> (каждый отдельно) против базы 10.25: польза &mdash; победы&minus;поражения &ge; +8 и медиана &ge; +8; вред &mdash; &le; &minus;6; механизм: генерация 1400&ndash;1500 (слои не должны удлинять ответ), число срабатываний в логе ([LVFACT]/[RESET]/[EXPLORE]).</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">Duck на gpt-oss-120b</span><span class="v-date">собрано 13.09 10:15 &middot; пуш v1 10:12 как дымовая проба 30 мин</span></div>
           <span class="badge wait">проба идёт</span>
         </div>
