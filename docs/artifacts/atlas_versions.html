@@ -335,6 +335,23 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">Duck на gpt-oss-120b</span><span class="v-date">собрано 13.09 10:15 &middot; слаг arc3-duck-gptoss &middot; ~2.5 ч</span></div>
+          <span class="badge pending">к пушу</span>
+        </div>
+        <p class="summary"><strong>Стоковый Duck, другая модель.</strong> gpt-oss-120b (MXFP4, ~63 ГБ, 5B активных) &mdash; единственная открытая модель, которая влезает в 96 ГБ и не мерилась на этой обвязке. Сервер &mdash; по официальному шаблону ARC-AGI-3: GPT-OSS-120B (vLLM 0.19.1 из колёс philipvonderlind/vllm-deps, tool-call-parser openai, kv fp8, enforce-eager), на том же адресе 127.0.0.1:1234.</p>
+        <ul class="changes">
+          <li>изменены три ячейки стокового ноутбука: входы (модель danielhanchen/gpt-oss-120b + колёса вместо рантайма Flash-Next), запуск сервера вместо setup_commands бандла, сторож сервера отключён; образ Kaggle приколочен как в шаблоне</li>
+          <li>окружение анализатора &mdash; тот же список, что пишет serving_setup.py; провайдер openrouter (чистый OpenAI-запрос без top_k/chat_template_kwargs); модель обслуживается под двумя именами на случай запечённого в солвере</li>
+          <li>повод: вчера max и 2.4T на Duck через API брали по 1 уровню ka59 &mdash; ожидание низкое, но это единственный ход «сменить модель» без своего сервера</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска</strong> против базы 10.25: польза &mdash; победы&minus;поражения &ge; +8 и медиана &ge; +8; вред &mdash; &le; &minus;6. Механизм: сервер поднялся (models отдаёт gpt-oss-120b); доля вызовов с ходом, вызовов на игру, генерация &mdash; записать, порогов нет (другая модель). Риск: колёса vLLM 0.19.1 и tool-calling gpt-oss в Duck не проверялись до этого прогона.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">ворота цели (Duck)</span><span class="v-date">собрано 12.09 20:00 &middot; v2 на Kaggle 20:43&ndash;23:12 &middot; v5 (в бою, проба 25 мин) пуш 23:35, завтра в бой</span></div>
           <span class="badge phase-a">Фаза A: 7.91 (h115) &middot; вред на грани / неопределённо</span>
         </div>

@@ -78,7 +78,7 @@ if _tk is not None:
 _g_cmd = [shutil.which("vllm") or sys.executable] + ([] if shutil.which("vllm") else ["-m", "vllm.entrypoints.openai.api_server", "--model"])
 if shutil.which("vllm"):
     _g_cmd += ["serve"]
-_g_cmd += [_G_MODEL_PATH, "--served-model-name", _G_SERVED, "--host", "127.0.0.1", "--port", str(_G_PORT),
+_g_cmd += [_G_MODEL_PATH, "--served-model-name", _G_SERVED, "Qwen/Qwen3.8-Flash-Next-NVFP4", "--host", "127.0.0.1", "--port", str(_G_PORT),
            "--enable-auto-tool-choice", "--tool-call-parser", "openai", "--max-num-seqs", "12",
            "--max-model-len", "40000", "--kv-cache-dtype", "fp8", "--tensor-parallel-size", "1", "--enforce-eager"]
 _g_log = open(WORKING_DIR / "vllm-openai-server.log", "ab")
