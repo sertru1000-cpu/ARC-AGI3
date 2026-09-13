@@ -34,7 +34,6 @@ if not TRUE_SUBMISSION:
                 st = {"level": None, "level_start": int(action_num or 0), "resets": 0, "last_reset": None,
                       "note": None, "note_left": 0, "entries": None}; self._rs_state = st; _rs_stats["games"] += 1
             _rs_stats["turns"] += 1
-            st["calls"] = int(st.get("calls", 0)) + 1
             st["entries"] = kwargs.get("history_entries")
             lv = getattr(kwargs.get("current_frame"), "level", None)
             if lv is not None:
@@ -59,6 +58,8 @@ if not TRUE_SUBMISSION:
         out = _rs_orig_run(self, state_path, arguments)
         try:
             st = getattr(self, "_rs_state", None)
+            if st is not None:
+                st["calls"] = int(st.get("calls", 0)) + 1   # один запуск кода = один вызов модели (промптов меньше: tool-loop)
             cb = getattr(self, "_step_env_callback", None)
             sess = getattr(cb, "__self__", None) if cb is not None else None
             if st is None or sess is None or st.get("level") is None:

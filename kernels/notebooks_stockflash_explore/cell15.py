@@ -101,7 +101,6 @@ if not TRUE_SUBMISSION:
                 st = {"level": None, "level_start": int(action_num or 0), "explorations": 0, "last": None,
                       "note": None, "note_left": 0, "clicked": set(), "since_start": 0}; self._ex_state = st; _ex_stats["games"] += 1
             _ex_stats["turns"] += 1
-            st["calls"] = int(st.get("calls", 0)) + 1
             lv = getattr(kwargs.get("current_frame"), "level", None)
             if lv is not None:
                 lv = int(lv)
@@ -123,6 +122,8 @@ if not TRUE_SUBMISSION:
         out = _ex_orig_run(self, state_path, arguments)
         try:
             st = getattr(self, "_ex_state", None)
+            if st is not None:
+                st["calls"] = int(st.get("calls", 0)) + 1   # один запуск кода = один вызов модели (промптов меньше: tool-loop)
             cb = getattr(self, "_step_env_callback", None)
             sess = getattr(cb, "__self__", None) if cb is not None else None
             if st is None or cb is None or st.get("level") is None:
