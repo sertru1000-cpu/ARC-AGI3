@@ -361,6 +361,15 @@ if not TRUE_SUBMISSION:
 def build(cell: str, out: str, slug: str, title: str, marker_var: str) -> None:
     src = json.load(open("kernels/notebooks_stockflash/submission.ipynb", encoding="utf-8"))
     nb = json.loads(json.dumps(src))
+    # 14.09 01:15: три пуша подряд упали в ячейке 5 -- путь с колёсами соревнования ещё не примонтирован
+    # (гонка монтирования при тяжёлых входах); ждём его появления до 10 минут.
+    c5 = "".join(nb["cells"][5]["source"])
+    guard = ("import time as _t5\n_w5 = Path('/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels')\n"
+             "for _i5 in range(120):\n    if _w5.exists():\n        break\n"
+             "    print('taaf.kaggle: жду монтирования входов соревнования (%d)' % _i5, flush=True); _t5.sleep(5)\n"
+             "print('taaf.kaggle: колёса соревнования:', _w5.exists(), flush=True)\n")
+    if "_w5" not in c5:
+        nb["cells"][5]["source"] = (guard + c5).splitlines(keepends=True)
     c = nb["cells"][15]
     body = "".join(c["source"])
     anchor = "    seconds=budget - 600.0\n)"
@@ -378,8 +387,9 @@ def build(cell: str, out: str, slug: str, title: str, marker_var: str) -> None:
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
     compile(code, "c15", "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
     diff = [i for i in range(18) if "".join(nb["cells"][i]["source"]) != "".join(src["cells"][i]["source"])]
-    print("ok   %s: изменена только ячейка 15: %s; патч после soft_end и до запуска: %s; слаг %s"
-          % (title, diff == [15], 0 < code.find(anchor) < code.find(marker_var) < code.find("await bm.run("), slug))
+    compile("".join(nb["cells"][5]["source"]), "c5", "exec")
+    print("ok   %s: изменены ячейки 5 (ожидание монтирования) и 15: %s; патч после soft_end и до запуска: %s; слаг %s"
+          % (title, diff == [5, 15], 0 < code.find(anchor) < code.find(marker_var) < code.find("await bm.run("), slug))
 
 
 def main() -> None:
