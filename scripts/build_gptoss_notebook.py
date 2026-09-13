@@ -1,0 +1,186 @@
+"""Стоковый Duck на gpt-oss-120b (пункт 4 плана 13.09): единственная открытая модель, которая
+влезает в 96 ГБ и не мерилась на этой обвязке.
+
+ЧТО МЕНЯЕТСЯ относительно стокового ноутбука Flash-Next (три ячейки, всё остальное побайтово):
+  * ячейка 7  -- входы: бандл Duck (keithtyser) остаётся; вместо рантайма и весов Flash-Next --
+                модель danielhanchen/gpt-oss-120b и колёса vLLM 0.19.1 (philipvonderlind/vllm-deps),
+                ровно как в официальном шаблоне ARC-AGI-3: GPT-OSS-120B;
+  * ячейка 9  -- вместо setup_commands бандла (установка приколоченного vLLM и запуск Flash-Next)
+                ставится vLLM 0.19.1 из колёс и поднимается gpt-oss-120b на 127.0.0.1:1234 (тот же адрес,
+                что у стокового сервера) с флагами шаблона; окружение анализатора Duck выставляется вручную
+                (тот же список, что пишет serving_setup.py), провайдер openrouter -- чистый OpenAI-запрос
+                без top_k/chat_template_kwargs, которых gpt-oss не знает;
+  * ячейка 15 -- сторож сервера (перезапуск Flash-Next при нездоровье) отключён; teardown -- остановка
+                нашего процесса vLLM вместо serving_teardown.py.
+
+ПОРОГИ (записаны до пуска), против базы runs/flash_v1_phaseA (10.25, 40 уровней), знаковым тестом:
+польза -- победы−поражения >= +8 и медиана >= +8; вред -- <= −6. Механизм: сервер поднялся (models
+отдаёт gpt-oss-120b), доля вызовов с ходом, вызовов на игру, генерация -- записать, порогов нет
+(другая модель, другой темп).
+
+usage:  .venv/bin/python scripts/build_gptoss_notebook.py
+"""
+import ast
+import json
+import os
+
+SLUG = "sergueimakarov/arc3-duck-gptoss"
+BUNDLE = "keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1"
+WHEELS_KERNEL = "philipvonderlind/vllm-deps"
+MODEL_SOURCE = "danielhanchen/gpt-oss-120b/Transformers/default/1"
+MODEL_PATH = "/kaggle/input/models/danielhanchen/gpt-oss-120b/transformers/default/1"
+SERVED_NAME = "gpt-oss-120b"
+PORT = 1234
+
+SETUP_CELL = r'''
+# =====================================================================
+# gpt-oss-120b вместо Flash-Next (13.09). Сервер -- по официальному шаблону ARC-AGI-3: GPT-OSS-120B
+# (vLLM 0.19.1 из колёс, tool-call-parser openai, kv fp8, enforce-eager). Окружение анализатора Duck --
+# тот же список, что пишет serving_setup.py бандла, провайдер openrouter (чистый OpenAI-запрос).
+# =====================================================================
+import importlib.util, shutil
+from urllib.request import urlopen as _g_urlopen
+
+_G_MODEL_PATH = %(model_path)r
+_G_SERVED = %(served)r
+_G_PORT = %(port)d
+_G_BASE_URL = "http://127.0.0.1:%%d/v1" %% _G_PORT
+
+def _g_find_wheel_dir():
+    for root in (Path("/kaggle/input"), Path("/kaggle/usr/lib/notebooks"), Path("/kaggle/working")):
+        if root.exists():
+            for w in root.rglob("vllm*.whl"):
+                return w.parent
+    raise FileNotFoundError("колёса vLLM не найдены: нужен вход %(wheels)s")
+
+def _g_find_tiktoken_dir():
+    for root in (Path("/kaggle/input"), Path("/kaggle/usr/lib/notebooks"), Path("/kaggle/working")):
+        if root.exists():
+            for d in root.rglob("*"):
+                if d.is_dir() and (d / "cl100k_base.tiktoken").exists() and (d / "o200k_base.tiktoken").exists():
+                    return d
+    return None
+
+if importlib.util.find_spec("vllm") is None:
+    wd = _g_find_wheel_dir()
+    print("gpt-oss: ставлю vLLM 0.19.1 из", wd, flush=True)
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-index", "--find-links", str(wd),
+                           "vllm==0.19.1", "openai==2.24.0", "openai-harmony==0.0.8"])
+import vllm as _g_vllm
+print("gpt-oss: vllm", _g_vllm.__version__, flush=True)
+
+_g_env = os.environ.copy()
+_g_env["OPENAI_API_KEY"] = "EMPTY"
+_g_env.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+_tk = _g_find_tiktoken_dir()
+if _tk is not None:
+    _g_env["TIKTOKEN_ENCODINGS_BASE"] = str(_tk)
+_g_cmd = [shutil.which("vllm") or sys.executable] + ([] if shutil.which("vllm") else ["-m", "vllm.entrypoints.openai.api_server", "--model"])
+if shutil.which("vllm"):
+    _g_cmd += ["serve"]
+_g_cmd += [_G_MODEL_PATH, "--served-model-name", _G_SERVED, "--host", "127.0.0.1", "--port", str(_G_PORT),
+           "--enable-auto-tool-choice", "--tool-call-parser", "openai", "--max-num-seqs", "12",
+           "--max-model-len", "40000", "--kv-cache-dtype", "fp8", "--tensor-parallel-size", "1", "--enforce-eager"]
+_g_log = open(WORKING_DIR / "vllm-openai-server.log", "ab")
+_g_proc = subprocess.Popen(_g_cmd, env=_g_env, stdout=_g_log, stderr=subprocess.STDOUT, cwd=str(WORKING_DIR))
+print("gpt-oss: сервер запущен pid", _g_proc.pid, flush=True)
+_g_deadline = time.time() + 1800
+while True:
+    if _g_proc.poll() is not None:
+        raise RuntimeError("vLLM завершился с кодом %%s -- см. vllm-openai-server.log" %% _g_proc.returncode)
+    try:
+        with _g_urlopen(_G_BASE_URL + "/models", timeout=3) as r:
+            if _G_SERVED in r.read().decode("utf-8", "replace"):
+                break
+    except Exception:
+        pass
+    if time.time() > _g_deadline:
+        raise RuntimeError("vLLM не поднялся за 30 минут")
+    time.sleep(5)
+print("gpt-oss: сервер отвечает, %%s" %% _G_BASE_URL, flush=True)
+
+_g_analyzer_env = {
+    "LOCAL_ANALYZER_BASE_URL": _G_BASE_URL, "OPENAI_BASE_URL": _G_BASE_URL,
+    "LOCAL_ANALYZER_PROVIDER": "openrouter", "OPENAI_PROVIDER": "openrouter",
+    "LOCAL_ANALYZER_MODEL_ID": _G_SERVED, "INFERENCE_ANALYZER_MODEL": _G_SERVED,
+    "OPENAI_API_KEY": "EMPTY", "LOCAL_ANALYZER_API_KEY": "EMPTY",
+    "LOCAL_ANALYZER_APP_NAME": "ARC3 Agent Harness",
+    "LOCAL_ANALYZER_CONTEXT_WINDOW": "32768", "LOCAL_ANALYZER_MAX_OUTPUT": "0",
+    "LOCAL_ANALYZER_TOOL_STEPS": "0", "LOCAL_ANALYZER_TOOL_TIMEOUT": "30", "LOCAL_ANALYZER_TOOL_OUTPUT_TOKENS": "1024",
+    "LOCAL_ANALYZER_YIELD_SECONDS": "60", "LOCAL_ANALYZER_TEMPERATURE": "0.6", "LOCAL_ANALYZER_TOP_P": "0.95",
+    "LOCAL_ANALYZER_TOP_K": "20", "LOCAL_ANALYZER_ENABLE_THINKING": "true",
+    "MULTIMODAL_CONTEXT": "current_grid", "MULTIMODAL_UPSCALE": "4",
+}
+os.environ.update(_g_analyzer_env)
+_g_persist = json.loads(SETUP_ENV_PATH.read_text())
+_g_persist.update(_g_analyzer_env)
+SETUP_ENV_PATH.write_text(json.dumps(_g_persist, indent=2, sort_keys=True) + "\n")
+print("gpt-oss: окружение анализатора выставлено (%%d ключей)" %% len(_g_analyzer_env), flush=True)
+'''
+
+
+def main() -> None:
+    src = json.load(open("kernels/notebooks_stockflash/submission.ipynb", encoding="utf-8"))
+    nb = json.loads(json.dumps(src))
+
+    # --- ячейка 7: входы
+    c7 = "".join(nb["cells"][7]["source"])
+    old = 'DATASET_SOURCES = ["keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1", "keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1"]\nKERNEL_SOURCES = []'
+    assert old in c7, "ячейка 7: не нашёл список входов"
+    c7 = c7.replace(old, 'DATASET_SOURCES = [%r]\nKERNEL_SOURCES = [%r]' % (BUNDLE, WHEELS_KERNEL))
+    nb["cells"][7]["source"] = c7.splitlines(keepends=True)
+
+    # --- ячейка 9: вместо setup_commands бандла -- наш сервер
+    c9 = "".join(nb["cells"][9]["source"])
+    old = '''# Solver setup commands (wheels, vLLM server startup, ...) run before the benchmark loads.
+env = _command_env()
+for command in json.loads((BUNDLE_DIR / "setup_commands.json").read_text()):
+    print(f"taaf.kaggle: setup command: {command}", flush=True)
+    subprocess.run(command, shell=True, check=True, cwd=WORKING_DIR, env=env)
+    # Re-read in case the command persisted new env keys.
+    env = _command_env()
+    os.environ.update(env)
+'''
+    assert old in c9, "ячейка 9: не нашёл цикл setup_commands"
+    setup = SETUP_CELL % {"model_path": MODEL_PATH, "served": SERVED_NAME, "port": PORT, "wheels": WHEELS_KERNEL}
+    c9 = c9.replace(old, "# setup_commands бандла (приколоченный vLLM + Flash-Next) НЕ выполняются: сервер ниже.\n" + setup + "\nenv = _command_env()\nos.environ.update(env)\n")
+    nb["cells"][9]["source"] = c9.splitlines(keepends=True)
+
+    # --- ячейка 15: сторож отключён, teardown -- наш процесс
+    c15 = "".join(nb["cells"][15]["source"])
+    a = c15.index("import vllm_server_watchdog as vllm_watchdog")
+    b = c15.index("# Play the benchmark; watchdog stop and teardown run even if it raises.")
+    c15 = c15[:a] + ("class vllm_watchdog:  # сторож Flash-Next отключён: сервер gpt-oss управляется ноутбуком\n"
+                     "    @staticmethod\n    def stop_background(timeout_seconds=15.0):\n        return None\n"
+                     "print('gpt-oss: сторож сервера отключён', flush=True)\n\n") + c15[b:]
+    old = '(BUNDLE_DIR / "teardown_commands.json").read_text()'
+    assert old in c15, "ячейка 15: не нашёл teardown"
+    c15 = c15.replace(old, "'[\"pkill -f vllm.entrypoints || true\"]'")
+    nb["cells"][15]["source"] = c15.splitlines(keepends=True)
+
+    out = "kernels/notebooks_duck_gptoss"
+    os.makedirs(out, exist_ok=True)
+    json.dump(nb, open(os.path.join(out, "submission.ipynb"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    meta = json.load(open("kernels/notebooks_stockflash/kernel-metadata.json"))
+    meta["id"] = SLUG
+    meta["title"] = "arc3 duck gptoss"
+    meta["dataset_sources"] = [BUNDLE]
+    meta["kernel_sources"] = [WHEELS_KERNEL]
+    meta["model_sources"] = [MODEL_SOURCE]
+    # образ Kaggle приколочен как в официальном шаблоне: колёса vLLM 0.19.1 собраны под его torch/CUDA
+    meta["docker_image"] = json.load(open("reference/gpt-oss-template/kernel-metadata.json"))["docker_image"]
+    json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
+
+    for i in (7, 9, 15):
+        compile("".join(nb["cells"][i]["source"]), "cell%d" % i, "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
+    diff = [i for i in range(18) if "".join(nb["cells"][i]["source"]) != "".join(src["cells"][i]["source"])]
+    size = os.path.getsize(os.path.join(out, "submission.ipynb"))
+    print("ok   изменены только ячейки 7, 9, 15:", diff == [7, 9, 15])
+    print("ok   ячейки компилируются; входы: бандл %s, колёса %s, модель %s" % (BUNDLE, WHEELS_KERNEL, MODEL_SOURCE))
+    print("ok   setup_commands бандла не исполняются:", "setup_commands.json\").read_text()" not in "".join(nb["cells"][9]["source"]))
+    print("ok   сторож отключён, teardown свой:", "vllm_watchdog.start_background" not in c15 and "pkill -f vllm.entrypoints" in c15)
+    print("ok   слаг для пуша:", meta["id"], "| размер %.0f КБ" % (size / 1024))
+
+
+if __name__ == "__main__":
+    main()
