@@ -72,6 +72,8 @@ print("gpt-oss: vllm", _g_vllm.__version__, flush=True)
 
 _g_env = os.environ.copy()
 _g_env["OPENAI_API_KEY"] = "EMPTY"
+_g_env["LD_LIBRARY_PATH"] = os.pathsep.join([p for p in ("/usr/local/nvidia/lib64", "/usr/local/cuda/lib64", _g_env.get("LD_LIBRARY_PATH", "")) if p])
+_g_env["VLLM_LOGGING_LEVEL"] = "DEBUG"
 _g_env.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 _tk = _g_find_tiktoken_dir()
 if _tk is not None:
@@ -171,8 +173,10 @@ for command in json.loads((BUNDLE_DIR / "setup_commands.json").read_text()):
     meta["dataset_sources"] = [BUNDLE]
     meta["kernel_sources"] = [WHEELS_KERNEL]
     meta["model_sources"] = [MODEL_SOURCE]
-    # образ Kaggle приколочен как в официальном шаблоне: колёса vLLM 0.19.1 собраны под его torch/CUDA
-    meta["docker_image"] = json.load(open("reference/gpt-oss-template/kernel-metadata.json"))["docker_image"]
+    # v2 (13.09 14:55): приколоченный образ шаблона оказался БЕЗ CUDA (libcudart.so.12 не найден, «0 active drivers»,
+    # vLLM «Failed to infer device type») -- образ по умолчанию, как у стокового кернела; LD_LIBRARY_PATH
+    # с CUDA-библиотеками Kaggle выставляется серверу явно.
+    meta.pop("docker_image", None)
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
 
     for i in (7, 9, 15):

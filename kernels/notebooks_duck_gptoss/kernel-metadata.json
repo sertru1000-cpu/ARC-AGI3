@@ -21,6 +21,5 @@
   ],
   "model_sources": [
     "danielhanchen/gpt-oss-120b/Transformers/default/1"
-  ],
-  "docker_image": "gcr.io/kaggle-images/python@sha256:e5452ce6268c2e8345cfe5141f31ca7ff47032aca46a7ea532bbb87481281d0c"
+  ]
 }
