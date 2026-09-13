@@ -6,7 +6,7 @@
 # 2 исследований на уровень. Только оффлайн.
 # =====================================================================
 import inference.agent.tool_agent as _wta
-_EX_STALL, _EX_MAX, _EX_NOTE_TURNS, _EX_MAX_CLICKS = 100, 2, 3, 16
+_EX_STALL, _EX_CALLS, _EX_MAX, _EX_NOTE_TURNS, _EX_MAX_CLICKS = 100, 40, 2, 3, 16
 _ex_stats = {"games": 0, "explorations": 0, "moves": 0, "levels_during": 0, "turns": 0, "blocked_max": 0}
 
 def _ex_objects(grid, max_cells=400):
@@ -101,11 +101,13 @@ if not TRUE_SUBMISSION:
                 st = {"level": None, "level_start": int(action_num or 0), "explorations": 0, "last": None,
                       "note": None, "note_left": 0, "clicked": set(), "since_start": 0}; self._ex_state = st; _ex_stats["games"] += 1
             _ex_stats["turns"] += 1
+            st["calls"] = int(st.get("calls", 0)) + 1
             lv = getattr(kwargs.get("current_frame"), "level", None)
             if lv is not None:
                 lv = int(lv)
                 if st["level"] is None or lv > st["level"]:
-                    st.update({"level": lv, "level_start": int(action_num or 0), "explorations": 0, "last": None, "clicked": set()})
+                    st.update({"level": lv, "level_start": int(action_num or 0), "explorations": 0, "last": None, "clicked": set(),
+                               "calls": 0, "calls_at_last": 0})
             st["action_num"] = int(action_num or 0)
             if st.get("note") and st.get("note_left", 0) > 0:
                 st["note_left"] -= 1
@@ -131,17 +133,21 @@ if not TRUE_SUBMISSION:
             cur_num = int(last.get("action_num") or st.get("action_num") or 0)
             since_start = cur_num - int(st.get("level_start") or 0)
             since_last = cur_num - int(st["last"]) if st.get("last") is not None else since_start
-            if since_start >= _EX_STALL and since_last >= _EX_STALL:
+            calls_since = int(st.get("calls", 0)) - int(st.get("calls_at_last", 0))
+            by_moves = since_start >= _EX_STALL and since_last >= _EX_STALL
+            by_calls = calls_since >= _EX_CALLS
+            if by_moves or by_calls:
                 if st["explorations"] >= _EX_MAX:
                     _ex_stats["blocked_max"] += 1
                     return out
-                st["explorations"] += 1; st["last"] = cur_num; st["since_start"] = since_start; _ex_stats["explorations"] += 1
+                st["explorations"] += 1; st["last"] = cur_num; st["since_start"] = since_start; st["calls_at_last"] = int(st.get("calls", 0)); _ex_stats["explorations"] += 1
+                _ex_stats["by_calls"] = _ex_stats.get("by_calls", 0) + int(by_calls and not by_moves)
                 st["note"] = _ex_run(self, sess, state_path, st); st["note_left"] = _EX_NOTE_TURNS
-                print("[EXPLORE] уровень %d: исследование %d/%d после %d ходов" % (st["level"], st["explorations"], _EX_MAX, since_start), flush=True)
+                print("[EXPLORE] уровень %d: исследование %d/%d после %d ходов / %d вызовов%s" % (st["level"], st["explorations"], _EX_MAX, since_start, calls_since, " [по вызовам]" if (by_calls and not by_moves) else ""), flush=True)
         except Exception as _e:
             print("[EXPLORE] сбой: %r" % (_e,), flush=True)
         return out
     _wta.ToolAgent._run_python_tool = _ex_run_tool
-    print("EXPLORE: скриптовый исследователь после %d ходов без взятия (стрелки x3, клики по объектам, <= %d раз на уровень), отчёт во входе %d хода. "
+    print("EXPLORE: скриптовый исследователь после %d ходов ИЛИ %d вызовов без взятия (стрелки x3, клики по объектам, <= %d раз на уровень), отчёт во входе %d хода. "
           "ПОРОГИ против базы 10.25: польза -- победы-поражения >= +8 и медиана >= +8; вред -- <= -6; генерация 1400-1500."
-          % (_EX_STALL, _EX_MAX, _EX_NOTE_TURNS), flush=True)
+          % (_EX_STALL, _EX_CALLS, _EX_MAX, _EX_NOTE_TURNS), flush=True)

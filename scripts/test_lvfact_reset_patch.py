@@ -119,6 +119,26 @@ check(sess.resets == 2 and agent._rs_state["resets"] == 0 and agent._rs_state["l
 agent._last_action_result = {"action_num": 425, "level": 2}
 wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "x"})
 check(sess.resets == 3, "уровень 2, 104 хода без взятия: сброс снова доступен")
+# второй триггер: 40 вызовов без уровня при малом числе ходов
+sess2 = Sess(); agent2 = types.SimpleNamespace(_step_env_callback=sess2.step_env, _last_action_result={})
+wta.ToolAgent._build_user_prompt(agent2, 0, current_frame=Frame(1, "s"), history_entries=[])
+for i in range(39):   # первый промпт обнуляет счёт (новый уровень), дальше 39 вызовов
+    wta.ToolAgent._build_user_prompt(agent2, 5, current_frame=Frame(1, "s"), history_entries=h[:5])
+agent2._last_action_result = {"action_num": 5, "level": 1}
+wta.ToolAgent._run_python_tool(agent2, Path("/tmp/x"), {"code": "x"})
+check(sess2.resets == 0, "триггер по вызовам: 39 вызовов и 5 ходов -- сброса нет")
+wta.ToolAgent._build_user_prompt(agent2, 5, current_frame=Frame(1, "s"), history_entries=h[:5])
+wta.ToolAgent._run_python_tool(agent2, Path("/tmp/x"), {"code": "x"})
+check(sess2.resets == 1 and ns["_rs_stats"].get("by_calls") == 1, "триггер по вызовам: 40 вызовов при 5 ходах -- сброс [по вызовам]")
+t = wta.ToolAgent._build_user_prompt(agent2, 6, current_frame=Frame(1, "s"), history_entries=h[:6])
+check("5 moves and 40 model calls" in t, "сводка называет и ходы, и вызовы")
+for i in range(38):   # один промпт уже ушёл на проверку сводки
+    wta.ToolAgent._build_user_prompt(agent2, 6, current_frame=Frame(1, "s"), history_entries=h[:6])
+wta.ToolAgent._run_python_tool(agent2, Path("/tmp/x"), {"code": "x"})
+check(sess2.resets == 1, "после сброса счёт вызовов начинается заново: 39 -- второго сброса нет")
+wta.ToolAgent._build_user_prompt(agent2, 6, current_frame=Frame(1, "s"), history_entries=h[:6])
+wta.ToolAgent._run_python_tool(agent2, Path("/tmp/x"), {"code": "x"})
+check(sess2.resets == 2, "40 вызовов после первого сброса -- второй сброс")
 wta.ToolAgent._build_user_prompt, wta.ToolAgent._run_python_tool = orig_prompt, orig_run
 
 # ================= explore =================
@@ -182,6 +202,13 @@ check(ns["_ex_stats"]["explorations"] == 2 and len(clicks2) == 0, "второе 
 agent._last_action_result = {"action_num": 330, "level": 1}
 wta.ToolAgent._run_python_tool(agent, Path("/tmp/x"), {"code": "x"})
 check(ns["_ex_stats"]["explorations"] == 2 and ns["_ex_stats"]["blocked_max"] == 1, "лимит 2 исследования на уровень")
+esess2 = ESess(); agent3 = types.SimpleNamespace(_step_env_callback=esess2.step_env, _last_action_result={}, _current_valid_actions=["UP", "MOUSE"])
+wta.ToolAgent._build_user_prompt(agent3, 0, current_frame=Frame(1, "s"), history_entries=[])
+for i in range(40):
+    wta.ToolAgent._build_user_prompt(agent3, 3, current_frame=Frame(1, "s"), history_entries=[])
+agent3._last_action_result = {"action_num": 3, "level": 1}
+wta.ToolAgent._run_python_tool(agent3, Path("/tmp/x"), {"code": "x"})
+check(len(esess2.calls) > 0 and ns["_ex_stats"].get("by_calls") == 1, "explore: триггер по вызовам (40 вызовов при 3 ходах) -- исследование [по вызовам]")
 wta.ToolAgent._build_user_prompt, wta.ToolAgent._run_python_tool = orig_prompt, orig_run
 
 print("\nИТОГ: %d сбоев" % len(fails) if fails else "\nВСЕ ПРОВЕРКИ ПРОШЛИ")

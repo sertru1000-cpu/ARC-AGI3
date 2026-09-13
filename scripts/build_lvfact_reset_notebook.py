@@ -28,7 +28,7 @@ import ast
 import json
 import os
 
-STALL_MOVES, MAX_RESETS, NOTE_TURNS = 100, 2, 3
+STALL_MOVES, STALL_CALLS, MAX_RESETS, NOTE_TURNS = 100, 40, 2, 3   # второй триггер (13.09 12:30): 40 вызовов без уровня
 
 LVFACT_CELL = r'''
 # =====================================================================
@@ -109,7 +109,7 @@ RESET_CELL = r'''
 # =====================================================================
 import hashlib as _rs_hashlib
 import inference.agent.tool_agent as _wta
-_RS_STALL, _RS_MAX, _RS_NOTE_TURNS = %(stall)d, %(max_resets)d, %(note_turns)d
+_RS_STALL, _RS_CALLS, _RS_MAX, _RS_NOTE_TURNS = %(stall)d, %(stall_calls)d, %(max_resets)d, %(note_turns)d
 _rs_stats = {"games": 0, "resets": 0, "turns": 0, "blocked_max": 0, "levels": 0}
 
 def _rs_summary(history_entries, level):
@@ -137,6 +137,7 @@ if not TRUE_SUBMISSION:
                 st = {"level": None, "level_start": int(action_num or 0), "resets": 0, "last_reset": None,
                       "note": None, "note_left": 0, "entries": None}; self._rs_state = st; _rs_stats["games"] += 1
             _rs_stats["turns"] += 1
+            st["calls"] = int(st.get("calls", 0)) + 1
             st["entries"] = kwargs.get("history_entries")
             lv = getattr(kwargs.get("current_frame"), "level", None)
             if lv is not None:
@@ -144,7 +145,8 @@ if not TRUE_SUBMISSION:
                 if st["level"] is None or lv > st["level"]:
                     if st["level"] is not None:
                         _rs_stats["levels"] += 1
-                    st.update({"level": lv, "level_start": int(action_num or 0), "resets": 0, "last_reset": None})
+                    st.update({"level": lv, "level_start": int(action_num or 0), "resets": 0, "last_reset": None,
+                               "calls": 0, "calls_at_reset": 0})
             st["action_num"] = int(action_num or 0)
             if st.get("note") and st.get("note_left", 0) > 0:
                 st["note_left"] -= 1
@@ -170,29 +172,33 @@ if not TRUE_SUBMISSION:
                 return out
             since_start = cur_num - int(st.get("level_start") or 0)
             since_reset = cur_num - int(st["last_reset"]) if st.get("last_reset") is not None else since_start
-            if since_start >= _RS_STALL and since_reset >= _RS_STALL:
+            calls_since = int(st.get("calls", 0)) - int(st.get("calls_at_reset", 0))
+            by_moves = since_start >= _RS_STALL and since_reset >= _RS_STALL
+            by_calls = calls_since >= _RS_CALLS
+            if by_moves or by_calls:
                 if st["resets"] >= _RS_MAX:
                     _rs_stats["blocked_max"] += 1
                     return out
                 n, top, boards, returns = _rs_summary(st.get("entries"), st["level"])
                 sess._execute_auto_reset()
-                st["resets"] += 1; st["last_reset"] = cur_num; _rs_stats["resets"] += 1
-                st["note"] = ("HARNESS RESET (attempt %%d of %%d): this level was RESET by the harness after %%d moves without "
+                st["resets"] += 1; st["last_reset"] = cur_num; st["calls_at_reset"] = int(st.get("calls", 0)); _rs_stats["resets"] += 1
+                _rs_stats["by_calls"] = _rs_stats.get("by_calls", 0) + int(by_calls and not by_moves)
+                st["note"] = ("HARNESS RESET (attempt %%d of %%d): this level was RESET by the harness after %%d moves and %%d model calls without "
                               "completing it -- the board is back to the level's start; completed levels are kept and your history "
                               "is kept. What you tried on this level: %%d moves (%%s); %%d distinct boards; returned to an already-seen "
                               "board %%d times. Do NOT repeat the same sequences from the start: choose a different mechanic or "
-                              "a different target first." %% (st["resets"], _RS_MAX, since_start, n, top or "-", boards, returns))
+                              "a different target first." %% (st["resets"], _RS_MAX, since_start, calls_since, n, top or "-", boards, returns))
                 st["note_left"] = _RS_NOTE_TURNS
-                print("[RESET] уровень %%d: сброс %%d/%%d после %%d ходов (досок %%d, возвратов %%d)"
-                      %% (st["level"], st["resets"], _RS_MAX, since_start, boards, returns), flush=True)
+                print("[RESET] уровень %%d: сброс %%d/%%d после %%d ходов / %%d вызовов (досок %%d, возвратов %%d)%%s"
+                      %% (st["level"], st["resets"], _RS_MAX, since_start, calls_since, boards, returns, " [по вызовам]" if (by_calls and not by_moves) else ""), flush=True)
         except Exception as _e:
             print("[RESET] сбой: %%r" %% (_e,), flush=True)
         return out
     _wta.ToolAgent._run_python_tool = _rs_run
-    print("RESET: сброс уровня обвязкой после %%d ходов без взятия, не больше %%d на уровень, сводка испробованного во входе %%d хода. "
+    print("RESET: сброс уровня обвязкой после %%d ходов ИЛИ %%d вызовов без взятия, не больше %%d на уровень, сводка испробованного во входе %%d хода. "
           "ПОРОГИ против базы 10.25: польза -- победы-поражения >= +8 и медиана >= +8; вред -- <= -6; генерация 1400-1500."
-          %% (_RS_STALL, _RS_MAX, _RS_NOTE_TURNS), flush=True)
-''' % {"stall": STALL_MOVES, "max_resets": MAX_RESETS, "note_turns": NOTE_TURNS}
+          %% (_RS_STALL, _RS_CALLS, _RS_MAX, _RS_NOTE_TURNS), flush=True)
+''' % {"stall": STALL_MOVES, "stall_calls": STALL_CALLS, "max_resets": MAX_RESETS, "note_turns": NOTE_TURNS}
 
 EXPLORE_CELL = r"""
 # =====================================================================
@@ -202,7 +208,7 @@ EXPLORE_CELL = r"""
 # %(max_resets)d исследований на уровень. Только оффлайн.
 # =====================================================================
 import inference.agent.tool_agent as _wta
-_EX_STALL, _EX_MAX, _EX_NOTE_TURNS, _EX_MAX_CLICKS = %(stall)d, %(max_resets)d, %(note_turns)d, 16
+_EX_STALL, _EX_CALLS, _EX_MAX, _EX_NOTE_TURNS, _EX_MAX_CLICKS = %(stall)d, %(stall_calls)d, %(max_resets)d, %(note_turns)d, 16
 _ex_stats = {"games": 0, "explorations": 0, "moves": 0, "levels_during": 0, "turns": 0, "blocked_max": 0}
 
 def _ex_objects(grid, max_cells=400):
@@ -297,11 +303,13 @@ if not TRUE_SUBMISSION:
                 st = {"level": None, "level_start": int(action_num or 0), "explorations": 0, "last": None,
                       "note": None, "note_left": 0, "clicked": set(), "since_start": 0}; self._ex_state = st; _ex_stats["games"] += 1
             _ex_stats["turns"] += 1
+            st["calls"] = int(st.get("calls", 0)) + 1
             lv = getattr(kwargs.get("current_frame"), "level", None)
             if lv is not None:
                 lv = int(lv)
                 if st["level"] is None or lv > st["level"]:
-                    st.update({"level": lv, "level_start": int(action_num or 0), "explorations": 0, "last": None, "clicked": set()})
+                    st.update({"level": lv, "level_start": int(action_num or 0), "explorations": 0, "last": None, "clicked": set(),
+                               "calls": 0, "calls_at_last": 0})
             st["action_num"] = int(action_num or 0)
             if st.get("note") and st.get("note_left", 0) > 0:
                 st["note_left"] -= 1
@@ -327,21 +335,25 @@ if not TRUE_SUBMISSION:
             cur_num = int(last.get("action_num") or st.get("action_num") or 0)
             since_start = cur_num - int(st.get("level_start") or 0)
             since_last = cur_num - int(st["last"]) if st.get("last") is not None else since_start
-            if since_start >= _EX_STALL and since_last >= _EX_STALL:
+            calls_since = int(st.get("calls", 0)) - int(st.get("calls_at_last", 0))
+            by_moves = since_start >= _EX_STALL and since_last >= _EX_STALL
+            by_calls = calls_since >= _EX_CALLS
+            if by_moves or by_calls:
                 if st["explorations"] >= _EX_MAX:
                     _ex_stats["blocked_max"] += 1
                     return out
-                st["explorations"] += 1; st["last"] = cur_num; st["since_start"] = since_start; _ex_stats["explorations"] += 1
+                st["explorations"] += 1; st["last"] = cur_num; st["since_start"] = since_start; st["calls_at_last"] = int(st.get("calls", 0)); _ex_stats["explorations"] += 1
+                _ex_stats["by_calls"] = _ex_stats.get("by_calls", 0) + int(by_calls and not by_moves)
                 st["note"] = _ex_run(self, sess, state_path, st); st["note_left"] = _EX_NOTE_TURNS
-                print("[EXPLORE] уровень %%d: исследование %%d/%%d после %%d ходов" %% (st["level"], st["explorations"], _EX_MAX, since_start), flush=True)
+                print("[EXPLORE] уровень %%d: исследование %%d/%%d после %%d ходов / %%d вызовов%%s" %% (st["level"], st["explorations"], _EX_MAX, since_start, calls_since, " [по вызовам]" if (by_calls and not by_moves) else ""), flush=True)
         except Exception as _e:
             print("[EXPLORE] сбой: %%r" %% (_e,), flush=True)
         return out
     _wta.ToolAgent._run_python_tool = _ex_run_tool
-    print("EXPLORE: скриптовый исследователь после %%d ходов без взятия (стрелки x3, клики по объектам, <= %%d раз на уровень), отчёт во входе %%d хода. "
+    print("EXPLORE: скриптовый исследователь после %%d ходов ИЛИ %%d вызовов без взятия (стрелки x3, клики по объектам, <= %%d раз на уровень), отчёт во входе %%d хода. "
           "ПОРОГИ против базы 10.25: польза -- победы-поражения >= +8 и медиана >= +8; вред -- <= -6; генерация 1400-1500."
-          %% (_EX_STALL, _EX_MAX, _EX_NOTE_TURNS), flush=True)
-""" % {"stall": STALL_MOVES, "max_resets": MAX_RESETS, "note_turns": NOTE_TURNS}
+          %% (_EX_STALL, _EX_CALLS, _EX_MAX, _EX_NOTE_TURNS), flush=True)
+""" % {"stall": STALL_MOVES, "stall_calls": STALL_CALLS, "max_resets": MAX_RESETS, "note_turns": NOTE_TURNS}
 
 
 def build(cell: str, out: str, slug: str, title: str, marker_var: str) -> None:
