@@ -31,6 +31,7 @@ MODEL_SOURCE = "danielhanchen/gpt-oss-120b/Transformers/default/1"
 MODEL_PATH = "/kaggle/input/models/danielhanchen/gpt-oss-120b/transformers/default/1"
 SERVED_NAME = "gpt-oss-120b"
 PORT = 1234
+PROBE_CAP_S = 1800.0   # дымовая проба 30 мин вне боя (слово владельца 13.09)
 
 SETUP_CELL = r'''
 # =====================================================================
@@ -156,6 +157,9 @@ for command in json.loads((BUNDLE_DIR / "setup_commands.json").read_text()):
     old = '(BUNDLE_DIR / "teardown_commands.json").read_text()'
     assert old in c15, "ячейка 15: не нашёл teardown"
     c15 = c15.replace(old, "'[\"pkill -f vllm.entrypoints || true\"]'")
+    marker = "# Play the benchmark; watchdog stop and teardown run even if it raises."
+    assert marker in c15
+    c15 = c15.replace(marker, "if not TRUE_SUBMISSION:\n    bm.solver.max_runtime_s_per_game = %r    # дымовая проба вне боя\n\n" % PROBE_CAP_S + marker, 1)
     nb["cells"][15]["source"] = c15.splitlines(keepends=True)
 
     out = "kernels/notebooks_duck_gptoss"
@@ -179,6 +183,7 @@ for command in json.loads((BUNDLE_DIR / "setup_commands.json").read_text()):
     print("ok   ячейки компилируются; входы: бандл %s, колёса %s, модель %s" % (BUNDLE, WHEELS_KERNEL, MODEL_SOURCE))
     print("ok   setup_commands бандла не исполняются:", "setup_commands.json\").read_text()" not in "".join(nb["cells"][9]["source"]))
     print("ok   сторож отключён, teardown свой:", "vllm_watchdog.start_background" not in c15 and "pkill -f vllm.entrypoints" in c15)
+    print("ok   потолок пробы вне боя: %s с (в бою штатный):" % PROBE_CAP_S, "max_runtime_s_per_game = %r" % PROBE_CAP_S in c15)
     print("ok   слаг для пуша:", meta["id"], "| размер %.0f КБ" % (size / 1024))
 
 
