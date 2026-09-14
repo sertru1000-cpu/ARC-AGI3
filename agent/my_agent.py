@@ -120,8 +120,13 @@ class MyAgent(Agent):
             self.explorer = GoExplore(seed=hash(self.game_id) & 0xFFFF)
         elif BRAIN == "wmplan":
             # «модель думает, алгоритм ходит»: программа модели мира из записей (локальная проверка алгоритма)
-            prog = load_recorded_program(self.game_id[:4], os.getenv("MY_AGENT_WM_PROGRAMS", "docs/wm_offline_flash_s1.json,docs/wm_offline_flash_s1_retry.json").split(","),
-                                         os.getenv("MY_AGENT_WM_EVENTS", "runs/flash_v1_phaseA/artifacts/GAME-*_p0_events.jsonl"))
+            if os.getenv("MY_AGENT_WM_PROGRAM_FILE"):
+                # программа из трассы цикла (hex-цифры) -- для проверки планировщика на известной программе
+                from agent.harness.wmplan import Program as _P
+                prog = _P(open(os.getenv("MY_AGENT_WM_PROGRAM_FILE"), encoding="utf-8").read(), {i: "0123456789abcdef"[i] for i in range(16)})
+            else:
+                prog = load_recorded_program(self.game_id[:4], os.getenv("MY_AGENT_WM_PROGRAMS", "docs/wm_offline_flash_s1.json,docs/wm_offline_flash_s1_retry.json").split(","),
+                                             os.getenv("MY_AGENT_WM_EVENTS", "runs/flash_v1_phaseA/artifacts/GAME-*_p0_events.jsonl"))
             if prog is None:
                 raise RuntimeError(f"{self.game_id}: нет записанной программы модели мира")
             self.explorer = WMPlanner(prog, seed=hash(self.game_id) & 0xFFFF)
@@ -145,6 +150,7 @@ class MyAgent(Agent):
             else:
                 backend = default_backend()
             self.explorer = WMLoop(backend, seed=hash(self.game_id) & 0xFFFF)
+            self.explorer.game_tag = self.game_id[:4]
         else:
             self.explorer = HeuristicExplorer(seed=hash(self.game_id) & 0xFFFF)
         self.policy: Optional[LLMPolicy] = None

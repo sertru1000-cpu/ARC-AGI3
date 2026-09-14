@@ -53,6 +53,12 @@ def progress(state):
     # moves made -- those change on every action and would mislead the search. The planner explores high-progress states first.
     ...
 
+def is_goal(state):
+    # OPTIONAL fourth function: True when the state completes the level (e.g. the target region equals the reference
+    # pattern, all items collected, the movable object stands on its target). The planner searches for such a state
+    # inside your model first, then executes the path for real. Omit it if the completion condition is unknown.
+    ...
+
 Scoring: a prediction is correct if predict(state_of(before), action) == state_of(after). Only transitions where state_of(before) != state_of(after) count, so a constant state_of scores zero. Cover as many cases as you can; return None only when truly unknown.
 
 EXAMPLES ({n} transitions, in chronological order; "before" of a transition equals "after" of the previous one when consecutive):
@@ -70,7 +76,7 @@ Previous program:
 Evidence the planner collected ({n} transitions). Transitions marked STATE_UNCHANGED are ones where the board changed but your state_of returned the same value before and after -- your state misses whatever changed there. Transitions marked PREDICT_WRONG show predicted vs actual state.
 {examples}
 
-Rewrite BOTH functions (same contract, one ```python block; you may also add/revise the optional progress(state) function). Extend state_of so that it distinguishes every board change that could matter for completing the level, and make predict consistent with the evidence. Rules: (1) state_of must include the concrete visible things that changed in the STATE_UNCHANGED transitions (read the cell-change lists: rows, columns, colours); (2) predict must NOT return None for every action -- when a click on some region visibly changed cells in the evidence, encode that change; return None only for actions you have no evidence about; (3) if a board change looks like a hidden counter, still model it as visible cells."""
+Rewrite BOTH functions (same contract, one ```python block; you may also add/revise the optional progress(state) and is_goal(state) functions). Extend state_of so that it distinguishes every board change that could matter for completing the level, and make predict consistent with the evidence. Rules: (1) state_of must include the concrete visible things that changed in the STATE_UNCHANGED transitions (read the cell-change lists: rows, columns, colours); (2) predict must NOT return None for every action -- when a click on some region visibly changed cells in the evidence, encode that change; return None only for actions you have no evidence about; (3) if a board change looks like a hidden counter, still model it as visible cells."""
 
 
 def fmt_transition(i, t, show_before, note=""):

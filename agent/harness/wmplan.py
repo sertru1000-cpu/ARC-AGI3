@@ -58,11 +58,15 @@ class Program:
         exec(source, ns)
         self.state_of = ns["state_of"]; self.predict = ns["predict"]
         self.progress = ns.get("progress")   # необязательная: progress(state) -> число, больше = ближе к взятию уровня
+        self.is_goal = ns.get("is_goal")     # необязательная: is_goal(state) -> bool, состояние завершает уровень
         self.letters = letter_map
         self.clock_idx: set[int] = set()
         self.frozen = False
         self._seen_pairs = 0
         self._changes: collections.Counter = collections.Counter()
+        self._alone: collections.Counter = collections.Counter()
+        self._values: dict = {}
+        self._mono: dict = {}
 
     def rows(self, grid: np.ndarray) -> list[str]:
         return ["".join(self.letters.get(int(v), "?") for v in row) for row in grid]
@@ -74,15 +78,34 @@ class Program:
             return None
 
     def note_transition(self, s_before, s_after) -> None:
-        """Учёт «часов»: компоненты верхнего уровня, меняющиеся почти всегда."""
+        """Учёт «часов» -- компонент верхнего уровня, которые (а) меняются почти на каждом ходе (tn36: счётчик
+        кликов) или (б) никогда не меняются сами по себе, а только вместе с другими, и принимают много значений
+        (ft09: счётчик, убывающий при каждом переключении блока) -- избыточны для поиска."""
         if not (isinstance(s_before, tuple) and isinstance(s_after, tuple) and len(s_before) == len(s_after)):
             return
+        if s_before == s_after:
+            return
         self._seen_pairs += 1
-        for i, (a, b) in enumerate(zip(s_before, s_after)):
-            if a != b:
-                self._changes[i] += 1
-        if self._seen_pairs >= 6 and not self.frozen:
-            self.clock_idx = {i for i, n in self._changes.items() if n >= 0.9 * self._seen_pairs}
+        changed = [i for i, (a, b) in enumerate(zip(s_before, s_after)) if a != b]
+        for i in changed:
+            self._changes[i] += 1
+            self._values.setdefault(i, set()).add(s_after[i])
+            if len(changed) == 1:
+                self._alone[i] += 1
+            if isinstance(s_before[i], (int, float)) and isinstance(s_after[i], (int, float)) and not isinstance(s_after[i], bool):
+                d = s_after[i] - s_before[i]
+                self._mono.setdefault(i, set()).add(1 if d > 0 else -1)
+        if self._seen_pairs >= 4 and (not self.frozen or self._seen_pairs in (4, 8, 16, 32, 64, 128)):
+            clocks = set()
+            for i, n in self._changes.items():
+                # часы = ЧИСЛОВОЙ МОНОТОННЫЙ компонент с >= 3 значениями, меняющийся в >= 80% переходов
+                # (tn36: счётчик кликов; ft09: счётчик, убывающий при каждом переключении). Нечисловые компоненты
+                # (цвета блоков, позиции) часами не бывают, даже если меняются каждый ход.
+                if (len(self._mono.get(i, ())) == 1 and len(self._values.get(i, ())) >= 3 and n >= 0.8 * self._seen_pairs):
+                    clocks.add(i)
+            if clocks and len(clocks) >= len(s_after):
+                clocks = set()      # не выбрасывать всё
+            self.clock_idx = clocks
 
     def abstract(self, s):
         if s is None:
@@ -98,6 +121,14 @@ class Program:
             return float(self.progress(s_raw))
         except Exception:
             return 0.0
+
+    def goal_of(self, s_raw) -> bool:
+        if self.is_goal is None or s_raw is None:
+            return False
+        try:
+            return bool(self.is_goal(s_raw))
+        except Exception:
+            return False
 
     def predict_raw(self, s_raw, act):
         try:
@@ -135,6 +166,7 @@ class PlanState:
     cur_abstract: object = None
     cur_exact: str | None = None
     cur_path: list = field(default_factory=list)
+    clocks_seen: set = field(default_factory=set)
     need_reset: bool = True
     last_action: tuple | None = None
     stats: collections.Counter = field(default_factory=collections.Counter)
@@ -204,6 +236,47 @@ class WMPlanner:
             st.nodes[abstract].path = list(st.cur_path); st.nodes[abstract].exact = exact; st.nodes[abstract].raw = raw
 
     # ----------------------------------------------------------------- decide
+    IMAGINE_DEPTH = 8
+    IMAGINE_NODES = 3000
+
+    def _imagine(self, node: Node, frame, simple_actions, has_click):
+        """BFS в модели от узла: предсказанные состояния (predict != None). Возвращает путь к лучшему состоянию,
+        которого ещё нет в реальном графе: цель (is_goal) > прогресс > глубина. Пустой список, если нечего."""
+        grid = latest_grid(frame)
+        alphabet: list = [(a, None) for a in simple_actions]
+        if has_click and grid is not None:
+            alphabet += [act for act, _ in self._click_alphabet(node, grid)]
+        start_key = self.prog.abstract(node.raw)
+        seen = {start_key: (node.raw, [], 0)}
+        frontier = [(node.raw, [], 0)]
+        best = None
+        while frontier and len(seen) < self.IMAGINE_NODES:
+            nxt = []
+            for raw, path, depth in frontier:
+                if depth >= self.IMAGINE_DEPTH:
+                    continue
+                for act in alphabet:
+                    praw = self.prog.predict_raw(raw, act)
+                    if praw is None:
+                        continue
+                    key = self.prog.abstract(praw)
+                    if key in seen or key == self.prog.abstract(raw):
+                        continue
+                    seen[key] = (praw, path + [act], depth + 1)
+                    nxt.append((praw, path + [act], depth + 1))
+                    real_known = key in st_nodes if (st_nodes := self.st.nodes) is not None else False
+                    if real_known:
+                        continue
+                    cand = (1 if self.prog.goal_of(praw) else 0, self.prog.progress_of(praw), -(depth + 1))
+                    if best is None or cand > best[0]:
+                        best = (cand, path + [act], key)
+                    if cand[0] == 1:
+                        self.st.stats["goal_imagined"] += 1
+                        return path + [act], key
+            frontier = nxt
+        self.st.stats["imagined_states"] = max(self.st.stats["imagined_states"], len(seen))
+        return (best[1], best[2]) if best else ([], None)
+
     def decide(self, frame, simple_actions: list[str], has_click: bool) -> tuple[str, dict | None]:
         st = self.st
         st.stats["steps"] += 1
@@ -212,19 +285,25 @@ class WMPlanner:
             return self._emit(("RESET", None))
         if st.queue:
             return self._emit(st.queue.pop(0))
+        # воображение: план из модели к лучшему невиданному состоянию, исполняется с проверкой каждого шага
+        node = st.nodes.get(st.cur_abstract)
+        if node is not None and not self.hybrid and self.prog.frozen and not getattr(node, "imagined", False):
+            node.imagined = True
+            path, key = self._imagine(node, frame, simple_actions, has_click)
+            if path:
+                st.stats["imagined_plans"] += 1
+                st.pending = (node.abstract, path[-1], key)
+                st.queue = list(path)
+                return self._emit(st.queue.pop(0))
         if not self.prog.frozen:
             if st.stats["steps"] <= self.WARMUP:
-                return self._emit(self._random_action(frame, simple_actions, has_click))
+                return self._emit(self._warmup_action(frame, simple_actions, has_click))
             self.prog.frozen = True
-            # перестроить узлы по замороженной абстракции
-            rebuilt: dict = {}
-            for n in st.nodes.values():
-                key = self.prog.abstract(n.raw)
-                if key not in rebuilt or len(n.path) < len(rebuilt[key].path):
-                    n.abstract = key; n.expanded = False; rebuilt[key] = n
-            st.nodes = rebuilt; st.heap.clear()
-            st.cur_abstract = self.prog.abstract(st.cur_raw)
-            st.stats["clocks_frozen_at"] = st.stats["steps"]
+            self._rekey(); st.stats["clocks_frozen_at"] = st.stats["steps"]
+        elif self.prog.clock_idx != st.clocks_seen:
+            # часы переопределились по новым переходам (Program пересчитывает их до заморозки; после -- по
+            # накопленным парам при вызове refresh) -- перестроить ключи
+            self._rekey()
         # расширить текущий узел, если ещё не расширен
         node = st.nodes.get(st.cur_abstract)
         if node is not None and not node.expanded:
@@ -319,6 +398,32 @@ class WMPlanner:
         if has_click and grid is not None:
             opts += [("ACTION6", {"x": x, "y": y}) for x, y in spread_click_targets(grid, self.MAX_CLICK_TARGETS)]
         return self.rng.choice(opts) if opts else ("RESET", None)
+
+    def _rekey(self) -> None:
+        st = self.st
+        rebuilt: dict = {}
+        for n in st.nodes.values():
+            key = self.prog.abstract(n.raw)
+            if self.hybrid:
+                key = (key, n.exact)
+            if key not in rebuilt or len(n.path) < len(rebuilt[key].path):
+                n.abstract = key; n.expanded = False; n.imagined = False; rebuilt[key] = n
+        st.nodes = rebuilt; st.heap.clear()
+        st.cur_abstract = self.prog.abstract(st.cur_raw)
+        if self.hybrid:
+            st.cur_abstract = (st.cur_abstract, st.cur_exact)
+        st.clocks_seen = set(self.prog.clock_idx)
+        st.stats["rekeys"] += 1
+
+    def _warmup_action(self, frame, simple_actions, has_click):
+        """Разминка: сначала клики по разнообразным целям (малые объекты), затем стрелки -- чтобы часы проявились."""
+        grid = latest_grid(frame)
+        i = self.st.stats["steps"] - 1
+        targets = spread_click_targets(grid, self.WARMUP) if (has_click and grid is not None) else []
+        opts = [("ACTION6", {"x": x, "y": y}) for x, y in targets] + [(a, None) for a in simple_actions]
+        if not opts:
+            return ("RESET", None)
+        return opts[i % len(opts)]
 
     def _emit(self, act):
         st = self.st
