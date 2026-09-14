@@ -1,0 +1,286 @@
+"""Замкнутый цикл «модель думает, алгоритм ходит» (14.09, слово владельца «без вариантов»).
+
+  PROBE   : ~30 скриптовых ходов (стрелки ×2, клики по центрам объектов, случайные клетки) -> переходы.
+  SYNTH   : модель пишет state_of(grid)/predict(state, action) по переходам (промпт оффлайн-теста 12.09,
+            где Flash дал рабочие программы в 5/24 играх; tn36 -- 118/120 и 200/200 контрфактически).
+  PLAN    : WMPlanner исчерпывает абстрактные состояния программы в настоящей среде (tn36: 32/32 за 31 ход).
+  REPAIR  : уровень не взят, а фронтир пуст или предсказания врут -> модели показываются контрпримеры
+            (доска менялась, а state_of -- нет; predict != реальность) с требованием расширить состояние;
+            новая программа -> PLAN. Не больше REPAIRS починок на уровень; дальше -- Go-Explore-разведка
+            до конца бюджета (без модели).
+  LEVEL   : взят -> та же программа на новом уровне (фронтир строится заново); при расхождениях -- REPAIR.
+
+Модель нужна только в SYNTH/REPAIR: 1 + до REPAIRS вызовов на уровень, ходами она не управляет.
+Интерфейс как у GoExplore: observe(frame) + decide(frame, simple_actions, has_click) -> (name, payload).
+"""
+from __future__ import annotations
+
+import logging
+import random
+import re
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from .goexplore import GoExplore
+from .perception import latest_grid, segment
+from .wmplan import Program, WMPlanner, action_display
+
+logger = logging.getLogger(__name__)
+HEX = "0123456789abcdef"
+LETTERS = {i: HEX[i] for i in range(16)}
+
+PROMPT = """You are given recorded transitions from an unknown grid game (ARC-AGI-3). The board is a 64x64 grid; each cell is one hex digit (0-f) = a colour. Actions are UP, DOWN, LEFT, RIGHT, SPACE, or MOUSE(row=r, col=c).
+
+Your task: infer the game's mechanics from the examples and write a Python predictor that generalises to UNSEEN transitions of the same game (including later levels with different layouts). An algorithm will use it to PLAN: it enumerates the states your state_of can distinguish and executes real moves to reach each new one, so state_of must capture EVERYTHING that matters for completing a level (positions of movable things, toggles, counters, collected items, doors), not only the most obvious counter.
+
+Write exactly two functions in one ```python block, no other code outside them, no imports except from: collections, itertools, math, re, copy, json:
+
+def state_of(grid):
+    # grid: list of 64 strings, each 64 hex chars. Return a hashable, JSON-serialisable summary of the game-relevant state
+    # (e.g. tuple of object positions/colours). It must change whenever the game state changes and ignore purely cosmetic detail.
+    ...
+
+def predict(state, action):
+    # state: a value returned by state_of; action: one of the strings above.
+    # Return the state after the action (same format as state_of) or None if you cannot predict this case.
+    ...
+
+Scoring: a prediction is correct if predict(state_of(before), action) == state_of(after). Only transitions where state_of(before) != state_of(after) count, so a constant state_of scores zero. Cover as many cases as you can; return None only when truly unknown.
+
+EXAMPLES ({n} transitions, in chronological order; "before" of a transition equals "after" of the previous one when consecutive):
+{examples}
+
+Now write the two functions."""
+
+REPAIR = """Your previous predictor was used by a planner in the real game. Result: {verdict}
+
+Previous program:
+```python
+{code}
+```
+
+Evidence the planner collected ({n} transitions). Transitions marked STATE_UNCHANGED are ones where the board changed but your state_of returned the same value before and after -- your state misses whatever changed there. Transitions marked PREDICT_WRONG show predicted vs actual state.
+{examples}
+
+Rewrite BOTH functions (same contract, one ```python block). Extend state_of so that it distinguishes every board change that could matter for completing the level, and make predict consistent with the evidence. Return None from predict only when truly unknown."""
+
+
+def fmt_transition(i, t, show_before, note=""):
+    s = "### transition %d  action: %s  level: %d%s%s\n" % (i, t["action"], t["level"], "  (LEVEL COMPLETED after this action)" if t["level_up"] else "", note)
+    if show_before:
+        s += "before:\n" + t["before"] + "\n"
+    diff = []
+    b, a = t["before"].split("\n"), t["after"].split("\n")
+    for r, (x, y) in enumerate(zip(b, a)):
+        for c, (p, q) in enumerate(zip(x, y)):
+            if p != q:
+                diff.append((r, c, p, q))
+    if len(diff) > 400:
+        s += "after:\n" + t["after"] + "\n"
+    else:
+        s += "after = before with these cell changes (row,col: old->new): " + " ".join("%d,%d:%s>%s" % d for d in diff) + "\n"
+    return s
+
+
+def extract_code(text: str) -> str:
+    m = re.search(r"```python\s*(.*?)```", text, re.S)
+    if m:
+        return m.group(1)
+    if "```python" in text:
+        return text.split("```python", 1)[1]
+    return text
+
+
+def board_text(grid: np.ndarray) -> str:
+    return "\n".join("".join(LETTERS.get(int(v), "?") for v in row) for row in grid)
+
+
+@dataclass
+class Transition:
+    before: str
+    action: str
+    after: str
+    level: int
+    level_up: bool
+    note: str = ""
+
+
+class WMLoop:
+    PROBE_CLICKS = 16
+    PROBE_RANDOM = 6
+    REPAIRS = 3
+    PLAN_STALL = 40        # ходов подряд с пустым фронтиром -> починка
+    MAX_TOKENS = 6000
+
+    def __init__(self, backend, seed: int = 0, temperature: float = 0.6):
+        self.backend = backend
+        self.temperature = temperature
+        self.rng = random.Random(seed)
+        self.phase = "probe"
+        self.probe_plan: list = []
+        self.transitions: list[Transition] = []
+        self.program: Program | None = None
+        self.planner: WMPlanner | None = None
+        self.fallback: GoExplore | None = None
+        self.repairs = 0
+        self.level = 0
+        self.calls = 0
+        self.prev_grid: np.ndarray | None = None
+        self.last_action: tuple | None = None
+        self.stall = 0
+        self.stats: dict = {"calls": 0, "repairs": 0, "synth_fail": 0, "phase_log": []}
+        import types as _types
+        self.st = _types.SimpleNamespace(need_reset=False)   # совместимость с циклом my_agent (GAME_OVER -> RESET)
+
+    # ---------------------------------------------------------------- observe
+    def observe(self, frame) -> None:
+        grid = latest_grid(frame)
+        if grid is None:
+            return
+        level = int(getattr(frame, "levels_completed", 0) or 0)
+        state = str(getattr(frame, "state", ""))
+        if self.prev_grid is not None and self.last_action is not None and self.last_action[0] != "RESET" and not state.endswith("GAME_OVER"):
+            self.transitions.append(Transition(board_text(self.prev_grid), action_display(self.last_action), board_text(grid), self.level, level > self.level))
+        if level != self.level:
+            self.level = level
+            self.repairs = 0; self.stall = 0
+            if self.phase == "fallback":
+                self.phase = "plan" if self.planner is not None else "probe"
+        self.prev_grid = grid
+        if self.planner is not None and self.phase == "plan":
+            self.planner.observe(frame)
+        if self.fallback is not None and self.phase == "fallback":
+            self.fallback.observe(frame)
+
+    # ----------------------------------------------------------------- decide
+    def decide(self, frame, simple_actions: list[str], has_click: bool) -> tuple[str, dict | None]:
+        grid = latest_grid(frame)
+        if self.phase == "probe":
+            if not self.probe_plan:
+                self.probe_plan = self._probe_actions(grid, simple_actions, has_click)
+                if not self.probe_plan:
+                    self.phase = "synth"
+                    return self.decide(frame, simple_actions, has_click)
+            act = self.probe_plan.pop(0)
+            if not self.probe_plan:
+                self.phase = "synth"
+            return self._emit(act)
+        if self.phase == "synth":
+            ok = self._synthesize(repair=False)
+            self.phase = "plan" if ok else "fallback"
+            self._log_phase()
+            return self.decide(frame, simple_actions, has_click)
+        if self.phase == "plan":
+            act = self.planner.decide(frame, simple_actions, has_click)
+            st = self.planner.st.stats
+            self.stall = self.stall + 1 if st.get("frontier_empty", 0) > getattr(self, "_fe_seen", 0) else 0
+            self._fe_seen = st.get("frontier_empty", 0)
+            wrong = st.get("pred_wrong", 0); okp = st.get("pred_ok", 0)
+            if self.stall >= self.PLAN_STALL or (wrong >= 8 and wrong > 2 * okp):
+                if self.repairs < self.REPAIRS:
+                    self.repairs += 1
+                    if self._synthesize(repair=True):
+                        self.stall = 0; self._fe_seen = 0
+                    self._log_phase()
+                else:
+                    self.phase = "fallback"
+                    self.fallback = GoExplore(seed=self.rng.randint(0, 1 << 16))
+                    self._log_phase()
+            return self._emit(act)
+        # fallback
+        if self.fallback is None:
+            self.fallback = GoExplore(seed=self.rng.randint(0, 1 << 16))
+        self.fallback.observe(frame)
+        return self._emit(self.fallback.decide(frame, simple_actions, has_click))
+
+    def _emit(self, act):
+        self.last_action = act
+        if act[0] == "RESET":
+            # RESET, выданный внешним циклом (GAME_OVER): сообщить внутренним мозгам
+            if self.planner is not None and self.phase == "plan" and self.planner.st.last_action != act:
+                self.planner._emit(act)
+            if self.fallback is not None and self.phase == "fallback" and self.fallback.st.last_action != act:
+                self.fallback._emit(act)
+        return act
+
+    def _log_phase(self):
+        self.stats["phase_log"].append((self.level, self.phase, self.repairs, len(self.transitions)))
+
+    # ------------------------------------------------------------------ probe
+    def _probe_actions(self, grid, simple_actions, has_click) -> list:
+        plan: list = [(a, None) for a in simple_actions for _ in range(2)]
+        if has_click and grid is not None:
+            objs = segment(grid).non_background()[: self.PROBE_CLICKS]
+            plan += [("ACTION6", {"x": int(round(o.centroid[1])), "y": int(round(o.centroid[0]))}) for o in objs]
+            plan += [("ACTION6", {"x": self.rng.randint(0, 63), "y": self.rng.randint(0, 63)}) for _ in range(self.PROBE_RANDOM)]
+        return plan
+
+    # --------------------------------------------------------------- synthesis
+    def _synthesize(self, repair: bool) -> bool:
+        trans = self.transitions[-60:]
+        if not trans:
+            return False
+        if not repair or self.program is None:
+            parts = []; prev = None
+            for i, t in enumerate(trans):
+                parts.append(fmt_transition(i + 1, {"before": t.before, "action": t.action, "after": t.after, "level": t.level, "level_up": t.level_up}, show_before=(t.before != prev)))
+                prev = t.after
+            prompt = PROMPT.format(n=len(trans), examples="\n".join(parts))
+        else:
+            ev = self._evidence(trans)
+            parts = []; prev = None
+            for i, (t, note) in enumerate(ev):
+                parts.append(fmt_transition(i + 1, {"before": t.before, "action": t.action, "after": t.after, "level": t.level, "level_up": t.level_up}, show_before=(t.before != prev), note=note))
+                prev = t.after
+            st = self.planner.st.stats if self.planner else {}
+            verdict = ("the level was NOT completed; the planner reached all %d states your state_of distinguishes (frontier exhausted), "
+                       "so state_of misses what matters; predictions correct %d, wrong %d." % (len(self.planner.st.nodes) if self.planner else 0, st.get("pred_ok", 0), st.get("pred_wrong", 0)))
+            prompt = REPAIR.format(verdict=verdict, code=self.program_source, n=len(ev), examples="\n".join(parts))
+        self.calls += 1; self.stats["calls"] += 1
+        if repair:
+            self.stats["repairs"] += 1
+        try:
+            reply = self.backend.chat([{"role": "user", "content": prompt}], max_tokens=self.MAX_TOKENS, temperature=self.temperature)
+        except Exception as exc:
+            logger.warning("wmloop: model call failed: %r", exc); self.stats["synth_fail"] += 1
+            return False
+        code = extract_code(reply)
+        try:
+            prog = Program(code, LETTERS)
+            prog.raw_state(self.prev_grid if self.prev_grid is not None else np.zeros((64, 64), dtype=np.int16))
+        except Exception as exc:
+            logger.warning("wmloop: program rejected: %r", exc); self.stats["synth_fail"] += 1
+            return False
+        self.program = prog; self.program_source = code
+        self.planner = WMPlanner(prog, seed=self.rng.randint(0, 1 << 16))
+        self.planner.st.need_reset = True   # план начинается со старта уровня
+        return True
+
+    def _evidence(self, trans: list[Transition]) -> list[tuple[Transition, str]]:
+        """Контрпримеры: доска менялась, а состояние нет; предсказание не совпало; взятия уровня."""
+        out = []
+        for t in trans:
+            note = ""
+            try:
+                sb = self.program.state_of(t.before.split("\n")); sa = self.program.state_of(t.after.split("\n"))
+                if t.before != t.after and sb == sa:
+                    note = "  STATE_UNCHANGED"
+                else:
+                    p = self.program.predict(sb, t.action)
+                    if p is not None and p != sa:
+                        note = "  PREDICT_WRONG (predicted %r, actual %r)" % (p, sa)
+            except Exception:
+                note = "  STATE_OF_ERROR"
+            if t.level_up or note:
+                out.append((t, note))
+        if len(out) < 8:
+            out += [(t, "") for t in trans[-(8 - len(out)):]]
+        return out[-24:]
+
+    def summary(self) -> dict:
+        d = dict(self.stats)
+        d["phase"] = self.phase; d["transitions"] = len(self.transitions); d["level"] = self.level
+        if self.planner is not None:
+            d["planner"] = self.planner.summary()
+        return d

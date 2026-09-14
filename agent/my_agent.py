@@ -28,6 +28,8 @@ try:
     from agent.harness.explorer import HeuristicExplorer
     from agent.harness.goexplore import GoExplore
     from agent.harness.wmplan import WMPlanner, load_recorded_program
+    from agent.harness.wmloop import WMLoop
+    from agent.harness.llm import MockLLM
     from agent.harness.llm import default_backend
     from agent.harness.llm_policy import LLMPolicy
     from agent.harness.sandbox import Sandbox
@@ -40,6 +42,8 @@ except ImportError:  # Kaggle notebook: harness modules are inlined beside us
     from harness.explorer import HeuristicExplorer  # type: ignore
     from harness.goexplore import GoExplore  # type: ignore
     from harness.wmplan import WMPlanner, load_recorded_program  # type: ignore
+    from harness.wmloop import WMLoop  # type: ignore
+    from harness.llm import MockLLM  # type: ignore
     from harness.journal import REFLECTION_PROMPT, CrossGameJournal  # type: ignore
     from harness.llm import default_backend  # type: ignore
     from harness.llm_policy import LLMPolicy  # type: ignore
@@ -121,6 +125,26 @@ class MyAgent(Agent):
             if prog is None:
                 raise RuntimeError(f"{self.game_id}: нет записанной программы модели мира")
             self.explorer = WMPlanner(prog, seed=hash(self.game_id) & 0xFFFF)
+        elif BRAIN == "wmloop":
+            # замкнутый цикл: модель пишет/чинит программу, алгоритм ходит. MY_AGENT_WM_MOCK=1 -- вместо модели
+            # записанная программа игры (проверка механики цикла без модели)
+            if os.getenv("MY_AGENT_WM_MOCK"):
+                prog = load_recorded_program(self.game_id[:4], ["docs/wm_offline_flash_s1.json", "docs/wm_offline_flash_s1_retry.json"],
+                                             "runs/flash_v1_phaseA/artifacts/GAME-*_p0_events.jsonl")
+                import json as _json
+                best = None
+                for f in ("docs/wm_offline_flash_s1.json", "docs/wm_offline_flash_s1_retry.json"):
+                    for x in _json.load(open(f, encoding="utf-8")):
+                        if x.get("game") == self.game_id[:4] and x.get("code") and x.get("ok") is not None and (best is None or x["ok"] > best["ok"]):
+                            best = x
+                # программа из записи писалась под буквы Duck; в цикле доска -- hex-цифры, поэтому перекодируем буквы в hex
+                code = best["code"]
+                for num, letter in prog.letters.items():
+                    code = code.replace("'%s'" % letter, "'%s'" % "0123456789abcdef"[num]).replace('"%s"' % letter, '"%s"' % "0123456789abcdef"[num])
+                backend = MockLLM(["```python\n" + code + "\n```"] * 8)
+            else:
+                backend = default_backend()
+            self.explorer = WMLoop(backend, seed=hash(self.game_id) & 0xFFFF)
         else:
             self.explorer = HeuristicExplorer(seed=hash(self.game_id) & 0xFFFF)
         self.policy: Optional[LLMPolicy] = None
@@ -156,7 +180,7 @@ class MyAgent(Agent):
     def choose_action(
         self, frames: list[FrameData], latest_frame: FrameData
     ) -> GameAction:
-        if BRAIN in ("goexplore", "wmplan"):
+        if BRAIN in ("goexplore", "wmplan", "wmloop"):
             self.explorer.observe(latest_frame)
             if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
                 self.explorer.st.need_reset = False
@@ -191,7 +215,7 @@ class MyAgent(Agent):
     def main(self) -> None:
         if BRAIN != "llm":
             super().main()
-            if BRAIN in ("goexplore", "wmplan"):
+            if BRAIN in ("goexplore", "wmplan", "wmloop"):
                 try:
                     logger.warning(f"{self.game_id}: {BRAIN} {self.explorer.summary()}")
                 except Exception:

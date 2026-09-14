@@ -218,16 +218,37 @@ class WMPlanner:
         st.stats["frontier_empty"] += 1
         return self._emit(self._random_action(frame, simple_actions, has_click))
 
+    def _click_alphabet(self, node: Node, grid) -> list[tuple[tuple[str, dict | None], object]]:
+        """Алфавит кликов из знаний модели: predict пробуется на КАЖДОЙ клетке доски (чистый Python, дёшево),
+        клетки группируются по предсказанному абстрактному состоянию, из группы берётся один представитель.
+        Группа «модель не знает» (None) представлена центрами объектов сегментации."""
+        groups: dict = {}
+        h, w = grid.shape
+        for r in range(h):
+            for c in range(w):
+                pred = self.prog.predict_abstract(node.raw, ("ACTION6", {"x": c, "y": r}))
+                if pred in (None, "ERR"):
+                    continue
+                if pred not in groups:
+                    groups[pred] = ("ACTION6", {"x": c, "y": r})
+        out = [(act, pred) for pred, act in groups.items()]
+        objs = segment(grid).non_background()[: self.MAX_CLICK_TARGETS]
+        for o in objs:
+            act = ("ACTION6", {"x": int(round(o.centroid[1])), "y": int(round(o.centroid[0]))})
+            pred = self.prog.predict_abstract(node.raw, act)
+            if pred in (None, "ERR"):
+                out.append((act, pred))
+        self.st.stats["click_groups"] = max(self.st.stats["click_groups"], len(groups))
+        return out
+
     def _expand(self, node: Node, frame, simple_actions, has_click) -> None:
         st = self.st
         grid = latest_grid(frame)
-        alphabet: list[tuple[str, dict | None]] = [(a, None) for a in simple_actions]
+        cands: list[tuple[tuple[str, dict | None], object]] = [((a, None), self.prog.predict_abstract(node.raw, (a, None))) for a in simple_actions]
         if has_click and grid is not None:
-            objs = segment(grid).non_background()[: self.MAX_CLICK_TARGETS]
-            alphabet += [("ACTION6", {"x": int(round(o.centroid[1])), "y": int(round(o.centroid[0]))}) for o in objs]
+            cands += self._click_alphabet(node, grid)
         depth = len(node.path)
-        for act in alphabet:
-            predicted = self.prog.predict_abstract(node.raw, act)
+        for act, predicted in cands:
             if predicted == node.abstract:
                 st.stats["pruned_noop"] += 1
                 continue   # модель говорит: ничего не изменится
