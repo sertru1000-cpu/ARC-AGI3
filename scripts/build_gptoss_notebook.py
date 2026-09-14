@@ -157,6 +157,128 @@ def _g_build_payload(*a, **kw):
     return payload
 _wta.build_chat_payload = _g_build_payload
 print("gpt-oss: санитайзер истории под harmony установлен", flush=True)
+
+# v4 (14.09 09:00, слово владельца «переписывай для gpt-oss»): три пробы показали, что chat/completions с harmony
+# в vLLM 0.19.1 отдаёт 500 на большинстве запросов Duck (включая первый). Рекомендуемый путь gpt-oss -- Responses
+# API. Адаптер: перехват requests.post в tool_agent -- запрос Duck переводится в /v1/responses, ответ -- обратно
+# в форму chat/completions (choices[0].message с content/reasoning/tool_calls), которую Duck разбирает без правок.
+# gpt-oss текстовая: картинки не шлём (MULTIMODAL_CONTEXT пуст, части image_url отбрасываются).
+import types as _g_types, json as _g_json
+_g_real_requests = _wta.requests
+
+def _g_to_responses(payload):
+    msgs = _g_sanitize_messages(payload.get("messages") or [])
+    instructions = []; items = []
+    for m in msgs:
+        role = m.get("role"); content = m.get("content")
+        if role == "system":
+            instructions.append(content if isinstance(content, str) else " ".join(str(c.get("text", "")) for c in (content or []) if isinstance(c, dict)))
+        elif role == "user":
+            parts = []
+            if isinstance(content, str):
+                parts.append({"type": "input_text", "text": content})
+            else:
+                for c in (content or []):
+                    if isinstance(c, dict) and c.get("type") == "text":
+                        parts.append({"type": "input_text", "text": str(c.get("text", ""))})
+                    # image_url отбрасываем: gpt-oss текстовая
+            if parts:
+                items.append({"type": "message", "role": "user", "content": parts})
+        elif role == "assistant":
+            text = content if isinstance(content, str) else ""
+            if text.strip():
+                items.append({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]})
+            for c in (m.get("tool_calls") or []):
+                fn = (c or {}).get("function") or {}
+                args = fn.get("arguments", "{}")
+                items.append({"type": "function_call", "call_id": str(c.get("id", "")), "name": str(fn.get("name", "")),
+                              "arguments": args if isinstance(args, str) else _g_json.dumps(args)})
+        elif role == "tool":
+            items.append({"type": "function_call_output", "call_id": str(m.get("tool_call_id", "")),
+                          "output": content if isinstance(content, str) else _g_json.dumps(content)})
+    tools = []
+    for t in (payload.get("tools") or []):
+        fn = (t or {}).get("function") or {}
+        tools.append({"type": "function", "name": fn.get("name", ""), "description": fn.get("description", ""),
+                      "parameters": fn.get("parameters") or {"type": "object", "properties": {}}})
+    body = {"model": payload.get("model"), "input": items, "store": False, "parallel_tool_calls": False,
+            "reasoning": {"effort": os.environ.get("GPTOSS_REASONING_EFFORT", "medium")}}
+    if instructions:
+        body["instructions"] = "\n\n".join(instructions)
+    if tools:
+        body["tools"] = tools; body["tool_choice"] = "auto"
+    for k_src, k_dst in (("max_tokens", "max_output_tokens"), ("temperature", "temperature"), ("top_p", "top_p")):
+        if payload.get(k_src) is not None:
+            body[k_dst] = payload[k_src]
+    return body
+
+def _g_from_responses(resp):
+    text = []; reasoning = []; calls = []
+    for it in (resp.get("output") or []):
+        t = it.get("type")
+        if t == "message":
+            for c in (it.get("content") or []):
+                if isinstance(c, dict) and c.get("type") in ("output_text", "text"):
+                    text.append(str(c.get("text", "")))
+        elif t == "reasoning":
+            for c in (it.get("summary") or []) + (it.get("content") or []):
+                if isinstance(c, dict) and c.get("text"):
+                    reasoning.append(str(c["text"]))
+        elif t == "function_call":
+            calls.append({"id": str(it.get("call_id") or it.get("id") or ""), "type": "function",
+                          "function": {"name": str(it.get("name", "")), "arguments": it.get("arguments") if isinstance(it.get("arguments"), str) else _g_json.dumps(it.get("arguments") or {})}})
+    message = {"role": "assistant", "content": "".join(text)}
+    if reasoning:
+        message["reasoning"] = "\n".join(reasoning)
+    if calls:
+        message["tool_calls"] = calls
+    status = resp.get("status", "completed")
+    finish = "tool_calls" if calls else ("length" if status == "incomplete" else "stop")
+    u = resp.get("usage") or {}
+    return {"choices": [{"index": 0, "message": message, "finish_reason": finish}],
+            "usage": {"prompt_tokens": u.get("input_tokens", 0), "completion_tokens": u.get("output_tokens", 0),
+                      "total_tokens": u.get("total_tokens", 0)}, "model": resp.get("model"), "id": resp.get("id")}
+
+class _GResp:
+    def __init__(self, status_code, data, text):
+        self.status_code = status_code; self._data = data; self.text = text; self.headers = {}
+    def json(self):
+        return self._data
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise _g_real_requests.HTTPError("%%d Server Error" %% self.status_code, response=self)
+
+_g_stats = {"requests": 0, "ok": 0, "errors": 0, "tool_calls": 0}
+def _g_post(url, headers=None, json=None, timeout=None, **kw):
+    if not str(url).endswith("/chat/completions") or not isinstance(json, dict) or "messages" not in json:
+        return _g_real_requests.post(url, headers=headers, json=json, timeout=timeout, **kw)
+    _g_stats["requests"] += 1
+    body = _g_to_responses(json)
+    r = _g_real_requests.post(str(url)[: -len("/chat/completions")] + "/responses", headers=headers, json=body, timeout=timeout, **kw)
+    if r.status_code >= 400:
+        _g_stats["errors"] += 1
+        if _g_stats["errors"] <= 5:
+            print("gpt-oss responses: HTTP %%d %%s" %% (r.status_code, r.text[:300]), flush=True)
+        return _GResp(r.status_code, {}, r.text)
+    try:
+        data = _g_from_responses(r.json())
+    except Exception as _e:
+        _g_stats["errors"] += 1
+        return _GResp(502, {}, "responses translate failed: %%r" %% (_e,))
+    _g_stats["ok"] += 1; _g_stats["tool_calls"] += len(data["choices"][0]["message"].get("tool_calls") or [])
+    if _g_stats["requests"] %% 50 == 0:
+        print("gpt-oss responses stats:", _g_stats, flush=True)
+    return _GResp(200, data, _g_json.dumps(data))
+
+class _GRequests:
+    def __getattr__(self, name):
+        return getattr(_g_real_requests, name)
+    post = staticmethod(_g_post)
+_wta.requests = _GRequests()
+os.environ["MULTIMODAL_CONTEXT"] = ""   # gpt-oss текстовая: без картинки
+_g_persist = _g_json.loads(SETUP_ENV_PATH.read_text()); _g_persist["MULTIMODAL_CONTEXT"] = ""
+SETUP_ENV_PATH.write_text(_g_json.dumps(_g_persist, indent=2, sort_keys=True) + "\n")
+print("gpt-oss: адаптер Responses API установлен (chat/completions -> /v1/responses), картинки отключены", flush=True)
 '''
 
 
