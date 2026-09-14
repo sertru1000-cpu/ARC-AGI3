@@ -354,7 +354,7 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
-          <div class="v-label"><span class="v-num">Duck на gpt-oss-120b</span><span class="v-date">собрано 13.09 10:15 &middot; пуш v1 10:12 как дымовая проба 30 мин</span></div>
+          <div class="v-label"><span class="v-num">Duck на gpt-oss-120b</span><span class="v-date">собрано 13.09 10:15 &middot; пробы v1&ndash;v3 (harmony: 500) &middot; v4 Responses API 14.09 10:50 упал по диску (модель играла: 1371 ходов, 1 уровень) &middot; v5 14.09 13:50: форма сообщений ассистента, обрезка ошибок, лог INFO</span></div>
           <span class="badge regress">3 пробы: сервер поднялся, harmony-парсер vLLM даёт 500 на 148/216 запросов &mdash; ветка закрыта</span>
         </div>
         <p class="summary"><strong>Стоковый Duck, другая модель.</strong> gpt-oss-120b (MXFP4, ~63 ГБ, 5B активных) &mdash; единственная открытая модель, которая влезает в 96 ГБ и не мерилась на этой обвязке. Сервер &mdash; по официальному шаблону ARC-AGI-3: GPT-OSS-120B (vLLM 0.19.1 из колёс philipvonderlind/vllm-deps, tool-call-parser openai, kv fp8, enforce-eager), на том же адресе 127.0.0.1:1234.</p>
@@ -364,6 +364,7 @@
           <li>повод: вчера max и 2.4T на Duck через API брали по 1 уровню ka59 &mdash; ожидание низкое, но это единственный ход «сменить модель» без своего сервера</li>
         </ul>
         <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска</strong> против базы 10.25: польза &mdash; победы&minus;поражения &ge; +8 и медиана &ge; +8; вред &mdash; &le; &minus;6. Механизм: сервер поднялся (models отдаёт gpt-oss-120b); доля вызовов с ходом, вызовов на игру, генерация &mdash; записать, порогов нет (другая модель). Риск: колёса vLLM 0.19.1 и tool-calling gpt-oss в Duck не проверялись до этого прогона.</p>
+        <p class="score-note"><strong>14.09 13:50.</strong> Проба с адаптером Responses API: ноутбук упал &mdash; «No space left on device», выход ноутбука 6.4 ГБ: на запросах с текстом ассистента vLLM отвечал 400 «178 validation errors» и в каждом теле повторял эхо всей истории 178 раз, Duck печатал тело целиком. До падения модель играла: 1371 ходов на 25 игр, 1 уровень (lp85), балл 0.11 против базы-30 3.32. v5: ассистент &rarr; EasyInputMessage (role + строка), текст ошибок &le; 2000 символов, лог сервера INFO. Ждёт слова на перепуш.</p>
       </div>
     </div>
 

@@ -73,7 +73,7 @@ print("gpt-oss: vllm", _g_vllm.__version__, flush=True)
 _g_env = os.environ.copy()
 _g_env["OPENAI_API_KEY"] = "EMPTY"
 _g_env["LD_LIBRARY_PATH"] = os.pathsep.join([p for p in ("/usr/local/nvidia/lib64", "/usr/local/cuda/lib64", _g_env.get("LD_LIBRARY_PATH", "")) if p])
-_g_env["VLLM_LOGGING_LEVEL"] = "DEBUG"
+_g_env["VLLM_LOGGING_LEVEL"] = "INFO"   # v5: DEBUG-лог сервера тоже ест диск /kaggle/working
 _g_env.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 _tk = _g_find_tiktoken_dir()
 if _tk is not None:
@@ -187,7 +187,9 @@ def _g_to_responses(payload):
         elif role == "assistant":
             text = content if isinstance(content, str) else ""
             if text.strip():
-                items.append({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]})
+                # v5 (14.09): форма ResponseOutputMessage требует id/status -> 400 «178 validation errors»;
+                # EasyInputMessage (role + строка) vLLM 0.19.1 принимает без них.
+                items.append({"role": "assistant", "content": text})
             for c in (m.get("tool_calls") or []):
                 fn = (c or {}).get("function") or {}
                 args = fn.get("arguments", "{}")
@@ -259,7 +261,9 @@ def _g_post(url, headers=None, json=None, timeout=None, **kw):
         _g_stats["errors"] += 1
         if _g_stats["errors"] <= 5:
             print("gpt-oss responses: HTTP %%d %%s" %% (r.status_code, r.text[:300]), flush=True)
-        return _GResp(r.status_code, {}, r.text)
+        # v5: Duck вставляет response.text целиком в warning -> в вывод ноутбука; тело 400 у vLLM несёт эхо
+        # всей истории на каждую из ~180 ошибок валидации (десятки МБ), v1 так набрала 6.4 ГБ и упала «No space left».
+        return _GResp(r.status_code, {}, r.text[:2000])
     try:
         data = _g_from_responses(r.json())
     except Exception as _e:

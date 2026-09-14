@@ -44,5 +44,18 @@ d = resp.json(); m = d["choices"][0]["message"]
 check(resp.status_code == 200 and m["content"] == "Plan: probe" and m["reasoning"] == "думаю" and m["tool_calls"][0]["id"] == "call_9" and m["tool_calls"][0]["function"]["arguments"] == "{\"code\": \"print(1)\"}", "ответ переведён в chat-форму: content, reasoning, tool_calls")
 check(d["choices"][0]["finish_reason"] == "tool_calls" and d["usage"]["prompt_tokens"] == 100, "finish_reason и usage")
 check(ns["_g_stats"]["ok"] == 1 and ns["_g_stats"]["tool_calls"] == 1, "статистика адаптера")
-r2 = ns["_g_post"]("http://127.0.0.1:1234/v1/models", headers={}, json=None, timeout=5) if False else None
+# v5: сообщение ассистента с текстом -> EasyInputMessage (role + строка, без type/id/status)
+msgs2 = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "Plan text", "tool_calls": [{"id": "zz", "type": "function", "function": {"name": "python", "arguments": "{}"}}]}, {"role": "user", "content": "next"}]
+ns["_g_post"]("http://127.0.0.1:1234/v1/chat/completions", headers={}, json={"model": "m", "messages": msgs2}, timeout=10)
+it = captured["body"]["input"][1]
+check(it == {"role": "assistant", "content": "Plan text"}, "ассистент с текстом -> {role, content:str} без type/id/status: %r" % (it,))
+check(all("type" not in x or x["type"] != "message" or x["role"] == "user" for x in captured["body"]["input"]), "ни одного ассистентского item с type=message")
+# v5: тело ошибки обрезается до 2000 символов (Duck печатает response.text в warning целиком)
+class FakeErr(FakeReal):
+    @staticmethod
+    def post(url, headers=None, json=None, timeout=None, **kw):
+        return types.SimpleNamespace(status_code=400, json=lambda: {}, text="E" * 100000)
+fake_wta.requests = FakeErr; ns["_g_real_requests"] = FakeErr
+r3 = ns["_g_post"]("http://127.0.0.1:1234/v1/chat/completions", headers={}, json={"model": "m", "messages": msgs2}, timeout=10)
+check(r3.status_code == 400 and len(r3.text) == 2000, "текст ошибки обрезан до 2000 символов (было %d)" % len(r3.text))
 print("\nИТОГ: %d сбоев" % len(fails) if fails else "\nВСЕ ПРОВЕРКИ ПРОШЛИ"); sys.exit(1 if fails else 0)
