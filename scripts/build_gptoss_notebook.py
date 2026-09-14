@@ -286,6 +286,28 @@ def main() -> None:
     src = json.load(open("kernels/notebooks_stockflash/submission.ipynb", encoding="utf-8"))
     nb = json.loads(json.dumps(src))
 
+    # --- ячейка 5: колёса соревнования ищем по всему /kaggle/input (14.09: Kaggle монтирует их в
+    # /kaggle/input/arc-prize-2026-arc-agi-3/, а стоковый путь с /competitions/ пуст -- explore v5 это показал)
+    c5 = "".join(nb["cells"][5]["source"])
+    guard = ("import time as _t5\n"
+             "def _c5_find():\n"
+             "    fixed = Path('/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels')\n"
+             "    if fixed.exists():\n        return fixed\n"
+             "    for root in (Path('/kaggle/input'),):\n"
+             "        for d in root.rglob('arc_agi_3_wheels'):\n"
+             "            if d.is_dir():\n                return d\n"
+             "    return None\n"
+             "COMP_WHEELS_DIR = None\n"
+             "for _i5 in range(120):\n"
+             "    COMP_WHEELS_DIR = _c5_find()\n"
+             "    if COMP_WHEELS_DIR is not None:\n        break\n"
+             "    print('taaf.kaggle: жду монтирования входов соревнования (%d)' % _i5, flush=True); _t5.sleep(5)\n"
+             "print('taaf.kaggle: колёса соревнования:', COMP_WHEELS_DIR, flush=True)\n"
+             "if COMP_WHEELS_DIR is None:\n    raise RuntimeError('входы соревнования не примонтированы')\n")
+    lit = '"/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels",'
+    assert lit in c5
+    nb["cells"][5]["source"] = (guard + c5.replace(lit, "str(COMP_WHEELS_DIR),")).splitlines(keepends=True)
+
     # --- ячейка 7: входы
     c7 = "".join(nb["cells"][7]["source"])
     old = 'DATASET_SOURCES = ["keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1", "keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1"]\nKERNEL_SOURCES = []'
@@ -311,6 +333,9 @@ for command in json.loads((BUNDLE_DIR / "setup_commands.json").read_text()):
 
     # --- ячейка 15: сторож отключён, teardown -- наш процесс
     c15 = "".join(nb["cells"][15]["source"])
+    lit15 = 'str(Path("/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels").parent / "environment_files")'
+    assert lit15 in c15
+    c15 = c15.replace(lit15, 'str(Path(COMP_WHEELS_DIR).parent / "environment_files")')
     a = c15.index("import vllm_server_watchdog as vllm_watchdog")
     b = c15.index("# Play the benchmark; watchdog stop and teardown run even if it raises.")
     c15 = c15[:a] + ("class vllm_watchdog:  # сторож Flash-Next отключён: сервер gpt-oss управляется ноутбуком\n"
@@ -343,7 +368,7 @@ for command in json.loads((BUNDLE_DIR / "setup_commands.json").read_text()):
         compile("".join(nb["cells"][i]["source"]), "cell%d" % i, "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
     diff = [i for i in range(18) if "".join(nb["cells"][i]["source"]) != "".join(src["cells"][i]["source"])]
     size = os.path.getsize(os.path.join(out, "submission.ipynb"))
-    print("ok   изменены только ячейки 7, 9, 15:", diff == [7, 9, 15])
+    print("ok   изменены только ячейки 5, 7, 9, 15:", diff == [5, 7, 9, 15])
     print("ok   ячейки компилируются; входы: бандл %s, колёса %s, модель %s" % (BUNDLE, WHEELS_KERNEL, MODEL_SOURCE))
     print("ok   setup_commands бандла не исполняются:", "setup_commands.json\").read_text()" not in "".join(nb["cells"][9]["source"]))
     print("ok   сторож отключён, teardown свой:", "vllm_watchdog.start_background" not in c15 and "pkill -f vllm.entrypoints" in c15)
