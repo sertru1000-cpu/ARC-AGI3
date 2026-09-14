@@ -195,7 +195,11 @@ class WMLoop:
             wrong = st.get("pred_wrong", 0); okp = st.get("pred_ok", 0)
             executed = st.get("executed", 0)
             budget_hit = executed >= self.PLAN_TESTS * (self.repairs + 1)
-            if self.stall >= self.PLAN_STALL or (wrong >= 8 and wrong > 2 * okp) or budget_hit:
+            # самый быстрый сигнал «состояние неполное»: доска изменилась, а state_of -- нет (>= 2 раз) -> починка сразу
+            missing = st.get("state_unchanged", 0) >= 2 and st.get("state_unchanged", 0) > getattr(self, "_su_seen", 0)
+            if missing:
+                self._su_seen = st.get("state_unchanged", 0)
+            if self.stall >= self.PLAN_STALL or (wrong >= 8 and wrong > 2 * okp) or budget_hit or missing:
                 if self.repairs < self.REPAIRS:
                     self.repairs += 1
                     if self._synthesize(repair=True):
