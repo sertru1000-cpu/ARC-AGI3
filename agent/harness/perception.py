@@ -280,3 +280,23 @@ def zones_summary(zones: list[Zone]) -> str:
         "are usually control panels, references/legends, or progress bars — "
         "figure out which is which and how actions in one affect another.")
     return "\n".join(lines)
+
+
+def spread_click_targets(grid: np.ndarray, limit: int = 40) -> list[tuple[int, int]]:
+    """(x, y) центров объектов, разнообразно: сначала все МАЛЫЕ объекты (переключатели, фишки), затем по одному
+    представителю каждого (цвет, размер)-класса, остальные -- равномерно по списку. Фон исключён."""
+    seg = segment(grid)
+    objs = sorted(seg.non_background(), key=lambda o: (o.cells, o.color, o.centroid))
+    picked: list = []; seen_class: set = set()
+    for o in objs:
+        if o.cells <= 12 and len(picked) < limit:
+            picked.append(o)
+    for o in objs:
+        key = (o.color, min(o.cells, 200) // 20)
+        if key not in seen_class and o not in picked and len(picked) < limit:
+            seen_class.add(key); picked.append(o)
+    rest = [o for o in objs if o not in picked]
+    if rest and len(picked) < limit:
+        step = max(1, len(rest) // (limit - len(picked)))
+        picked += rest[::step][: limit - len(picked)]
+    return [(int(round(o.centroid[1])), int(round(o.centroid[0]))) for o in picked[:limit]]

@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .perception import frame_hash, latest_grid, segment
+from .perception import frame_hash, latest_grid, segment, spread_click_targets
 
 MODEL_ACTION = {"ACTION1": "UP", "ACTION2": "DOWN", "ACTION3": "LEFT", "ACTION4": "RIGHT", "ACTION5": "SPACE"}
 
@@ -141,7 +141,7 @@ class PlanState:
 
 
 class WMPlanner:
-    MAX_CLICK_TARGETS = 24
+    MAX_CLICK_TARGETS = 40
     WARMUP = 10   # случайных ходов на определение «часов» до начала планирования; после — часы заморожены
 
     def __init__(self, program: Program, seed: int = 0):
@@ -262,9 +262,8 @@ class WMPlanner:
                 if pred not in groups:
                     groups[pred] = ("ACTION6", {"x": c, "y": r})
         out = [(act, pred) for pred, act in groups.items()]
-        objs = segment(grid).non_background()[: self.MAX_CLICK_TARGETS]
-        for o in objs:
-            act = ("ACTION6", {"x": int(round(o.centroid[1])), "y": int(round(o.centroid[0]))})
+        for x, y in spread_click_targets(grid, self.MAX_CLICK_TARGETS):
+            act = ("ACTION6", {"x": x, "y": y})
             pred = self.prog.predict_abstract(node.raw, act)
             if pred in (None, "ERR"):
                 out.append((act, pred))
@@ -303,8 +302,7 @@ class WMPlanner:
         grid = latest_grid(frame)
         opts = [(a, None) for a in simple_actions]
         if has_click and grid is not None:
-            objs = segment(grid).non_background()[: self.MAX_CLICK_TARGETS]
-            opts += [("ACTION6", {"x": int(round(o.centroid[1])), "y": int(round(o.centroid[0]))}) for o in objs]
+            opts += [("ACTION6", {"x": x, "y": y}) for x, y in spread_click_targets(grid, self.MAX_CLICK_TARGETS)]
         return self.rng.choice(opts) if opts else ("RESET", None)
 
     def _emit(self, act):

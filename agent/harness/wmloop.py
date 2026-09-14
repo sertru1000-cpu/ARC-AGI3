@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .goexplore import GoExplore
-from .perception import latest_grid, segment
+from .perception import latest_grid, segment, spread_click_targets
 from .wmplan import Program, WMPlanner, action_display
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ class Transition:
 
 
 class WMLoop:
-    PROBE_CLICKS = 16
+    PROBE_CLICKS = 40
     PROBE_RANDOM = 6
     REPAIRS = 3
     PLAN_STALL = 40        # ходов подряд с пустым фронтиром -> починка
@@ -221,8 +221,7 @@ class WMLoop:
     def _probe_actions(self, grid, simple_actions, has_click) -> list:
         plan: list = [(a, None) for a in simple_actions for _ in range(2)]
         if has_click and grid is not None:
-            objs = segment(grid).non_background()[: self.PROBE_CLICKS]
-            plan += [("ACTION6", {"x": int(round(o.centroid[1])), "y": int(round(o.centroid[0]))}) for o in objs]
+            plan += [("ACTION6", {"x": x, "y": y}) for x, y in spread_click_targets(grid, self.PROBE_CLICKS)]
             plan += [("ACTION6", {"x": self.rng.randint(0, 63), "y": self.rng.randint(0, 63)}) for _ in range(self.PROBE_RANDOM)]
         return plan
 
