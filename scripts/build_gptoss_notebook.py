@@ -31,7 +31,7 @@ MODEL_SOURCE = "danielhanchen/gpt-oss-120b/Transformers/default/1"
 MODEL_PATH = "/kaggle/input/models/danielhanchen/gpt-oss-120b/transformers/default/1"
 SERVED_NAME = "gpt-oss-120b"
 PORT = 1234
-PROBE_CAP_S = 1800.0   # дымовая проба 30 мин вне боя (слово владельца 13.09)
+PROBE_CAP_S = 1800.0   # дымовая проба 30 мин вне боя (слово владельца 13.09; v3 -- 14.09 «ещё одна проба -- да»)
 
 SETUP_CELL = r'''
 # =====================================================================
@@ -119,6 +119,44 @@ _g_persist = json.loads(SETUP_ENV_PATH.read_text())
 _g_persist.update(_g_analyzer_env)
 SETUP_ENV_PATH.write_text(json.dumps(_g_persist, indent=2, sort_keys=True) + "\n")
 print("gpt-oss: окружение анализатора выставлено (%%d ключей)" %% len(_g_analyzer_env), flush=True)
+
+# v3 (14.09): harmony-кодировщик gpt-oss падал на истории Duck: модель отдаёт по 10-20 вызовов инструмента
+# за ответ, Duck исполняет первый и хранит все, а tool-результат один -- «Unexpected token 200012 while
+# expecting start token 200006». Санитайзер: в assistant-сообщениях оставляем только вызовы с результатами,
+# убираем reasoning, content -> строка; запрещаем параллельные вызовы. Импорт tool_agent -- после env.
+import inference.agent.tool_agent as _wta
+_g_orig_build_payload = _wta.build_chat_payload
+def _g_sanitize_messages(messages):
+    msgs = [dict(m) for m in (messages or []) if isinstance(m, dict)]
+    answered = {str(m.get("tool_call_id", "")) for m in msgs if m.get("role") == "tool"}
+    out = []
+    for m in msgs:
+        if m.get("role") == "assistant":
+            m.pop("reasoning", None); m.pop("reasoning_content", None)
+            if m.get("content") is None:
+                m["content"] = ""
+            calls = m.get("tool_calls") or []
+            kept = [c for c in calls if str((c or {}).get("id", "")) in answered]
+            if kept:
+                m["tool_calls"] = kept
+            else:
+                m.pop("tool_calls", None)
+                if not str(m.get("content") or "").strip():
+                    m["content"] = "(tool call omitted)"
+        elif m.get("role") == "tool":
+            if m.get("content") is None:
+                m["content"] = ""
+        out.append(m)
+    return out
+def _g_build_payload(*a, **kw):
+    if "messages" in kw:
+        kw["messages"] = _g_sanitize_messages(kw["messages"])
+    payload = _g_orig_build_payload(*a, **kw)
+    if payload.get("tools"):
+        payload["parallel_tool_calls"] = False
+    return payload
+_wta.build_chat_payload = _g_build_payload
+print("gpt-oss: санитайзер истории под harmony установлен", flush=True)
 '''
 
 
