@@ -160,9 +160,11 @@ class WMLoop:
             self.transitions.append(Transition(board_text(self.prev_grid), action_display(self.last_action), board_text(grid), self.level, level > self.level))
         if level != self.level:
             self.level = level
-            self.repairs = 0; self.stall = 0
-            if self.phase == "fallback":
-                self.phase = "plan" if self.planner is not None else "probe"
+            self.repairs = 0; self.stall = 0; self._su_seen = 0; self._fe_seen = 0
+            # новый уровень: раскладка другая -- новая проба и синтез с нуля (прошлая программа идёт подсказкой)
+            self.prev_program_source = getattr(self, "program_source", None)
+            self.phase = "probe"; self.probe_plan = []
+            self.stats["phase_log"].append((level, "level_up", self.repairs, len(self.transitions)))
         self.prev_grid = grid
         if self.planner is not None and self.phase == "plan":
             self.planner.observe(frame)
@@ -239,7 +241,8 @@ class WMLoop:
 
     # --------------------------------------------------------------- synthesis
     def _synthesize(self, repair: bool) -> bool:
-        trans = self.transitions[-60:]
+        cur = [t for t in self.transitions if t.level == self.level]
+        trans = (cur if len(cur) >= 5 else self.transitions)[-60:]   # переходы ТЕКУЩЕГО уровня: программа для новой раскладки
         if not trans:
             return False
         if not repair or self.program is None:
@@ -248,6 +251,9 @@ class WMLoop:
                 parts.append(fmt_transition(i + 1, {"before": t.before, "action": t.action, "after": t.after, "level": t.level, "level_up": t.level_up}, show_before=(t.before != prev)))
                 prev = t.after
             prompt = PROMPT.format(n=len(trans), examples="\n".join(parts))
+            if getattr(self, "prev_program_source", None):
+                prompt += ("\n\nFor reference, this program worked on the PREVIOUS level of the same game (layout may differ now; "
+                           "generalise rather than copy coordinates):\n```python\n" + self.prev_program_source[-6000:] + "\n```")
         else:
             ev = self._evidence(trans)
             parts = []; prev = None
