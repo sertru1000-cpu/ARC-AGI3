@@ -335,6 +335,24 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">макроходы (Duck, flash)</span><span class="v-date">собрано 14.09 15:40 &middot; проба 30 мин пуш 15:50</span></div>
+          <span class="badge phase-a">проба 30 мин против базы-30 3.32</span>
+        </div>
+        <p class="summary"><strong>План 13.09, пункт 5, последний неизмеренный.</strong> Три помощника в песочнице <code>python</code> поверх <code>action()</code>: каждый делает много настоящих ходов движка за ОДИН вызов модели и возвращает сводку. Ответ модели не удлиняется; описание помощников &mdash; во входе каждого хода.</p>
+        <ul class="changes">
+          <li><code>move_until_stuck(move, max_moves=40)</code> &mdash; повторяет ход, пока доска меняется: дойти до стены/края; стоп на первом ходе без изменения, при взятии уровня, по потолку.</li>
+          <li><code>click_objects(color, min_pixels, max_pixels, ids, stop_on_change, max_clicks=16)</code> &mdash; клик по центру каждого подходящего объекта сегментации (фон пропущен), отчёт «какие клики меняли доску».</li>
+          <li><code>sweep_moves()</code> &mdash; каждый ход из valid_actions (кроме MOUSE) по разу, отчёт что изменилось.</li>
+          <li>сборка <code>scripts/build_macro_notebook.py</code>; помощники приписываются спереди кода модели в <code>_run_python_tool</code>, маркеры [[MACRO]] из stdout песочницы читает обвязка и вырезает; 17 проверок на НАСТОЯЩЕЙ песочнице Duck с имитацией движка (<code>scripts/test_macro_patch.py</code>); только оффлайн.</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска</strong> против базы 10.25 (полный прогон): польза &mdash; дельта &ge; +4 и парный критерий знаков p &lt; 0.05; вред &mdash; &le; &minus;4; иначе шум. Механизм: макрос вызван в &ge; 15 играх, иначе прогон измерил отсутствие слоя; побочные &mdash; вызовов на игру, ходов на вызов, ходов внутри макросов, уровней внутри макроса. Проба 30 мин: пользуется ли модель макросами и нет ли сбоев; балл против базы-30 3.32 только качественно.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">три слоя без выходных токенов: lvfact / reset / explore</span><span class="v-date">собраны 13.09 10:45 &middot; измерены 13&ndash;14.09</span></div>
           <span class="badge phase-a">reset 6.78 / explore 9.41 / lvfact 6.88 против 10.25 &mdash; ни один не помог</span>
         </div>
