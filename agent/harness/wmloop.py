@@ -277,7 +277,11 @@ class WMLoop:
         hints = [
             "\n\nHINT for this attempt: represent the state as OBJECTS (connected same-colour components) with their positions/colours; movable objects and their targets first.",
             "\n\nHINT for this attempt: represent the state by the CELLS THAT CHANGED in the examples (list their coordinates and colours as state components); build predict from the observed per-action changes.",
+            "\n\nHINT for this attempt: first write down, as a comment, the rule of the game in one sentence (what the player controls, what reacts to clicks, what a level probably requires); then make state_of contain exactly the things named in that sentence.",
+            "\n\nHINT for this attempt: keep state_of SMALL and DISCRETE (a tuple of a few integers/characters), so that the number of distinct states is small; put every interactive element you can see on the board into it, even ones never touched in the examples.",
         ]
+        max_k = int(_os.getenv("MY_AGENT_WM_MAX_VARIANTS", "50"))
+        good_enough = 0.6
         def _one(i):
             m = [{"role": "user", "content": prompt + hints[i % len(hints)]}]
             for attempt in range(2):   # одна повторная попытка на сетевой сбой / лимит запросов
@@ -286,18 +290,28 @@ class WMLoop:
                 except Exception as exc:
                     logger.warning("wmloop: variant %d attempt %d failed: %r", i, attempt, exc); _time.sleep(3 + 5 * attempt)
             return ""
-        with _cf.ThreadPoolExecutor(max_workers=k) as ex:
-            replies = list(ex.map(_one, range(k)))
-        scored = []
-        for i, reply in enumerate(replies):
-            code = extract_code(reply)
-            self._trace("call%d_%s_v%d" % (self.calls, "repair" if repair else "synth", i), prompt if i == 0 else "", reply, code)
-            try:
-                prog = Program(code, LETTERS)
-                prog.raw_state(self.prev_grid if self.prev_grid is not None else np.zeros((64, 64), dtype=np.int16))
-            except Exception as exc:
-                scored.append((None, i, ("rejected", str(exc)[:80]), code)); continue
-            scored.append((self._score_program(prog, trans), i, None, code, prog))
+        scored = []; start = 0
+        # адаптивно: пачками по k, пока лучший не наберёт good_enough или не кончится max_k; при полном нуле -- две пачки
+        while start < max_k:
+            idx = list(range(start, min(start + k, max_k)))
+            with _cf.ThreadPoolExecutor(max_workers=k) as ex:
+                replies = list(ex.map(_one, idx))
+            for i, reply in zip(idx, replies):
+                code = extract_code(reply)
+                self._trace("call%d_%s_v%d" % (self.calls, "repair" if repair else "synth", i), prompt if i == 0 else "", reply, code)
+                try:
+                    prog = Program(code, LETTERS)
+                    prog.raw_state(self.prev_grid if self.prev_grid is not None else np.zeros((64, 64), dtype=np.int16))
+                except Exception as exc:
+                    scored.append((None, i, ("rejected", str(exc)[:80]), code)); continue
+                scored.append((self._score_program(prog, trans), i, None, code, prog))
+            start += k
+            best_so_far = max((x[0][0] for x in scored if x[0] is not None), default=-1.0)
+            if best_so_far >= good_enough:
+                break
+            if start >= 2 * k and best_so_far <= 0.05:
+                break   # два нуля подряд -- дело не в удаче выборки
+        self.stats["variants_used"] = self.stats.get("variants_used", 0) + start
         good = [x for x in scored if x[0] is not None]
         self.stats.setdefault("variants", []).append([(x[1], x[0] if x[0] is not None else x[2]) for x in scored])
         if not good:
