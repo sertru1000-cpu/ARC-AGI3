@@ -119,7 +119,7 @@ class WMLoop:
     PLAN_STALL = 40        # ходов подряд с пустым фронтиром -> починка
     PLAN_TESTS = 80        # проверенных кандидатов без уровня -> починка (программа верна, но цели нет)
     MAX_TOKENS = 14000
-    VARIANTS = 5           # параллельных вариантов программы на вызов (идея владельца 14.09); отбор на собранных переходах
+    VARIANTS = 10          # параллельных вариантов программы на вызов (идея владельца 14.09: «можно и 10»); MY_AGENT_WM_VARIANTS
     TRACE_DIR = None       # каталог для записи промптов/ответов/программ (MY_AGENT_TRACE_DIR)
 
     def __init__(self, backend, seed: int = 0, temperature: float = 0.6):
@@ -259,13 +259,17 @@ class WMLoop:
         # K параллельных вариантов, отбор на собранных переходах (без движка)
         import concurrent.futures as _cf
         msgs = [{"role": "user", "content": prompt}]
+        import os as _os, time as _time
+        k = int(_os.getenv("MY_AGENT_WM_VARIANTS", str(self.VARIANTS)))
         def _one(i):
-            try:
-                return self.backend.chat(msgs, max_tokens=self.MAX_TOKENS, temperature=self.temperature)
-            except Exception as exc:
-                logger.warning("wmloop: variant %d failed: %r", i, exc); return ""
-        with _cf.ThreadPoolExecutor(max_workers=self.VARIANTS) as ex:
-            replies = list(ex.map(_one, range(self.VARIANTS)))
+            for attempt in range(2):   # одна повторная попытка на сетевой сбой / лимит запросов
+                try:
+                    return self.backend.chat(msgs, max_tokens=self.MAX_TOKENS, temperature=self.temperature)
+                except Exception as exc:
+                    logger.warning("wmloop: variant %d attempt %d failed: %r", i, attempt, exc); _time.sleep(3 + 5 * attempt)
+            return ""
+        with _cf.ThreadPoolExecutor(max_workers=k) as ex:
+            replies = list(ex.map(_one, range(k)))
         scored = []
         for i, reply in enumerate(replies):
             code = extract_code(reply)
