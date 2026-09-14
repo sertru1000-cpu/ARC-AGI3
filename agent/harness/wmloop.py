@@ -261,10 +261,17 @@ class WMLoop:
         msgs = [{"role": "user", "content": prompt}]
         import os as _os, time as _time
         k = int(_os.getenv("MY_AGENT_WM_VARIANTS", str(self.VARIANTS)))
+        # две формулировки: половина вариантов -- «состояние = объекты и их позиции», половина -- «состояние = ячейки,
+        # которые менялись в примерах»; разные абстракции ценнее десяти пересказов одной
+        hints = [
+            "\n\nHINT for this attempt: represent the state as OBJECTS (connected same-colour components) with their positions/colours; movable objects and their targets first.",
+            "\n\nHINT for this attempt: represent the state by the CELLS THAT CHANGED in the examples (list their coordinates and colours as state components); build predict from the observed per-action changes.",
+        ]
         def _one(i):
+            m = [{"role": "user", "content": prompt + hints[i % len(hints)]}]
             for attempt in range(2):   # одна повторная попытка на сетевой сбой / лимит запросов
                 try:
-                    return self.backend.chat(msgs, max_tokens=self.MAX_TOKENS, temperature=self.temperature)
+                    return self.backend.chat(m, max_tokens=self.MAX_TOKENS, temperature=self.temperature)
                 except Exception as exc:
                     logger.warning("wmloop: variant %d attempt %d failed: %r", i, attempt, exc); _time.sleep(3 + 5 * attempt)
             return ""
