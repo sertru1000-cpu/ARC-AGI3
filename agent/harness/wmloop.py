@@ -125,8 +125,8 @@ class WMLoop:
     REPAIRS = 3
     PLAN_STALL = 40        # ходов подряд с пустым фронтиром -> починка
     PLAN_TESTS = 80        # проверенных кандидатов без уровня -> починка (программа верна, но цели нет)
-    MAX_TOKENS = 14000
-    VARIANTS = 10          # параллельных вариантов программы на вызов (идея владельца 14.09: «можно и 10»); MY_AGENT_WM_VARIANTS
+    MAX_TOKENS = 10000
+    VARIANTS = 3           # параллельных вариантов на пачку (экономия 14.09 23:55); MY_AGENT_WM_VARIANTS; потолок MY_AGENT_WM_MAX_VARIANTS
     TRACE_DIR = None       # каталог для записи промптов/ответов/программ (MY_AGENT_TRACE_DIR)
 
     def __init__(self, backend, seed: int = 0, temperature: float = 0.6):
@@ -242,7 +242,7 @@ class WMLoop:
     # --------------------------------------------------------------- synthesis
     def _synthesize(self, repair: bool) -> bool:
         cur = [t for t in self.transitions if t.level == self.level]
-        trans = (cur if len(cur) >= 5 else self.transitions)[-60:]   # переходы ТЕКУЩЕГО уровня: программа для новой раскладки
+        trans = (cur if len(cur) >= 5 else self.transitions)[-40:]   # переходы ТЕКУЩЕГО уровня: программа для новой раскладки
         if not trans:
             return False
         if not repair or self.program is None:
@@ -255,10 +255,11 @@ class WMLoop:
                 prompt += ("\n\nFor reference, this program worked on the PREVIOUS level of the same game (layout may differ now; "
                            "generalise rather than copy coordinates):\n```python\n" + self.prev_program_source[-6000:] + "\n```")
         else:
-            ev = self._evidence(trans)
+            ev = self._evidence(trans)[-12:]
+            # экономия: полная доска только один раз (первая улика), остальные -- диффами клеток
             parts = []; prev = None
             for i, (t, note) in enumerate(ev):
-                parts.append(fmt_transition(i + 1, {"before": t.before, "action": t.action, "after": t.after, "level": t.level, "level_up": t.level_up}, show_before=(t.before != prev), note=note))
+                parts.append(fmt_transition(i + 1, {"before": t.before, "action": t.action, "after": t.after, "level": t.level, "level_up": t.level_up}, show_before=(i == 0), note=note))
                 prev = t.after
             st = self.planner.st.stats if self.planner else {}
             nst = len(self.planner.st.nodes) if self.planner else 0
@@ -286,7 +287,7 @@ class WMLoop:
             "\n\nHINT for this attempt: first write down, as a comment, the rule of the game in one sentence (what the player controls, what reacts to clicks, what a level probably requires); then make state_of contain exactly the things named in that sentence.",
             "\n\nHINT for this attempt: keep state_of SMALL and DISCRETE (a tuple of a few integers/characters), so that the number of distinct states is small; put every interactive element you can see on the board into it, even ones never touched in the examples.",
         ]
-        max_k = int(_os.getenv("MY_AGENT_WM_MAX_VARIANTS", "50"))
+        max_k = int(_os.getenv("MY_AGENT_WM_MAX_VARIANTS", "12"))
         good_enough = 0.6
         def _one(i):
             m = [{"role": "user", "content": prompt + hints[i % len(hints)]}]
