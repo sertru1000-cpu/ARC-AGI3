@@ -364,14 +364,37 @@ def build(cell: str, out: str, slug: str, title: str, marker_var: str) -> None:
     # 14.09 01:15: три пуша подряд упали в ячейке 5 -- путь с колёсами соревнования ещё не примонтирован
     # (гонка монтирования при тяжёлых входах); ждём его появления до 10 минут.
     c5 = "".join(nb["cells"][5]["source"])
-    guard = ("import time as _t5\n_w5 = Path('/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels')\n"
-             "for _i5 in range(120):\n    if _w5.exists():\n        break\n"
+    # 14.09 06:30: путь соревнования у тяжёлых кернелов не появляется и за 10 минут, хотя пробные кернелы его видят.
+    # Ищем каталог колёс по всему /kaggle/input (любая точка монтирования), ждём до 10 минут, и тот же каталог
+    # используем в ячейке 15 для environment_files.
+    guard = ("import time as _t5\n"
+             "def _c5_find():\n"
+             "    fixed = Path('/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels')\n"
+             "    if fixed.exists():\n        return fixed\n"
+             "    for root in (Path('/kaggle/input'), Path('/kaggle/input/competitions')):\n"
+             "        if root.exists():\n"
+             "            for d in root.rglob('arc_agi_3_wheels'):\n"
+             "                if d.is_dir():\n                    return d\n"
+             "    return None\n"
+             "COMP_WHEELS_DIR = None\n"
+             "for _i5 in range(120):\n"
+             "    COMP_WHEELS_DIR = _c5_find()\n"
+             "    if COMP_WHEELS_DIR is not None:\n        break\n"
              "    print('taaf.kaggle: жду монтирования входов соревнования (%d)' % _i5, flush=True); _t5.sleep(5)\n"
-             "print('taaf.kaggle: колёса соревнования:', _w5.exists(), flush=True)\n")
-    if "_w5" not in c5:
-        nb["cells"][5]["source"] = (guard + c5).splitlines(keepends=True)
+             "print('taaf.kaggle: колёса соревнования:', COMP_WHEELS_DIR, flush=True)\n"
+             "if COMP_WHEELS_DIR is None:\n"
+             "    print('taaf.kaggle: /kaggle/input:', [str(x) for x in Path('/kaggle/input').rglob('*') if x.is_dir()][:80], flush=True)\n"
+             "    raise RuntimeError('входы соревнования не примонтированы')\n")
+    lit = '"/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels",'
+    assert lit in c5, "ячейка 5: не нашёл путь колёс"
+    if "COMP_WHEELS_DIR" not in c5:
+        c5 = guard + c5.replace(lit, "str(COMP_WHEELS_DIR),")
+        nb["cells"][5]["source"] = c5.splitlines(keepends=True)
     c = nb["cells"][15]
     body = "".join(c["source"])
+    lit15 = 'str(Path("/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels").parent / "environment_files")'
+    assert lit15 in body, "ячейка 15: не нашёл путь environment_files"
+    body = body.replace(lit15, 'str(Path(COMP_WHEELS_DIR).parent / "environment_files")')
     anchor = "    seconds=budget - 600.0\n)"
     at = body.find(anchor); run_at = body.find("await bm.run(")
     if at < 0 or run_at < 0:
@@ -388,7 +411,7 @@ def build(cell: str, out: str, slug: str, title: str, marker_var: str) -> None:
     compile(code, "c15", "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
     diff = [i for i in range(18) if "".join(nb["cells"][i]["source"]) != "".join(src["cells"][i]["source"])]
     compile("".join(nb["cells"][5]["source"]), "c5", "exec")
-    print("ok   %s: изменены ячейки 5 (ожидание монтирования) и 15: %s; патч после soft_end и до запуска: %s; слаг %s"
+    print("ok   %s: изменены ячейки 5 (поиск и ожидание колёс соревнования) и 15: %s; патч после soft_end и до запуска: %s; слаг %s"
           % (title, diff == [5, 15], 0 < code.find(anchor) < code.find(marker_var) < code.find("await bm.run("), slug))
 
 
