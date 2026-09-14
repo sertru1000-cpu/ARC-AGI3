@@ -187,6 +187,12 @@ class MyAgent(Agent):
         self, frames: list[FrameData], latest_frame: FrameData
     ) -> GameAction:
         if BRAIN in ("goexplore", "wmplan", "wmloop"):
+            # потолок времени на игру (Kaggle-проба): по истечении -- завершить главный цикл
+            if not hasattr(self, "_brain_t0"):
+                self._brain_t0 = _time_mod.time()
+            if _time_mod.time() - self._brain_t0 > float(os.getenv("MY_AGENT_GAME_SECONDS", "1e9")):
+                self.action_counter = self.MAX_ACTIONS + 1
+                return GameAction.RESET
             self.explorer.observe(latest_frame)
             if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
                 self.explorer.st.need_reset = False
