@@ -119,6 +119,7 @@ class WMLoop:
     PLAN_STALL = 40        # ходов подряд с пустым фронтиром -> починка
     PLAN_TESTS = 80        # проверенных кандидатов без уровня -> починка (программа верна, но цели нет)
     MAX_TOKENS = 14000
+    VARIANTS = 5           # параллельных вариантов программы на вызов (идея владельца 14.09); отбор на собранных переходах
     TRACE_DIR = None       # каталог для записи промптов/ответов/программ (MY_AGENT_TRACE_DIR)
 
     def __init__(self, backend, seed: int = 0, temperature: float = 0.6):
@@ -255,34 +256,70 @@ class WMLoop:
         self.calls += 1; self.stats["calls"] += 1
         if repair:
             self.stats["repairs"] += 1
-        try:
-            reply = self.backend.chat([{"role": "user", "content": prompt}], max_tokens=self.MAX_TOKENS, temperature=self.temperature)
-        except Exception as exc:
-            logger.warning("wmloop: model call failed: %r", exc); self.stats["synth_fail"] += 1
-            return False
-        code = extract_code(reply)
-        self._trace("call%d_%s" % (self.calls, "repair" if repair else "synth"), prompt, reply, code)
-        try:
-            prog = Program(code, LETTERS)
-            prog.raw_state(self.prev_grid if self.prev_grid is not None else np.zeros((64, 64), dtype=np.int16))
-        except Exception as exc:
-            logger.warning("wmloop: program rejected: %r", exc); self.stats["synth_fail"] += 1
-            # одна повторная попытка: короче, без docstring, только код
+        # K параллельных вариантов, отбор на собранных переходах (без движка)
+        import concurrent.futures as _cf
+        msgs = [{"role": "user", "content": prompt}]
+        def _one(i):
             try:
-                reply2 = self.backend.chat([{"role": "user", "content": prompt}, {"role": "assistant", "content": reply[-4000:]},
-                                            {"role": "user", "content": "Your reply was cut off or had a syntax error (%r). Reply again with ONLY the two functions in one ```python block, no docstrings, no prose, under 150 lines." % (str(exc)[:120],)}],
-                                           max_tokens=self.MAX_TOKENS, temperature=self.temperature)
-                code = extract_code(reply2); self.calls += 1; self.stats["calls"] += 1
-                self._trace("call%d_retry" % self.calls, "", reply2, code)
+                return self.backend.chat(msgs, max_tokens=self.MAX_TOKENS, temperature=self.temperature)
+            except Exception as exc:
+                logger.warning("wmloop: variant %d failed: %r", i, exc); return ""
+        with _cf.ThreadPoolExecutor(max_workers=self.VARIANTS) as ex:
+            replies = list(ex.map(_one, range(self.VARIANTS)))
+        scored = []
+        for i, reply in enumerate(replies):
+            code = extract_code(reply)
+            self._trace("call%d_%s_v%d" % (self.calls, "repair" if repair else "synth", i), prompt if i == 0 else "", reply, code)
+            try:
                 prog = Program(code, LETTERS)
                 prog.raw_state(self.prev_grid if self.prev_grid is not None else np.zeros((64, 64), dtype=np.int16))
-            except Exception as exc2:
-                logger.warning("wmloop: retry rejected: %r", exc2); self.stats["synth_fail"] += 1
-                return False
+            except Exception as exc:
+                scored.append((None, i, ("rejected", str(exc)[:80]), code)); continue
+            scored.append((self._score_program(prog, trans), i, None, code, prog))
+        good = [x for x in scored if x[0] is not None]
+        self.stats.setdefault("variants", []).append([(x[1], x[0] if x[0] is not None else x[2]) for x in scored])
+        if not good:
+            self.stats["synth_fail"] += 1
+            logger.warning("wmloop: all %d variants rejected", len(scored))
+            return False
+        good.sort(key=lambda x: x[0], reverse=True)
+        best = good[0]
+        code, prog = best[3], best[4]
+        logger.warning("wmloop: variants scored %s -> chosen v%d", [(x[1], tuple(round(v, 2) for v in x[0])) for x in good], best[1])
         self.program = prog; self.program_source = code
         self.planner = WMPlanner(prog, seed=self.rng.randint(0, 1 << 16))
         self.planner.st.need_reset = True   # план начинается со старта уровня
         return True
+
+    def _score_program(self, prog: Program, trans: list[Transition]) -> tuple:
+        """Оценка без движка: (точность × покрытие на нетривиальных переходах, информативность, покрытие).
+        информативность = различных состояний / различных досок, штраф за 1 состояние и за состояние == доска."""
+        ok = cov = nontriv = 0; states = set(); boards = set(); errs = 0
+        for t in trans:
+            try:
+                sb = prog.state_of(t.before.split("\n")); sa = prog.state_of(t.after.split("\n"))
+            except Exception:
+                errs += 1; continue
+            from .wmplan import _norm
+            nb, na = _norm(sb), _norm(sa)
+            boards.add(t.after); states.add(na)
+            if nb == na:
+                continue
+            nontriv += 1
+            try:
+                p = prog.predict(sb, t.action)
+            except Exception:
+                errs += 1; continue
+            if p is None:
+                continue
+            cov += 1; ok += int(_norm(p) == na)
+        acc = ok / nontriv if nontriv else 0.0
+        coverage = cov / nontriv if nontriv else 0.0
+        nb_ = max(1, len(boards)); ns_ = len(states)
+        info = 0.0 if ns_ <= 1 else (1.0 if ns_ < nb_ else 0.5)   # 1 состояние -- бесполезно; состояние == доска -- слабо
+        if errs > len(trans) // 2:
+            return (-1.0, 0.0, 0.0)
+        return (acc * coverage + 0.1 * info, info, coverage)
 
     def _trace(self, name: str, prompt: str, reply: str, code: str) -> None:
         import os
