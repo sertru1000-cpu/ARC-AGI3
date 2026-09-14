@@ -17,9 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SLUG = "sergueimakarov/arc3-wmloop-flash"
 TITLE = "arc3 wmloop flash"
 GAME_SECONDS = int(os.getenv("WMLOOP_GAME_SECONDS", "1500"))
-PARALLEL = int(os.getenv("WMLOOP_PARALLEL", "25"))
+PARALLEL = int(os.getenv("WMLOOP_PARALLEL", "8"))   # max_num_seqs сервера = 8 (проба v1: 4 работают, 22 ждут)
 VARIANTS = int(os.getenv("WMLOOP_VARIANTS", "2"))
-MAX_VARIANTS = int(os.getenv("WMLOOP_MAX_VARIANTS", "6"))
+MAX_VARIANTS = int(os.getenv("WMLOOP_MAX_VARIANTS", "4"))
 MAX_ACTIONS = int(os.getenv("WMLOOP_MAX_ACTIONS", "1500"))
 
 
@@ -79,6 +79,9 @@ RUNNER = r'''
         "LLM_TIMEOUT_S": "900", "MY_AGENT_MAX_ACTIONS": "__MAX_ACTIONS__", "MY_AGENT_GAME_SECONDS": "__GAME_SECONDS__",
         "MY_AGENT_WM_VARIANTS": "__VARIANTS__", "MY_AGENT_WM_MAX_VARIANTS": "__MAX_VARIANTS__",
         "MY_AGENT_TRACE_DIR": str(WORKING_DIR / "wmloop_trace"),
+        # проба v1 (15.09 00:52): 216 из 240 ответов пустые -- думание без бюджета съело max_tokens; 24 запроса -- 400
+        # (промпт до 34K символов hex-досок + max_tokens > 32768). Лечение: без думания, компактный промпт, ответ 6000.
+        "LLM_DISABLE_THINKING": "1", "MY_AGENT_WM_COMPACT": "1", "MY_AGENT_WM_TRANS": "20", "MY_AGENT_WM_MAX_TOKENS": "6000",
     })
     os.environ.pop("LLM_THINKING_BUDGET", None)
     import importlib, arc_agi

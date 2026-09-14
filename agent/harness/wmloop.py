@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import re
 from dataclasses import dataclass, field
@@ -89,7 +90,7 @@ def fmt_transition(i, t, show_before, note=""):
         for c, (p, q) in enumerate(zip(x, y)):
             if p != q:
                 diff.append((r, c, p, q))
-    if len(diff) > 400:
+    if len(diff) > 400 and not os.getenv("MY_AGENT_WM_COMPACT"):
         s += "after:\n" + t["after"] + "\n"
     else:
         s += "after = before with these cell changes (row,col: old->new): " + " ".join("%d,%d:%s>%s" % d for d in diff) + "\n"
@@ -125,7 +126,7 @@ class WMLoop:
     REPAIRS = 3
     PLAN_STALL = 40        # ходов подряд с пустым фронтиром -> починка
     PLAN_TESTS = 80        # проверенных кандидатов без уровня -> починка (программа верна, но цели нет)
-    MAX_TOKENS = 10000
+    MAX_TOKENS = int(os.getenv("MY_AGENT_WM_MAX_TOKENS", "10000"))
     VARIANTS = 3           # параллельных вариантов на пачку (экономия 14.09 23:55); MY_AGENT_WM_VARIANTS; потолок MY_AGENT_WM_MAX_VARIANTS
     TRACE_DIR = None       # каталог для записи промптов/ответов/программ (MY_AGENT_TRACE_DIR)
 
@@ -242,13 +243,17 @@ class WMLoop:
     # --------------------------------------------------------------- synthesis
     def _synthesize(self, repair: bool) -> bool:
         cur = [t for t in self.transitions if t.level == self.level]
-        trans = (cur if len(cur) >= 5 else self.transitions)[-40:]   # переходы ТЕКУЩЕГО уровня: программа для новой раскладки
+        import os as _os0
+        n_tr = int(_os0.getenv("MY_AGENT_WM_TRANS", "40"))
+        trans = (cur if len(cur) >= 5 else self.transitions)[-n_tr:]   # переходы ТЕКУЩЕГО уровня: программа для новой раскладки
         if not trans:
             return False
         if not repair or self.program is None:
             parts = []; prev = None
+            compact = bool(_os0.getenv("MY_AGENT_WM_COMPACT"))   # Kaggle/vLLM: контекст 32K, hex-доска ~3K токенов -- доска только раз
             for i, t in enumerate(trans):
-                parts.append(fmt_transition(i + 1, {"before": t.before, "action": t.action, "after": t.after, "level": t.level, "level_up": t.level_up}, show_before=(t.before != prev)))
+                parts.append(fmt_transition(i + 1, {"before": t.before, "action": t.action, "after": t.after, "level": t.level, "level_up": t.level_up},
+                                            show_before=(i == 0) if compact else (t.before != prev)))
                 prev = t.after
             prompt = PROMPT.format(n=len(trans), examples="\n".join(parts))
             if getattr(self, "prev_program_source", None):

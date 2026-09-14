@@ -258,6 +258,10 @@ class OpenAICompatLLM(LLMBackend):
         if tb:
             payload["enable_thinking"] = True
             payload["thinking_budget"] = int(tb)
+        # 15.09: на vLLM (Kaggle) Qwen3.8 думает по умолчанию без бюджета и съедает весь max_tokens --
+        # content пустой (проба arc3-wmloop-flash v1: 216 пустых ответов из 240). Выключаем думание.
+        if os.getenv("LLM_DISABLE_THINKING", "").strip():
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         data = self._request(payload)
         # AI Studio's compat layer may omit `content` entirely when thinking
         # consumed the whole budget; Vertex sends null. Vertex can also return
