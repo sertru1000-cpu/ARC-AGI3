@@ -26,6 +26,7 @@ from agents.agent import Agent
 
 try:
     from agent.harness.explorer import HeuristicExplorer
+    from agent.harness.goexplore import GoExplore
     from agent.harness.llm import default_backend
     from agent.harness.llm_policy import LLMPolicy
     from agent.harness.sandbox import Sandbox
@@ -36,6 +37,7 @@ try:
     from agent.harness.vision import VisionLLM
 except ImportError:  # Kaggle notebook: harness modules are inlined beside us
     from harness.explorer import HeuristicExplorer  # type: ignore
+    from harness.goexplore import GoExplore  # type: ignore
     from harness.journal import REFLECTION_PROMPT, CrossGameJournal  # type: ignore
     from harness.llm import default_backend  # type: ignore
     from harness.llm_policy import LLMPolicy  # type: ignore
@@ -108,7 +110,10 @@ class MyAgent(Agent):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.explorer = HeuristicExplorer(seed=hash(self.game_id) & 0xFFFF)
+        if BRAIN == "goexplore":
+            self.explorer = GoExplore(seed=hash(self.game_id) & 0xFFFF)
+        else:
+            self.explorer = HeuristicExplorer(seed=hash(self.game_id) & 0xFFFF)
         self.policy: Optional[LLMPolicy] = None
         # Every executed action lands here for the post-win speedrun phase.
         self.replay_log: list[dict] = []
@@ -142,6 +147,20 @@ class MyAgent(Agent):
     def choose_action(
         self, frames: list[FrameData], latest_frame: FrameData
     ) -> GameAction:
+        if BRAIN == "goexplore":
+            self.explorer.observe(latest_frame)
+            if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
+                self.explorer.st.need_reset = False
+                self.explorer._emit(("RESET", None))
+                return GameAction.RESET
+            available = self._normalize_available(latest_frame)
+            simple = [a.name for a in available if a not in (GameAction.RESET, GameAction.ACTION6)]
+            name, payload = self.explorer.decide(latest_frame, simple, GameAction.ACTION6 in available)
+            action = GameAction[name]
+            if payload is not None:
+                action.set_data(payload)
+            action.reasoning = f"goexplore:{name}"
+            return action
         if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
             self.explorer.state.prev_grid = None
             self.explorer.state.last_action_key = None
@@ -163,6 +182,11 @@ class MyAgent(Agent):
     def main(self) -> None:
         if BRAIN != "llm":
             super().main()
+            if BRAIN == "goexplore":
+                try:
+                    logger.warning(f"{self.game_id}: goexplore {self.explorer.summary()}")
+                except Exception:
+                    pass
             try:
                 self._speedrun_if_won()
             except Exception as exc:

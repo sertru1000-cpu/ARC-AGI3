@@ -335,6 +335,22 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">два контроля по раунду 4: cap4h / доза v2</span><span class="v-date">собраны 14.09 21:10 &middot; пуш 21:15, по ~4.4 ч квоты каждый</span></div>
+          <span class="badge phase-a">измерительные прогоны для итогового документа</span>
+        </div>
+        <p class="summary"><strong>Слово владельца «делаем уже всё».</strong> Оба критика раунда 4 сошлись: хода на +4 нет, публиковать. Два контроля, которых не хватает результатам: (1) <code>arc3-stock-flash-cap4h</code> &mdash; потолок игры 14400 с вместо 7920 при конкурентности 28: усечение записанных прогонов дало линейный рост балла 1.36 / 3.32 / 4.74 / 6.11 / 7.78 / 10.25 на 15&ndash;132 мин; вопрос &mdash; продолжается ли рост дальше. (2) <code>arc3-dose-conc13</code> v2 &mdash; повтор дозы (вызовов на игру &times;2 при том же времени): второй уровень для результата «больше вычислений &mdash; не больше прогресса» (первый замер 8.58 против 10.25, уровней 41 против 40).</p>
+        <ul class="changes">
+          <li>сборка <code>scripts/build_cap4h_dose_notebooks.py</code> через общий build() с поиском колёс соревнования по /kaggle/input (без него дозовый кернел 12.09 сегодня упал бы на установке)</li>
+          <li>боевая ветка не тронута: оба патча под <code>if not TRUE_SUBMISSION</code></li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска.</strong> cap4h: балл на 132-й минуте усечением (h115) в разбросе базы 6.76&ndash;10.25 (контроль); прирост 132 &rarr; 240 мин &ge; +4 &mdash; рост продолжается, +1..+4 &mdash; замедление, &le; +1 &mdash; насыщение. Доза v2: против базы 10.25 польза при победах&minus;поражениях &ge; +8 и медиане &ge; +8, вред &le; &minus;6; ворота механизма: вызовов на игру &ge; 95; согласие с первым замером &mdash; разность двух дозовых прогонов в шуме (|Δ| &lt; 4).</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">макроходы (Duck, flash)</span><span class="v-date">собрано 14.09 15:40 &middot; проба 30 мин пуш 15:50</span></div>
           <span class="badge phase-a">проба 30 мин против базы-30 3.32</span>
         </div>
