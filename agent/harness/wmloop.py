@@ -46,6 +46,12 @@ def predict(state, action):
     # Return the state after the action (same format as state_of) or None if you cannot predict this case.
     ...
 
+def progress(state):
+    # OPTIONAL third function: a number that is HIGHER when the level is closer to completion, computed from the state only
+    # (e.g. minus the distance between the movable object and its apparent target, number of matched/collected items,
+    # number of toggles in the "on" position). The planner explores high-progress states first. Omit it if you have no idea.
+    ...
+
 Scoring: a prediction is correct if predict(state_of(before), action) == state_of(after). Only transitions where state_of(before) != state_of(after) count, so a constant state_of scores zero. Cover as many cases as you can; return None only when truly unknown.
 
 EXAMPLES ({n} transitions, in chronological order; "before" of a transition equals "after" of the previous one when consecutive):
@@ -63,7 +69,7 @@ Previous program:
 Evidence the planner collected ({n} transitions). Transitions marked STATE_UNCHANGED are ones where the board changed but your state_of returned the same value before and after -- your state misses whatever changed there. Transitions marked PREDICT_WRONG show predicted vs actual state.
 {examples}
 
-Rewrite BOTH functions (same contract, one ```python block). Extend state_of so that it distinguishes every board change that could matter for completing the level, and make predict consistent with the evidence. Return None from predict only when truly unknown."""
+Rewrite BOTH functions (same contract, one ```python block; you may also add/revise the optional progress(state) function). Extend state_of so that it distinguishes every board change that could matter for completing the level, and make predict consistent with the evidence. Rules: (1) state_of must include the concrete visible things that changed in the STATE_UNCHANGED transitions (read the cell-change lists: rows, columns, colours); (2) predict must NOT return None for every action -- when a click on some region visibly changed cells in the evidence, encode that change; return None only for actions you have no evidence about; (3) if a board change looks like a hidden counter, still model it as visible cells."""
 
 
 def fmt_transition(i, t, show_before, note=""):
@@ -111,7 +117,9 @@ class WMLoop:
     PROBE_RANDOM = 6
     REPAIRS = 3
     PLAN_STALL = 40        # ходов подряд с пустым фронтиром -> починка
-    MAX_TOKENS = 6000
+    PLAN_TESTS = 80        # проверенных кандидатов без уровня -> починка (программа верна, но цели нет)
+    MAX_TOKENS = 14000
+    TRACE_DIR = None       # каталог для записи промптов/ответов/программ (MY_AGENT_TRACE_DIR)
 
     def __init__(self, backend, seed: int = 0, temperature: float = 0.6):
         self.backend = backend
@@ -177,7 +185,9 @@ class WMLoop:
             self.stall = self.stall + 1 if st.get("frontier_empty", 0) > getattr(self, "_fe_seen", 0) else 0
             self._fe_seen = st.get("frontier_empty", 0)
             wrong = st.get("pred_wrong", 0); okp = st.get("pred_ok", 0)
-            if self.stall >= self.PLAN_STALL or (wrong >= 8 and wrong > 2 * okp):
+            executed = st.get("executed", 0)
+            budget_hit = executed >= self.PLAN_TESTS * (self.repairs + 1)
+            if self.stall >= self.PLAN_STALL or (wrong >= 8 and wrong > 2 * okp) or budget_hit:
                 if self.repairs < self.REPAIRS:
                     self.repairs += 1
                     if self._synthesize(repair=True):
@@ -234,8 +244,14 @@ class WMLoop:
                 parts.append(fmt_transition(i + 1, {"before": t.before, "action": t.action, "after": t.after, "level": t.level, "level_up": t.level_up}, show_before=(t.before != prev), note=note))
                 prev = t.after
             st = self.planner.st.stats if self.planner else {}
-            verdict = ("the level was NOT completed; the planner reached all %d states your state_of distinguishes (frontier exhausted), "
-                       "so state_of misses what matters; predictions correct %d, wrong %d." % (len(self.planner.st.nodes) if self.planner else 0, st.get("pred_ok", 0), st.get("pred_wrong", 0)))
+            nst = len(self.planner.st.nodes) if self.planner else 0
+            if st.get("frontier_empty", 0) > 0:
+                verdict = ("the level was NOT completed; the planner reached all %d states your state_of distinguishes (frontier exhausted), "
+                           "so state_of misses what matters; predictions correct %d, wrong %d." % (nst, st.get("pred_ok", 0), st.get("pred_wrong", 0)))
+            else:
+                verdict = ("the level was NOT completed after testing %d candidate moves over %d distinct states (predictions correct %d, wrong %d). "
+                           "Either your state misses something, or the search needs direction: add/revise progress(state) so that states closer to "
+                           "completing the level score higher." % (st.get("executed", 0), nst, st.get("pred_ok", 0), st.get("pred_wrong", 0)))
             prompt = REPAIR.format(verdict=verdict, code=self.program_source, n=len(ev), examples="\n".join(parts))
         self.calls += 1; self.stats["calls"] += 1
         if repair:
@@ -246,16 +262,42 @@ class WMLoop:
             logger.warning("wmloop: model call failed: %r", exc); self.stats["synth_fail"] += 1
             return False
         code = extract_code(reply)
+        self._trace("call%d_%s" % (self.calls, "repair" if repair else "synth"), prompt, reply, code)
         try:
             prog = Program(code, LETTERS)
             prog.raw_state(self.prev_grid if self.prev_grid is not None else np.zeros((64, 64), dtype=np.int16))
         except Exception as exc:
             logger.warning("wmloop: program rejected: %r", exc); self.stats["synth_fail"] += 1
-            return False
+            # одна повторная попытка: короче, без docstring, только код
+            try:
+                reply2 = self.backend.chat([{"role": "user", "content": prompt}, {"role": "assistant", "content": reply[-4000:]},
+                                            {"role": "user", "content": "Your reply was cut off or had a syntax error (%r). Reply again with ONLY the two functions in one ```python block, no docstrings, no prose, under 150 lines." % (str(exc)[:120],)}],
+                                           max_tokens=self.MAX_TOKENS, temperature=self.temperature)
+                code = extract_code(reply2); self.calls += 1; self.stats["calls"] += 1
+                self._trace("call%d_retry" % self.calls, "", reply2, code)
+                prog = Program(code, LETTERS)
+                prog.raw_state(self.prev_grid if self.prev_grid is not None else np.zeros((64, 64), dtype=np.int16))
+            except Exception as exc2:
+                logger.warning("wmloop: retry rejected: %r", exc2); self.stats["synth_fail"] += 1
+                return False
         self.program = prog; self.program_source = code
         self.planner = WMPlanner(prog, seed=self.rng.randint(0, 1 << 16))
         self.planner.st.need_reset = True   # план начинается со старта уровня
         return True
+
+    def _trace(self, name: str, prompt: str, reply: str, code: str) -> None:
+        import os
+        d = self.TRACE_DIR or os.getenv("MY_AGENT_TRACE_DIR")
+        if not d:
+            return
+        try:
+            os.makedirs(d, exist_ok=True)
+            base = os.path.join(d, "%s_%s" % (getattr(self, "game_tag", "game"), name))
+            open(base + ".prompt.txt", "w", encoding="utf-8").write(prompt)
+            open(base + ".reply.txt", "w", encoding="utf-8").write(reply)
+            open(base + ".py", "w", encoding="utf-8").write(code)
+        except Exception as exc:
+            logger.warning("wmloop: trace failed: %r", exc)
 
     def _evidence(self, trans: list[Transition]) -> list[tuple[Transition, str]]:
         """Контрпримеры: доска менялась, а состояние нет; предсказание не совпало; взятия уровня."""

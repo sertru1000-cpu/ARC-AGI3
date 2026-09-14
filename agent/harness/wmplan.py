@@ -57,6 +57,7 @@ class Program:
         ns: dict = {}
         exec(source, ns)
         self.state_of = ns["state_of"]; self.predict = ns["predict"]
+        self.progress = ns.get("progress")   # необязательная: progress(state) -> число, больше = ближе к взятию уровня
         self.letters = letter_map
         self.clock_idx: set[int] = set()
         self.frozen = False
@@ -89,6 +90,21 @@ class Program:
         if isinstance(s, tuple) and self.clock_idx:
             return tuple(v for i, v in enumerate(s) if i not in self.clock_idx)
         return s
+
+    def progress_of(self, s_raw) -> float:
+        if self.progress is None or s_raw is None:
+            return 0.0
+        try:
+            return float(self.progress(s_raw))
+        except Exception:
+            return 0.0
+
+    def predict_raw(self, s_raw, act):
+        try:
+            p = self.predict(s_raw, action_display(act))
+        except Exception:
+            return None
+        return None if p is None else _norm(p)
 
     def predict_abstract(self, s_raw, act):
         try:
@@ -132,6 +148,7 @@ class WMPlanner:
         self.prog = program
         self.rng = random.Random(seed)
         self.st = PlanState()
+        self.hybrid = False   # ключ узла = (абстракция, точная доска), когда абстракция склеивает разные доски
 
     # ---------------------------------------------------------------- observe
     def observe(self, frame) -> None:
@@ -156,6 +173,19 @@ class WMPlanner:
             self.prog.note_transition(st.cur_raw, raw)
         abstract = self.prog.abstract(raw)
         exact = frame_hash(grid)
+        if (st.last_action is not None and st.last_action[0] != "RESET" and st.cur_exact is not None
+                and exact != st.cur_exact and abstract == st.cur_abstract):
+            st.stats["state_unchanged"] += 1
+            if st.stats["state_unchanged"] >= 3 and not self.hybrid:
+                # абстракция модели не различает изменившиеся доски: ключ = (абстракция, точная доска)
+                self.hybrid = True
+                st.stats["hybrid_at"] = st.stats["steps"]
+                st.nodes = {(n.abstract if isinstance(n.abstract, tuple) and len(n.abstract) == 2 and isinstance(n.abstract[1], str) else (n.abstract, n.exact)): n for n in st.nodes.values()}
+                for k, n in st.nodes.items():
+                    n.abstract = k; n.expanded = False
+                st.heap.clear()
+        if self.hybrid:
+            abstract = (abstract, exact)
         st.cur_raw, st.cur_abstract, st.cur_exact = raw, abstract, exact
         if st.pending is not None and not st.queue:
             parent, act, predicted = st.pending
@@ -248,15 +278,24 @@ class WMPlanner:
         if has_click and grid is not None:
             cands += self._click_alphabet(node, grid)
         depth = len(node.path)
+        base_abs = node.abstract[0] if self.hybrid else node.abstract
         for act, predicted in cands:
+            if self.hybrid:
+                # гибрид: предсказание абстракции только упорядочивает кандидатов, отсечений нет
+                prio = (-self.prog.progress_of(node.raw), 0 if predicted not in (None, "ERR") and predicted != base_abs else 1, depth + 1, self.rng.random())
+                st.seq += 1
+                heapq.heappush(st.heap, (prio, st.seq, node.abstract, act, None))
+                continue
             if predicted == node.abstract:
                 st.stats["pruned_noop"] += 1
                 continue   # модель говорит: ничего не изменится
             if predicted not in (None, "ERR") and predicted in st.nodes:
                 st.stats["pruned_known"] += 1
                 continue   # модель говорит: попадём в уже виденное
-            # приоритет: известное новое — раньше неизвестного; короче путь — раньше
-            prio = (0 if predicted not in (None, "ERR") else 1, depth + 1, self.rng.random())
+            # приоритет: выше прогресс (если модель дала progress) — раньше; известное новое — раньше неизвестного; короче путь — раньше
+            praw = self.prog.predict_raw(node.raw, act) if predicted not in (None, "ERR") else None
+            prog_val = self.prog.progress_of(praw if praw is not None else node.raw)
+            prio = (-prog_val, 0 if predicted not in (None, "ERR") else 1, depth + 1, self.rng.random())
             st.seq += 1
             heapq.heappush(st.heap, (prio, st.seq, node.abstract, act, predicted))
 
