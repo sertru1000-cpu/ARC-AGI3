@@ -49,7 +49,8 @@ def predict(state, action):
 def progress(state):
     # OPTIONAL third function: a number that is HIGHER when the level is closer to completion, computed from the state only
     # (e.g. minus the distance between the movable object and its apparent target, number of matched/collected items,
-    # number of toggles in the "on" position). The planner explores high-progress states first. Omit it if you have no idea.
+    # number of target cells that already equal the reference pattern). NEVER base it on counters, timers or the number of
+    # moves made -- those change on every action and would mislead the search. The planner explores high-progress states first.
     ...
 
 Scoring: a prediction is correct if predict(state_of(before), action) == state_of(after). Only transitions where state_of(before) != state_of(after) count, so a constant state_of scores zero. Cover as many cases as you can; return None only when truly unknown.

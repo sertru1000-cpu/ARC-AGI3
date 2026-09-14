@@ -278,25 +278,40 @@ class WMPlanner:
             cands += self._click_alphabet(node, grid)
         depth = len(node.path)
         base_abs = node.abstract[0] if self.hybrid else node.abstract
+        # группы кандидатов: 0 -- модель предсказывает НОВОЕ состояние; 1 -- модель не знает; 2 -- модель говорит
+        # «ничего не изменится» (ft09, 14.09: завершающий уровень клик был предсказан как noop и отсечён -- поэтому
+        # noop-кандидаты не отсекаются, а идут последними, по одному на клетку-цель); 3 -- предсказано уже виденное
+        noop_clicks = set()
+        if grid is not None:
+            for x, y in spread_click_targets(grid, self.MAX_CLICK_TARGETS):
+                noop_clicks.add(("ACTION6", x, y))
+        seen_click_reps = set()
         for act, predicted in cands:
+            if act[0] == "ACTION6" and act[1] is not None:
+                seen_click_reps.add(("ACTION6", act[1]["x"], act[1]["y"]))
             if self.hybrid:
-                # гибрид: предсказание абстракции только упорядочивает кандидатов, отсечений нет
-                prio = (-self.prog.progress_of(node.raw), 0 if predicted not in (None, "ERR") and predicted != base_abs else 1, depth + 1, self.rng.random())
-                st.seq += 1
-                heapq.heappush(st.heap, (prio, st.seq, node.abstract, act, None))
-                continue
-            if predicted == node.abstract:
-                st.stats["pruned_noop"] += 1
-                continue   # модель говорит: ничего не изменится
-            if predicted not in (None, "ERR") and predicted in st.nodes:
-                st.stats["pruned_known"] += 1
-                continue   # модель говорит: попадём в уже виденное
-            # приоритет: выше прогресс (если модель дала progress) — раньше; известное новое — раньше неизвестного; короче путь — раньше
-            praw = self.prog.predict_raw(node.raw, act) if predicted not in (None, "ERR") else None
+                group = 0 if predicted not in (None, "ERR") and predicted != base_abs else 1
+            elif predicted == node.abstract:
+                group = 2; st.stats["noop_deferred"] += 1
+            elif predicted not in (None, "ERR") and predicted in st.nodes:
+                group = 3; st.stats["known_deferred"] += 1
+            elif predicted in (None, "ERR"):
+                group = 1
+            else:
+                group = 0
+            praw = self.prog.predict_raw(node.raw, act) if (group == 0 and not self.hybrid) else None
             prog_val = self.prog.progress_of(praw if praw is not None else node.raw)
-            prio = (-prog_val, 0 if predicted not in (None, "ERR") else 1, depth + 1, self.rng.random())
+            prio = (group, -prog_val, depth + 1, self.rng.random())
             st.seq += 1
-            heapq.heappush(st.heap, (prio, st.seq, node.abstract, act, predicted))
+            heapq.heappush(st.heap, (prio, st.seq, node.abstract, act, None if self.hybrid or group >= 2 else predicted))
+        if not self.hybrid and grid is not None:
+            # представители noop-группы: все цели-клики, которых нет среди кандидатов других групп
+            for key in noop_clicks:
+                if key in seen_click_reps:
+                    continue
+                act = ("ACTION6", {"x": key[1], "y": key[2]})
+                st.seq += 1
+                heapq.heappush(st.heap, ((2, -self.prog.progress_of(node.raw), depth + 1, self.rng.random()), st.seq, node.abstract, act, None))
 
     def _random_action(self, frame, simple_actions, has_click):
         grid = latest_grid(frame)
