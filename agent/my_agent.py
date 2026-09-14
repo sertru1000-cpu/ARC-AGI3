@@ -27,6 +27,7 @@ from agents.agent import Agent
 try:
     from agent.harness.explorer import HeuristicExplorer
     from agent.harness.goexplore import GoExplore
+    from agent.harness.wmplan import WMPlanner, load_recorded_program
     from agent.harness.llm import default_backend
     from agent.harness.llm_policy import LLMPolicy
     from agent.harness.sandbox import Sandbox
@@ -38,6 +39,7 @@ try:
 except ImportError:  # Kaggle notebook: harness modules are inlined beside us
     from harness.explorer import HeuristicExplorer  # type: ignore
     from harness.goexplore import GoExplore  # type: ignore
+    from harness.wmplan import WMPlanner, load_recorded_program  # type: ignore
     from harness.journal import REFLECTION_PROMPT, CrossGameJournal  # type: ignore
     from harness.llm import default_backend  # type: ignore
     from harness.llm_policy import LLMPolicy  # type: ignore
@@ -112,6 +114,13 @@ class MyAgent(Agent):
         super().__init__(*args, **kwargs)
         if BRAIN == "goexplore":
             self.explorer = GoExplore(seed=hash(self.game_id) & 0xFFFF)
+        elif BRAIN == "wmplan":
+            # «модель думает, алгоритм ходит»: программа модели мира из записей (локальная проверка алгоритма)
+            prog = load_recorded_program(self.game_id[:4], os.getenv("MY_AGENT_WM_PROGRAMS", "docs/wm_offline_flash_s1.json,docs/wm_offline_flash_s1_retry.json").split(","),
+                                         os.getenv("MY_AGENT_WM_EVENTS", "runs/flash_v1_phaseA/artifacts/GAME-*_p0_events.jsonl"))
+            if prog is None:
+                raise RuntimeError(f"{self.game_id}: нет записанной программы модели мира")
+            self.explorer = WMPlanner(prog, seed=hash(self.game_id) & 0xFFFF)
         else:
             self.explorer = HeuristicExplorer(seed=hash(self.game_id) & 0xFFFF)
         self.policy: Optional[LLMPolicy] = None
@@ -147,7 +156,7 @@ class MyAgent(Agent):
     def choose_action(
         self, frames: list[FrameData], latest_frame: FrameData
     ) -> GameAction:
-        if BRAIN == "goexplore":
+        if BRAIN in ("goexplore", "wmplan"):
             self.explorer.observe(latest_frame)
             if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
                 self.explorer.st.need_reset = False
@@ -159,7 +168,7 @@ class MyAgent(Agent):
             action = GameAction[name]
             if payload is not None:
                 action.set_data(payload)
-            action.reasoning = f"goexplore:{name}"
+            action.reasoning = f"{BRAIN}:{name}"
             return action
         if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
             self.explorer.state.prev_grid = None
@@ -182,9 +191,9 @@ class MyAgent(Agent):
     def main(self) -> None:
         if BRAIN != "llm":
             super().main()
-            if BRAIN == "goexplore":
+            if BRAIN in ("goexplore", "wmplan"):
                 try:
-                    logger.warning(f"{self.game_id}: goexplore {self.explorer.summary()}")
+                    logger.warning(f"{self.game_id}: {BRAIN} {self.explorer.summary()}")
                 except Exception:
                     pass
             try:
