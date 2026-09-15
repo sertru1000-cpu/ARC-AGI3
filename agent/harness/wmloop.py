@@ -190,6 +190,9 @@ class WMLoop:
             return
         level = int(getattr(frame, "levels_completed", 0) or 0)
         state = str(getattr(frame, "state", ""))
+        self.stats["frames"] = self.stats.get("frames", 0) + 1
+        if state.endswith("GAME_OVER"):
+            self.stats["game_over_frames"] = self.stats.get("game_over_frames", 0) + 1
         if self.prev_grid is not None and self.last_action is not None and self.last_action[0] != "RESET" and not state.endswith("GAME_OVER"):
             self.transitions.append(Transition(board_text(self.prev_grid), action_display(self.last_action), board_text(grid), self.level, level > self.level))
         if level != self.level:

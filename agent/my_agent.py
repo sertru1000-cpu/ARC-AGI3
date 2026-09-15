@@ -175,7 +175,7 @@ class MyAgent(Agent):
 
     # ── shared plumbing ───────────────────────────────────────────────────
     def is_done(self, frames: list[FrameData], latest_frame: FrameData) -> bool:
-        return latest_frame.state is GameState.WIN
+        return latest_frame.state is GameState.WIN or bool(getattr(self, "_brain_done", False))
 
     @staticmethod
     def _normalize_available(latest_frame: FrameData) -> list[GameAction]:
@@ -191,7 +191,8 @@ class MyAgent(Agent):
             if not hasattr(self, "_brain_t0"):
                 self._brain_t0 = _time_mod.time()
             if _time_mod.time() - self._brain_t0 > float(os.getenv("MY_AGENT_GAME_SECONDS", "1e9")):
-                self.action_counter = self.MAX_ACTIONS + 1
+                # потолок времени: завершить через is_done, НЕ трогая счётчик ходов (15.09: счётчик 6002 при 95 настоящих ходах)
+                self._brain_done = True
                 return GameAction.RESET
             self.explorer.observe(latest_frame)
             if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
