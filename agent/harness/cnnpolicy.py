@@ -17,9 +17,9 @@ class CNNPolicy:
     def __init__(self, model_path: str, seed: int = 0, temperature: float = 1.0):
         import sys, os
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts"))
-        from imitation_train import Policy
+        from imitation_train import make_model
         ck = torch.load(model_path, map_location="cpu", weights_only=False)
-        self.model = Policy(); self.model.load_state_dict(ck["state"]); self.model.eval()
+        self.model = make_model(ck.get("arch", "cnn")); self.model.load_state_dict(ck["state"]); self.model.eval()
         self.rng = random.Random(seed); self.temperature = temperature
         self.stats = {"steps": 0, "policy_moves": 0, "clicks": 0, "resets": 0}
         self.last_hash = None; self.same_count = 0

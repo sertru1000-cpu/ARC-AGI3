@@ -27,6 +27,38 @@ class Policy(nn.Module):
         return logits
 
 
+class PatchTransformer(nn.Module):
+    """Трансформер над патчами 4x4 (256 токенов): вторая архитектура для сравнения с CNN на тех же данных."""
+    def __init__(self, dim=128, depth=4, heads=4, patch=4):
+        super().__init__()
+        self.patch = patch; n = (64 // patch) ** 2
+        self.embed = nn.Linear(16 * patch * patch, dim)
+        self.pos = nn.Parameter(torch.zeros(1, n + 1, dim)); self.cls = nn.Parameter(torch.zeros(1, 1, dim))
+        layer = nn.TransformerEncoderLayer(dim, heads, dim * 4, dropout=0.1, batch_first=True, norm_first=True)
+        self.enc = nn.TransformerEncoder(layer, depth)
+        self.norm = nn.LayerNorm(dim)
+        self.head = nn.Linear(dim, N_ACT)
+        self.click_tok = nn.Linear(dim, patch * patch)   # логит клика на каждую клетку патча
+        nn.init.trunc_normal_(self.pos, std=0.02); nn.init.trunc_normal_(self.cls, std=0.02)
+
+    def forward(self, x, with_click=False):
+        B = x.shape[0]; p = self.patch
+        oh = F.one_hot(x.long().clamp(0, 15), 16).float()                   # [B,64,64,16]
+        t = oh.view(B, 64 // p, p, 64 // p, p, 16).permute(0, 1, 3, 2, 4, 5).reshape(B, (64 // p) ** 2, p * p * 16)
+        h = torch.cat([self.cls.expand(B, -1, -1), self.embed(t)], 1) + self.pos
+        h = self.norm(self.enc(h))
+        logits = self.head(h[:, 0])
+        if with_click:
+            ct = self.click_tok(h[:, 1:])                                     # [B, n, p*p]
+            cmap = ct.view(B, 64 // p, 64 // p, p, p).permute(0, 1, 3, 2, 4).reshape(B, 4096)
+            return logits, cmap
+        return logits
+
+
+def make_model(arch: str):
+    return PatchTransformer() if arch == "vit" else Policy()
+
+
 def load(p):
     d = np.load(p, allow_pickle=True)
     click = d["click"] if "click" in d else np.full((len(d["y"]), 2), -1)
@@ -36,12 +68,13 @@ def load(p):
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--train", required=True); ap.add_argument("--val", required=True); ap.add_argument("--out", required=True)
-    ap.add_argument("--epochs", type=int, default=8); ap.add_argument("--bs", type=int, default=128); a = ap.parse_args()
+    ap.add_argument("--epochs", type=int, default=8); ap.add_argument("--bs", type=int, default=128); ap.add_argument("--arch", default="cnn", choices=["cnn", "vit"]); a = ap.parse_args()
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     Xt, yt, mt, mechs, ct = load(a.train); Xv, yv, mv, _, cv = load(a.val)
     print(f"train {len(yt)} val {len(yv)} device {dev}; классы train: {np.bincount(yt.numpy(), minlength=N_ACT).tolist()}")
-    model = Policy().to(dev); opt = torch.optim.AdamW(model.parameters(), lr=2e-3, weight_decay=1e-4)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=2e-3, total_steps=a.epochs * ((len(yt) + a.bs - 1) // a.bs))
+    model = make_model(a.arch).to(dev); lr = 2e-3 if a.arch == "cnn" else 5e-4
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=a.epochs * ((len(yt) + a.bs - 1) // a.bs))
     t0 = time.time()
     for ep in range(a.epochs):
         model.train(); perm = torch.randperm(len(yt)); tl = 0.0; n = 0
@@ -67,7 +100,7 @@ def main():
                     per.setdefault(m, [0, 0]); per[m][0] += ok; per[m][1] += 1
         acc = correct / max(1, len(yv))
         print(f"эпоха {ep + 1}: loss {tl / n:.3f}, val acc {acc:.3f}, клик±2 {chit / max(1, cn):.2f} ({cn}), по механикам " + ", ".join(f"{mechs[m]} {v[0] / v[1]:.2f}" for m, v in sorted(per.items())) + f", {time.time() - t0:.0f} с", flush=True)
-    torch.save({"state": model.state_dict(), "mechs": mechs}, a.out); print("сохранено", a.out)
+    torch.save({"state": model.state_dict(), "mechs": mechs, "arch": a.arch}, a.out); print("сохранено", a.out)
 
 
 if __name__ == "__main__":
