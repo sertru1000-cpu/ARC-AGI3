@@ -19,6 +19,8 @@ class Env:
     def __init__(self, arc, gid):
         self.arc, self.gid = arc, gid
         self.env = arc.make(gid)
+        if self.env is None:
+            raise RuntimeError("env creation failed (битый вариант)")
         self.ag = Scripted(card_id="bfs", game_id=gid, agent_name="bfs." + gid, ROOT_URL="http://localhost", record=False, arc_env=self.env, tags=["bfs"], script=[])
         self.moves = 0
 
