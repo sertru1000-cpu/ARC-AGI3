@@ -27,9 +27,11 @@ class Env:
         a = GameAction.RESET if name == "RESET" else GameAction[name]
         if payload:
             a.set_data(payload)
-        fr = self.ag.take_action(a); self.moves += 1
-        if fr is None:
-            return None
+        try:
+            fr = self.ag.take_action(a)
+        except Exception:
+            fr = None
+        self.moves += 1
         return fr
 
     def reset_and_replay(self, path):
@@ -40,6 +42,8 @@ class Env:
 
 
 def frame_info(fr):
+    if fr is None or not getattr(fr, "frame", None):
+        return np.zeros((64, 64), dtype=np.int16), 0, "GAME_OVER", []
     grid = np.asarray(fr.frame[-1], dtype=np.int16)
     avail = [str(a).split(".")[-1] for a in (fr.available_actions or [])]
     return grid, int(fr.levels_completed or 0), str(fr.state).split(".")[-1], avail
