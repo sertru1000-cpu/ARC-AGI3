@@ -237,7 +237,12 @@ class WMLoop:
                 self._su_seen = st.get("state_unchanged", 0)
             # стратег: план исчерпан или потратил STRATEGY_TESTS проверок без уровня, механика при этом не врёт
             mech_bad = (wrong >= 8 and wrong > 2 * okp) or missing
-            need_strategy = (not mech_bad) and (self.stall >= self.PLAN_STALL or executed >= self.STRATEGY_TESTS * (self.strategies + 1))
+            # v7-проба (15.09 08:54): стратег ни разу не вызван — его затеняла ветка «механика врёт» (починка, потом резерв).
+            # Теперь: механика врёт и починки остались -> починка; иначе стратег (по стагнации или бюджету проверок); потом резерв.
+            need_strategy = (self.stall >= self.PLAN_STALL or executed >= self.STRATEGY_TESTS * (self.strategies + 1)
+                             or (mech_bad and self.repairs >= self.REPAIRS))
+            if mech_bad and self.repairs < self.REPAIRS:
+                need_strategy = False
             if need_strategy and self.strategies < self.STRATEGIES:
                 self.strategies += 1
                 if self._strategize():
