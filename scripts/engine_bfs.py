@@ -122,7 +122,91 @@ def active_clicks(env, grid0, avail, step=4):
     return active
 
 
-def solve(arc, gid, max_states, max_moves, n_clicks, target_levels=1):
+def solve(arc, gid, max_states, max_moves, n_clicks, target_levels=1, max_levels=1):
+    """BFS уровня за уровнем: после взятия уровня перебор продолжается с этой позиции (путь-префикс) до max_levels."""
+    t0 = time.time(); env = Env(arc, gid)
+    prefix = []; levels_done = 0; total_states = 0; per_level = []
+    while levels_done < max_levels and env.moves < max_moves:
+        fr = env.reset_and_replay(prefix); grid, lvl0, state, avail = frame_info(fr)
+        clicks = active_clicks_from(env, prefix, grid, avail)
+        mask = clock_mask_from(env, prefix, grid, avail, n_clicks)
+        def key_of(g, mask=mask):
+            k = g.copy(); k[mask] = -1; return k.tobytes()
+        start_key = key_of(grid)
+        seen = {start_key: []}; q = deque([(start_key, [], grid, avail)]); found = None
+        while q and len(seen) < max_states and env.moves < max_moves and found is None:
+            key, path, grid, avail = q.popleft()
+            simple = [("ACTION" + a[-1], None) for a in avail if a in ("1", "2", "3", "4", "5", "ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5")]
+            for act in simple + clicks:
+                fr = env.reset_and_replay(prefix + path + [act])
+                if fr is None:
+                    continue
+                g2, lvl, st, av2 = frame_info(fr)
+                if lvl >= lvl0 + 1:
+                    found = path + [act]; break
+                if st == "GAME_OVER":
+                    continue
+                k2 = key_of(g2)
+                if k2 in seen:
+                    continue
+                seen[k2] = path + [act]; q.append((k2, path + [act], g2, av2))
+                if env.moves >= max_moves:
+                    break
+        total_states += len(seen)
+        if found is None:
+            break
+        prefix = prefix + found; levels_done += 1; per_level.append(len(found))
+    if levels_done:
+        return {"solved": True, "levels": levels_done, "path": prefix, "per_level": per_level, "states": total_states, "moves": env.moves, "seconds": round(time.time() - t0, 1)}
+    return {"solved": False, "levels": 0, "path": None, "states": total_states, "moves": env.moves, "seconds": round(time.time() - t0, 1)}
+
+
+def active_clicks_from(env, prefix, grid0, avail, step=4):
+    if not any(a in ("6", "ACTION6") for a in avail):
+        return []
+    from agent.harness.perception import segment
+    pts = [(x, y) for y in range(step // 2, 64, step) for x in range(step // 2, 64, step)]
+    for o in segment(grid0).non_background()[:60]:
+        pts.append((int(round(o.centroid[1])), int(round(o.centroid[0]))))
+    active = []; seen = set()
+    for x, y in pts:
+        if (x, y) in seen:
+            continue
+        seen.add((x, y))
+        fr = env.reset_and_replay(prefix + [("ACTION6", {"x": x, "y": y})])
+        g, lvl, st, av = frame_info(fr)
+        if (g != grid0).any() or lvl > 0:
+            active.append(("ACTION6", {"x": x, "y": y}))
+    return active
+
+
+def clock_mask_from(env, prefix, grid0, avail, n_clicks, warm=60, thr=0.8):
+    import random as _r
+    rng = _r.Random(0); acts = alphabet(grid0, avail, n_clicks)
+    if not acts:
+        return np.zeros_like(grid0, dtype=bool)
+    changes = np.zeros_like(grid0, dtype=np.int32); n = 0; prev = grid0
+    row_ch = np.zeros(grid0.shape[0], dtype=np.int32); col_ch = np.zeros(grid0.shape[1], dtype=np.int32)
+    env.reset_and_replay(prefix)
+    for _ in range(warm):
+        fr = env.do(rng.choice(acts))
+        g, lvl, st, av = frame_info(fr)
+        if st == "GAME_OVER" or lvl > 0 and False:
+            fr = env.reset_and_replay(prefix); prev = frame_info(fr)[0]; continue
+        if g.shape == prev.shape:
+            d = (g != prev)
+            if d.any():
+                changes += d; n += 1; row_ch += d.any(axis=1); col_ch += d.any(axis=0)
+        prev = g
+    mask = (changes >= thr * max(1, n)) & (changes >= 3)
+    for r in np.where(row_ch >= thr * max(1, n))[0]:
+        if n >= 5: mask[r, :] = True
+    for c in np.where(col_ch >= thr * max(1, n))[0]:
+        if n >= 5: mask[:, c] = True
+    return mask
+
+
+def _old_solve_unused(arc, gid, max_states, max_moves, n_clicks, target_levels=1):
     t0 = time.time(); env = Env(arc, gid)
     fr = env.reset_and_replay([]); grid, lvl0, state, avail = frame_info(fr)
     clicks = active_clicks(env, grid, avail)
@@ -156,7 +240,7 @@ def solve(arc, gid, max_states, max_moves, n_clicks, target_levels=1):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--env-dir", required=True); ap.add_argument("--games", default=None)
     ap.add_argument("--max-states", type=int, default=3000); ap.add_argument("--max-moves", type=int, default=80000); ap.add_argument("--clicks", type=int, default=24)
-    ap.add_argument("--out", default=None); a = ap.parse_args()
+    ap.add_argument("--out", default=None); ap.add_argument("--max-levels", type=int, default=1); a = ap.parse_args()
     import logging; logging.disable(logging.WARNING)
     import arc_agi
     from arc_agi import OperationMode
@@ -167,11 +251,11 @@ def main():
     res = {}
     for gid in gids:
         try:
-            r = solve(arc, gid, a.max_states, a.max_moves, a.clicks)
+            r = solve(arc, gid, a.max_states, a.max_moves, a.clicks, max_levels=a.max_levels)
         except Exception as exc:   # битый вариант (спрайт вне поля и т.п.) -- пропускаем, не роняя разметку
             r = {"solved": False, "path": None, "states": 0, "moves": 0, "seconds": 0.0, "error": repr(exc)[:200]}
         res[gid] = r
-        print(f"{gid}: {'РЕШЕНО' if r['solved'] else 'нет'} | путь {len(r['path']) if r['path'] else '-'} | состояний {r['states']} | глубина {r.get('max_depth', '-')} | часов {r.get('clock_cells')} | ходов {r['moves']} | {r['seconds']} с", flush=True)
+        print(f"{gid}: {'РЕШЕНО' if r['solved'] else 'нет'} | уровней {r.get('levels', 0)} | путь {len(r['path']) if r['path'] else '-'} {r.get('per_level', '')} | состояний {r['states']} | ходов {r['moves']} | {r['seconds']} с", flush=True)
     if a.out:
         Path(a.out).write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     print("решено", sum(1 for r in res.values() if r["solved"]), "из", len(res))
