@@ -162,7 +162,11 @@ def main():
         want = set(a.games.split(",")); gids = [g for g in gids if g.split("-")[0] in want]
     res = {}
     for gid in gids:
-        r = solve(arc, gid, a.max_states, a.max_moves, a.clicks); res[gid] = r
+        try:
+            r = solve(arc, gid, a.max_states, a.max_moves, a.clicks)
+        except Exception as exc:   # битый вариант (спрайт вне поля и т.п.) -- пропускаем, не роняя разметку
+            r = {"solved": False, "path": None, "states": 0, "moves": 0, "seconds": 0.0, "error": repr(exc)[:200]}
+        res[gid] = r
         print(f"{gid}: {'РЕШЕНО' if r['solved'] else 'нет'} | путь {len(r['path']) if r['path'] else '-'} | состояний {r['states']} | глубина {r.get('max_depth', '-')} | часов {r.get('clock_cells')} | ходов {r['moves']} | {r['seconds']} с", flush=True)
     if a.out:
         Path(a.out).write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
