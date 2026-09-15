@@ -80,6 +80,35 @@ Evidence the planner collected ({n} transitions). Transitions marked STATE_UNCHA
 Rewrite BOTH functions (same contract, one ```python block; you may also add/revise the optional progress(state) and is_goal(state) functions). Extend state_of so that it distinguishes every board change that could matter for completing the level, and make predict consistent with the evidence. Rules: (1) state_of must include the concrete visible things that changed in the STATE_UNCHANGED transitions (read the cell-change lists: rows, columns, colours); (2) predict must NOT return None for every action -- when a click on some region visibly changed cells in the evidence, encode that change; return None only for actions you have no evidence about; (3) if a board change looks like a hidden counter, still model it as visible cells."""
 
 
+STRATEGY = """You are the strategist for an algorithmic player of an unknown grid game (ARC-AGI-3, 64x64 board, hex digits = colours;
+actions UP, DOWN, LEFT, RIGHT, SPACE, MOUSE(row=r, col=c)). The player already has your mechanics model (state_of/predict below) and
+has explored {n_states} distinct states of it WITHOUT completing the level. It needs to know WHAT THE LEVEL WANTS.
+
+Mechanics model currently in use:
+```python
+{code}
+```
+
+START board of the level:
+{start}
+
+Representative states reached (as cell changes relative to the START board, row,col:old>new), with the moves that led there:
+{states}
+
+What single moves did to the board on this level (per move: how many cells changed, where):
+{effects}
+
+Answer with ONE ```python block containing:
+1. a comment with your hypothesis of the level's goal (one or two sentences: what must the board look like / what must happen);
+2. def is_goal(state): -> True when the level is completed according to your hypothesis (state = state_of(grid) of the model above);
+3. def progress(state): -> a number that grows as the board gets closer to the goal (NEVER based on counters/timers/number of moves);
+4. SUGGESTED_MOVES = [...]: up to 8 concrete actions to execute NEXT from the START board, as strings like "MOUSE(row=12, col=40)" or "UP",
+   chosen to test your hypothesis (e.g. click the element you believe is the trigger, move the object to its target).
+If the state_of above cannot express your goal (it lacks the relevant elements), say so in the comment and define
+is_goal/progress on the BOARD instead: they will receive state=None and a second argument grid (list of 64 strings), i.e. write
+def is_goal(state, grid=None) / def progress(state, grid=None)."""
+
+
 def fmt_transition(i, t, show_before, note=""):
     s = "### transition %d  action: %s  level: %d%s%s\n" % (i, t["action"], t["level"], "  (LEVEL COMPLETED after this action)" if t["level_up"] else "", note)
     if show_before:
@@ -123,7 +152,10 @@ class Transition:
 class WMLoop:
     PROBE_CLICKS = 40
     PROBE_RANDOM = 6
-    REPAIRS = 3
+    REPAIRS = 2
+    STRATEGIES = 4         # вызовов стратега на уровень
+    STRATEGY_TESTS = 60    # проверок планировщика без уровня -> стратег
+    PROMPT_CAP = 40000     # символов промпта (контекст vLLM 32K токенов)
     PLAN_STALL = 40        # ходов подряд с пустым фронтиром -> починка
     PLAN_TESTS = 80        # проверенных кандидатов без уровня -> починка (программа верна, но цели нет)
     MAX_TOKENS = int(os.getenv("MY_AGENT_WM_MAX_TOKENS", "10000"))
@@ -141,6 +173,7 @@ class WMLoop:
         self.planner: WMPlanner | None = None
         self.fallback: GoExplore | None = None
         self.repairs = 0
+        self.strategies = 0
         self.level = 0
         self.calls = 0
         self.prev_grid: np.ndarray | None = None
@@ -161,7 +194,7 @@ class WMLoop:
             self.transitions.append(Transition(board_text(self.prev_grid), action_display(self.last_action), board_text(grid), self.level, level > self.level))
         if level != self.level:
             self.level = level
-            self.repairs = 0; self.stall = 0; self._su_seen = 0; self._fe_seen = 0
+            self.repairs = 0; self.strategies = 0; self.stall = 0; self._su_seen = 0; self._fe_seen = 0; self._st_seen = 0
             # новый уровень: раскладка другая -- новая проба и синтез с нуля (прошлая программа идёт подсказкой)
             self.prev_program_source = getattr(self, "program_source", None)
             self.phase = "probe"; self.probe_plan = []
@@ -202,7 +235,16 @@ class WMLoop:
             missing = st.get("state_unchanged", 0) >= 2 and st.get("state_unchanged", 0) > getattr(self, "_su_seen", 0)
             if missing:
                 self._su_seen = st.get("state_unchanged", 0)
-            if self.stall >= self.PLAN_STALL or (wrong >= 8 and wrong > 2 * okp) or budget_hit or missing:
+            # стратег: план исчерпан или потратил STRATEGY_TESTS проверок без уровня, механика при этом не врёт
+            mech_bad = (wrong >= 8 and wrong > 2 * okp) or missing
+            need_strategy = (not mech_bad) and (self.stall >= self.PLAN_STALL or executed >= self.STRATEGY_TESTS * (self.strategies + 1))
+            if need_strategy and self.strategies < self.STRATEGIES:
+                self.strategies += 1
+                if self._strategize():
+                    self.stall = 0; self._fe_seen = 0
+                self._log_phase()
+                return self._emit(act)
+            if mech_bad or self.stall >= self.PLAN_STALL or budget_hit:
                 if self.repairs < self.REPAIRS:
                     self.repairs += 1
                     if self._synthesize(repair=True):
@@ -276,6 +318,8 @@ class WMLoop:
                            "Either your state misses something, or the search needs direction: add/revise progress(state) so that states closer to "
                            "completing the level score higher." % (st.get("executed", 0), nst, st.get("pred_ok", 0), st.get("pred_wrong", 0)))
             prompt = REPAIR.format(verdict=verdict, code=self.program_source, n=len(ev), examples="\n".join(parts))
+        if len(prompt) > self.PROMPT_CAP:
+            prompt = prompt[: self.PROMPT_CAP] + "\n...(truncated)"
         self.calls += 1; self.stats["calls"] += 1
         if repair:
             self.stats["repairs"] += 1
@@ -382,6 +426,84 @@ class WMLoop:
             open(base + ".py", "w", encoding="utf-8").write(code)
         except Exception as exc:
             logger.warning("wmloop: trace failed: %r", exc)
+
+    def _strategize(self) -> bool:
+        """Модель-стратег: дайджест найденного -> гипотеза цели, is_goal/progress, подсказанные ходы."""
+        import os as _os2, re as _re2
+        pl = self.planner
+        dg = pl.digest()
+        if dg["start"] is None:
+            return False
+        start = dg["start"]
+        def diff(a, b):
+            out = []
+            for r, (x, y) in enumerate(zip(a.split("\n"), b.split("\n"))):
+                for c, (p, q) in enumerate(zip(x, y)):
+                    if p != q:
+                        out.append("%d,%d:%s>%s" % (r, c, p, q))
+            return out
+        states = []
+        for n in dg["picks"]:
+            d = diff(start.board, n.board)
+            states.append("- after moves [%s]: %d cells changed: %s%s" % (", ".join(action_display(a) for a in n.path[-8:]), len(d), " ".join(d[:120]), " ..." if len(d) > 120 else ""))
+        # эффекты одиночных ходов на этом уровне (агрегат по действию)
+        eff: dict = {}
+        for t in [x for x in self.transitions if x.level == self.level][-400:]:
+            d = diff(t.before, t.after)
+            e = eff.setdefault(t.action, {"n": 0, "changed": 0, "cells": 0, "rows": set(), "cols": set()})
+            e["n"] += 1
+            if d:
+                e["changed"] += 1; e["cells"] += len(d)
+                for item in d[:50]:
+                    rc = item.split(":")[0].split(","); e["rows"].add(int(rc[0])); e["cols"].add(int(rc[1]))
+        eff_lines = []
+        for act, e in sorted(eff.items(), key=lambda kv: -kv[1]["changed"])[:40]:
+            if e["changed"]:
+                eff_lines.append("- %s: changed board %d/%d times, ~%d cells, rows %s, cols %s" % (act, e["changed"], e["n"], e["cells"] // max(1, e["changed"]), sorted(e["rows"])[:6], sorted(e["cols"])[:6]))
+        noop = [act for act, e in eff.items() if not e["changed"]]
+        if noop:
+            eff_lines.append("- no visible change: " + ", ".join(noop[:30]))
+        prompt = STRATEGY.format(n_states=dg["n_states"], code=self.program_source[-5000:], start=start.board, states="\n".join(states) or "- none", effects="\n".join(eff_lines) or "- none")
+        if len(prompt) > self.PROMPT_CAP:
+            prompt = prompt[: self.PROMPT_CAP] + "\n...(truncated)"
+        self.calls += 1; self.stats["calls"] += 1; self.stats["strategies"] = self.stats.get("strategies", 0) + 1
+        try:
+            reply = self.backend.chat([{"role": "user", "content": prompt}], max_tokens=self.MAX_TOKENS, temperature=self.temperature)
+        except Exception as exc:
+            logger.warning("wmloop: strategist call failed: %r", exc); return False
+        code = extract_code(reply)
+        self._trace("call%d_strategy" % self.calls, prompt, reply, code)
+        ns: dict = {}
+        try:
+            exec(code, ns)
+        except Exception as exc:
+            logger.warning("wmloop: strategist code rejected: %r", exc); return False
+        prog = self.program
+        def wrap(fn):
+            if fn is None:
+                return None
+            nparams = fn.__code__.co_argcount
+            def f(state, _grid_cache={}):
+                if nparams >= 2:
+                    node = pl.st.nodes.get(pl.st.cur_abstract)
+                    grid_rows = (node.board.split("\n") if node is not None else None)
+                    return fn(state, grid_rows)
+                return fn(state)
+            return f
+        pl.set_goal_functions(progress=wrap(ns.get("progress")), is_goal=wrap(ns.get("is_goal")))
+        moves = []
+        for m in (ns.get("SUGGESTED_MOVES") or [])[:8]:
+            m = str(m).strip()
+            mm = _re2.match(r"MOUSE\(row=(\d+),\s*col=(\d+)\)", m)
+            if mm:
+                moves.append(("ACTION6", {"x": int(mm.group(2)), "y": int(mm.group(1))}))
+            elif m.upper() in ("UP", "DOWN", "LEFT", "RIGHT", "SPACE"):
+                moves.append(({"UP": "ACTION1", "DOWN": "ACTION2", "LEFT": "ACTION3", "RIGHT": "ACTION4", "SPACE": "ACTION5"}[m.upper()], None))
+        if moves:
+            # от старта уровня: RESET + подсказанные ходы
+            pl.suggest_moves([("RESET", None)] + moves)
+        self.stats["phase_log"].append((self.level, "strategy", self.strategies, len(moves)))
+        return True
 
     def _evidence(self, trans: list[Transition]) -> list[tuple[Transition, str]]:
         """Контрпримеры: доска менялась, а состояние нет; предсказание не совпало; взятия уровня."""

@@ -152,6 +152,8 @@ class Node:
     exact: str
     path: list[tuple[str, dict | None]]
     expanded: bool = False
+    board: str = ""       # текст доски (hex) для дайджеста стратегу
+    imagined: bool = False
 
 
 @dataclass
@@ -230,7 +232,8 @@ class WMPlanner:
             else:
                 st.stats["pred_wrong"] += 1
         if abstract not in st.nodes:
-            st.nodes[abstract] = Node(abstract=abstract, raw=raw, exact=exact, path=list(st.cur_path))
+            st.nodes[abstract] = Node(abstract=abstract, raw=raw, exact=exact, path=list(st.cur_path),
+                                      board="\n".join("".join(self.prog.letters.get(int(v), "?") for v in row) for row in grid))
             st.stats["new_states"] += 1
         elif len(st.cur_path) < len(st.nodes[abstract].path):
             st.nodes[abstract].path = list(st.cur_path); st.nodes[abstract].exact = exact; st.nodes[abstract].raw = raw
@@ -430,6 +433,34 @@ class WMPlanner:
         st.last_action = act
         st.cur_path = [] if act[0] == "RESET" else st.cur_path + [act]
         return act
+
+    def set_goal_functions(self, progress=None, is_goal=None) -> None:
+        """Стратег дал progress/is_goal: заменить в программе и перестроить фронтир."""
+        if progress is not None:
+            self.prog.progress = progress
+        if is_goal is not None:
+            self.prog.is_goal = is_goal
+        for n in self.st.nodes.values():
+            n.expanded = False; n.imagined = False
+        self.st.heap.clear(); self.st.stats["goal_updates"] += 1
+
+    def suggest_moves(self, moves: list[tuple[str, dict | None]]) -> None:
+        """Стратег подсказал конкретные ходы: исполнить их первыми из текущего состояния."""
+        self.st.queue = list(moves) + list(self.st.queue)
+        self.st.pending = None; self.st.stats["suggested"] += len(moves)
+
+    def digest(self, max_states: int = 4) -> dict:
+        """Дайджест для стратега: стартовая доска, характерные достигнутые состояния, число состояний."""
+        nodes = list(self.st.nodes.values())
+        start = next((n for n in nodes if not n.path), None) or (nodes[0] if nodes else None)
+        picks = []
+        if nodes:
+            by_prog = sorted(nodes, key=lambda n: (-self.prog.progress_of(n.raw), -len(n.path)))
+            longest = max(nodes, key=lambda n: len(n.path))
+            for n in [by_prog[0], longest] + by_prog[1:max_states]:
+                if n is not start and n not in picks and len(picks) < max_states:
+                    picks.append(n)
+        return {"n_states": len(nodes), "start": start, "picks": picks, "stats": dict(self.st.stats)}
 
     def summary(self) -> dict:
         d = dict(self.st.stats)
