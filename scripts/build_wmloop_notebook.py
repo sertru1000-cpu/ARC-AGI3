@@ -21,6 +21,7 @@ PARALLEL = int(os.getenv("WMLOOP_PARALLEL", "8"))   # max_num_seqs сервер�
 VARIANTS = int(os.getenv("WMLOOP_VARIANTS", "2"))
 MAX_VARIANTS = int(os.getenv("WMLOOP_MAX_VARIANTS", "4"))
 MAX_ACTIONS = int(os.getenv("WMLOOP_MAX_ACTIONS", "1500"))
+N_GAMES = int(os.getenv("WMLOOP_N_GAMES", "8"))       # проба v2 (слово владельца «пуш» 15.09 02:10): 8 игр = одна волна сервера
 
 
 def collect_sources() -> dict:
@@ -88,7 +89,7 @@ RUNNER = r'''
     from arc_agi import OperationMode
     from agents import MyAgent
     _arc = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=str(Path(COMP_WHEELS_DIR).parent / "environment_files"))
-    _games = [e.game_id for e in _arc.available_environments]
+    _games = [e.game_id for e in _arc.available_environments][: int(os.environ.get("WMLOOP_N_GAMES", "__N_GAMES__"))]
     print("wmloop: игр", len(_games), "параллельно", __PARALLEL__, "потолок", __GAME_SECONDS__, "с,", "__MAX_ACTIONS__", "ходов", flush=True)
     _results = {}
     def _play(gid):
@@ -154,7 +155,7 @@ def main() -> None:
     end = c15.index("finally:", start)
     bundle = base64.b64encode(json.dumps(collect_sources()).encode("utf-8")).decode("ascii")
     runner = (RUNNER.replace("__BUNDLE__", bundle).replace("__MAX_ACTIONS__", str(MAX_ACTIONS)).replace("__GAME_SECONDS__", str(GAME_SECONDS))
-              .replace("__VARIANTS__", str(VARIANTS)).replace("__MAX_VARIANTS__", str(MAX_VARIANTS)).replace("__PARALLEL__", str(PARALLEL)))
+              .replace("__VARIANTS__", str(VARIANTS)).replace("__MAX_VARIANTS__", str(MAX_VARIANTS)).replace("__PARALLEL__", str(PARALLEL)).replace("__N_GAMES__", str(N_GAMES)))
     c15 = c15[:start] + "try:\n" + runner + c15[end:]
     nb["cells"][15]["source"] = c15.splitlines(keepends=True)
     out = ROOT / "kernels/notebooks_wmloop_flash"; out.mkdir(parents=True, exist_ok=True)

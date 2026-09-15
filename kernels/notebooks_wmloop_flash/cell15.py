@@ -193,7 +193,7 @@ try:
     from arc_agi import OperationMode
     from agents import MyAgent
     _arc = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=str(Path(COMP_WHEELS_DIR).parent / "environment_files"))
-    _games = [e.game_id for e in _arc.available_environments]
+    _games = [e.game_id for e in _arc.available_environments][: int(os.environ.get("WMLOOP_N_GAMES", "8"))]
     print("wmloop: игр", len(_games), "параллельно", 8, "потолок", 1500, "с,", "1500", "ходов", flush=True)
     _results = {}
     def _play(gid):
