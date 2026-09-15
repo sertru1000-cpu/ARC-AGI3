@@ -59,7 +59,7 @@ def run(args) -> None:
     from arc_agi import OperationMode
 
     logging.basicConfig(level=logging.WARNING)
-    arc = arc_agi.Arcade(operation_mode=OperationMode.NORMAL)
+    arc = arc_agi.Arcade(operation_mode=OperationMode.NORMAL, **({"environments_dir": args.env_dir} if args.env_dir else {}))
     all_ids = [e.game_id.split("-")[0] for e in arc.get_environments()]
     game_ids = all_ids
     if args.game:
@@ -151,6 +151,7 @@ def main() -> None:
     p.add_argument("--max-steps", type=int, default=None, help="override MAX_ACTIONS")
     p.add_argument("--tag", default="dev", help="label stored in the run journal")
     p.add_argument("--compare", action="store_true", help="diff the two latest runs")
+    p.add_argument("--env-dir", default=None, help="каталог игр (по умолчанию environment_files)")
     args = p.parse_args()
     if args.compare:
         compare()

@@ -134,6 +134,9 @@ class MyAgent(Agent):
             if prog is None:
                 raise RuntimeError(f"{self.game_id}: нет записанной программы модели мира")
             self.explorer = WMPlanner(prog, seed=hash(self.game_id) & 0xFFFF)
+        elif BRAIN == "cnn":
+            from agent.harness.cnnpolicy import CNNPolicy as _CP
+            self.explorer = _CP(os.environ["MY_AGENT_CNN_MODEL"], seed=hash(self.game_id) & 0xFFFF, temperature=float(os.getenv("MY_AGENT_CNN_TEMP", "1.0")))
         elif BRAIN == "wmloop":
             # замкнутый цикл: модель пишет/чинит программу, алгоритм ходит. MY_AGENT_WM_MOCK=1 -- вместо модели
             # записанная программа игры (проверка механики цикла без модели)
@@ -195,7 +198,7 @@ class MyAgent(Agent):
     def choose_action(
         self, frames: list[FrameData], latest_frame: FrameData
     ) -> GameAction:
-        if BRAIN in ("goexplore", "wmplan", "wmloop"):
+        if BRAIN in ("goexplore", "wmplan", "wmloop", "cnn"):
             # потолок времени на игру (Kaggle-проба): по истечении -- завершить главный цикл
             if not hasattr(self, "_brain_t0"):
                 self._brain_t0 = _time_mod.time()
@@ -237,7 +240,7 @@ class MyAgent(Agent):
     def main(self) -> None:
         if BRAIN != "llm":
             super().main()
-            if BRAIN in ("goexplore", "wmplan", "wmloop"):
+            if BRAIN in ("goexplore", "wmplan", "wmloop", "cnn"):
                 try:
                     logger.warning(f"{self.game_id}: {BRAIN} {self.explorer.summary()}")
                 except Exception:
