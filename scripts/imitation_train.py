@@ -70,7 +70,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--train", required=True); ap.add_argument("--val", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--epochs", type=int, default=8); ap.add_argument("--bs", type=int, default=128); ap.add_argument("--arch", default="cnn", choices=["cnn", "vit"]); a = ap.parse_args()
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    Xt, yt, mt, mechs, ct = load(a.train); Xv, yv, mv, _, cv = load(a.val)
+    Xt, yt, mt, mechs, ct = load(a.train); Xv, yv, mv, mechs_v, cv = load(a.val)
     print(f"train {len(yt)} val {len(yv)} device {dev}; классы train: {np.bincount(yt.numpy(), minlength=N_ACT).tolist()}")
     model = make_model(a.arch).to(dev); lr = 2e-3 if a.arch == "cnn" else 5e-4
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
@@ -99,7 +99,7 @@ def main():
                 for m, ok in zip(mv[i:i + 512].tolist(), (pred == yv[i:i + 512]).tolist()):
                     per.setdefault(m, [0, 0]); per[m][0] += ok; per[m][1] += 1
         acc = correct / max(1, len(yv))
-        print(f"эпоха {ep + 1}: loss {tl / n:.3f}, val acc {acc:.3f}, клик±2 {chit / max(1, cn):.2f} ({cn}), по механикам " + ", ".join(f"{mechs[m]} {v[0] / v[1]:.2f}" for m, v in sorted(per.items())) + f", {time.time() - t0:.0f} с", flush=True)
+        print(f"эпоха {ep + 1}: loss {tl / n:.3f}, val acc {acc:.3f}, клик±2 {chit / max(1, cn):.2f} ({cn}), по механикам " + ", ".join(f"{mechs_v[m] if m < len(mechs_v) else m} {v[0] / v[1]:.2f}" for m, v in sorted(per.items())) + f", {time.time() - t0:.0f} с", flush=True)
     torch.save({"state": model.state_dict(), "mechs": mechs, "arch": a.arch}, a.out); print("сохранено", a.out)
 
 
