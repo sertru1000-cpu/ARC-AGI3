@@ -161,6 +161,34 @@ def solve(arc, gid, max_states, max_moves, n_clicks, target_levels=1, max_levels
     return {"solved": False, "levels": 0, "path": None, "states": total_states, "moves": env.moves, "seconds": round(time.time() - t0, 1)}
 
 
+def solve_from(arc, gid, prefix, max_states, max_moves, n_clicks=24):
+    """BFS одного уровня от состояния после prefix (перенос решения: путь оригинала довёл близко, дорешиваем)."""
+    t0 = time.time(); env = Env(arc, gid)
+    fr = env.reset_and_replay(prefix); grid, lvl0, state, avail = frame_info(fr)
+    clicks = active_clicks_from(env, prefix, grid, avail)
+    mask = clock_mask_from(env, prefix, grid, avail, n_clicks)
+    def key_of(g):
+        k = g.copy(); k[mask] = -1; return k.tobytes()
+    seen = {key_of(grid): []}; q = deque([(key_of(grid), [], grid, avail)])
+    while q and len(seen) < max_states and env.moves < max_moves:
+        key, path, grid, avail = q.popleft()
+        simple = [("ACTION" + a[-1], None) for a in avail if a in ("1", "2", "3", "4", "5", "ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5")]
+        for act in simple + clicks:
+            fr = env.reset_and_replay(prefix + path + [act])
+            g2, lvl, st, av2 = frame_info(fr)
+            if lvl >= lvl0 + 1:
+                return {"solved": True, "path": prefix + path + [act], "states": len(seen), "moves": env.moves, "seconds": round(time.time() - t0, 1)}
+            if st == "GAME_OVER":
+                continue
+            k2 = key_of(g2)
+            if k2 in seen:
+                continue
+            seen[k2] = path + [act]; q.append((k2, path + [act], g2, av2))
+            if env.moves >= max_moves:
+                break
+    return {"solved": False, "path": None, "states": len(seen), "moves": env.moves, "seconds": round(time.time() - t0, 1)}
+
+
 def active_clicks_from(env, prefix, grid0, avail, step=4):
     if not any(a in ("6", "ACTION6") for a in avail):
         return []
