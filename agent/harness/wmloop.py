@@ -162,8 +162,9 @@ class WMLoop:
     VARIANTS = 3           # параллельных вариантов на пачку (экономия 14.09 23:55); MY_AGENT_WM_VARIANTS; потолок MY_AGENT_WM_MAX_VARIANTS
     TRACE_DIR = None       # каталог для записи промптов/ответов/программ (MY_AGENT_TRACE_DIR)
 
-    def __init__(self, backend, seed: int = 0, temperature: float = 0.6):
+    def __init__(self, backend, seed: int = 0, temperature: float = 0.6, goal_hint: str | None = None):
         self.backend = backend
+        self.goal_hint = goal_hint      # тест «цель раскрыта» (критик, раунд 5): целевая доска уровня 1 без пути
         self.temperature = temperature
         self.rng = random.Random(seed)
         self.phase = "probe"
@@ -225,6 +226,9 @@ class WMLoop:
             ok = self._synthesize(repair=False)
             self.phase = "plan" if ok else "fallback"
             self._log_phase()
+            if ok and self.goal_hint and self.level == 0 and self.strategies == 0:
+                self.strategies += 1
+                self._strategize(); self._log_phase()
             return self.decide(frame, simple_actions, has_click)
         if self.phase == "plan":
             act = self.planner.decide(frame, simple_actions, has_click)
@@ -472,6 +476,12 @@ class WMLoop:
         if noop:
             eff_lines.append("- no visible change: " + ", ".join(noop[:30]))
         prompt = STRATEGY.format(n_states=dg["n_states"], code=self.program_source[-5000:], start=start.board, states="\n".join(states) or "- none", effects="\n".join(eff_lines) or "- none")
+        if self.goal_hint and self.level == 0:
+            gd = diff(start.board, self.goal_hint)
+            prompt += ("\n\nTARGET STATE (oracle hint): the board below is a state of THIS level from which ONE more move completes the level. "
+                       "The completing move and the path to this board are NOT given. Derive the goal criterion from it (what differs from the START board: %d cells: %s%s), "
+                       "write is_goal/progress accordingly, and plan moves that transform the START board into this one.\n%s"
+                       % (len(gd), " ".join(gd[:150]), " ..." if len(gd) > 150 else "", self.goal_hint))
         if len(prompt) > self.PROMPT_CAP:
             prompt = prompt[: self.PROMPT_CAP] + "\n...(truncated)"
         self.calls += 1; self.stats["calls"] += 1; self.stats["strategies"] = self.stats.get("strategies", 0) + 1

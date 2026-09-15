@@ -118,6 +118,10 @@ class MyAgent(Agent):
         super().__init__(*args, **kwargs)
         if BRAIN == "goexplore":
             self.explorer = GoExplore(seed=hash(self.game_id) & 0xFFFF)
+            if os.getenv("MY_AGENT_GO_GOAL_DIR"):
+                _gp = os.path.join(os.getenv("MY_AGENT_GO_GOAL_DIR"), self.game_id[:4] + ".txt")
+                if os.path.exists(_gp):
+                    self.explorer.goal_board = np.array([[int(ch, 16) for ch in row] for row in open(_gp).read().strip().split("\n")], dtype=np.int16)
         elif BRAIN == "wmplan":
             # «модель думает, алгоритм ходит»: программа модели мира из записей (локальная проверка алгоритма)
             if os.getenv("MY_AGENT_WM_PROGRAM_FILE"):
@@ -149,7 +153,12 @@ class MyAgent(Agent):
                 backend = MockLLM(["```python\n" + code + "\n```"] * 8)
             else:
                 backend = default_backend()
-            self.explorer = WMLoop(backend, seed=hash(self.game_id) & 0xFFFF)
+            _hint = None
+            if os.getenv("MY_AGENT_WM_GOAL_HINT_DIR"):
+                _hp = os.path.join(os.getenv("MY_AGENT_WM_GOAL_HINT_DIR"), self.game_id[:4] + ".txt")
+                if os.path.exists(_hp):
+                    _hint = open(_hp, encoding="utf-8").read().strip()
+            self.explorer = WMLoop(backend, seed=hash(self.game_id) & 0xFFFF, goal_hint=_hint)
             self.explorer.game_tag = self.game_id[:4]
         else:
             self.explorer = HeuristicExplorer(seed=hash(self.game_id) & 0xFFFF)

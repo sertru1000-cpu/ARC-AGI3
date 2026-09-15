@@ -44,6 +44,7 @@ class Cell:
     exact: str
     visits: int = 0
     unreliable: bool = False
+    sim: float = 0.0      # близость к целевой доске (доля совпавших клеток), если цель задана
 
 
 @dataclass
@@ -71,6 +72,7 @@ class GoExplore:
     def __init__(self, seed: int = 0) -> None:
         self.rng = random.Random(seed)
         self.st = GoState()
+        self.goal_board = None    # оракульная цель (критик, раунд 5): вес ячейки растёт с долей клеток, равных целевой доске
 
     # ---------------------------------------------------------------- observe
     def observe(self, frame) -> None:
@@ -95,7 +97,8 @@ class GoExplore:
         key = (level, exact)   # ячейка = точная доска (движок детерминирован, взрыва при 10^4 ходах нет)
         cell = st.archive.get(key)
         if cell is None:
-            st.archive[key] = Cell(path=list(st.cur_path), exact=exact)
+            sim = float((grid == self.goal_board).mean()) if (self.goal_board is not None and grid.shape == self.goal_board.shape) else 0.0
+            st.archive[key] = Cell(path=list(st.cur_path), exact=exact, sim=sim)
             st.new_cells += 1
         elif len(st.cur_path) < len(cell.path) and not st.replay_target:
             cell.path = list(st.cur_path); cell.exact = exact
@@ -148,7 +151,11 @@ class GoExplore:
         cands = [(k, c) for k, c in st.archive.items() if not c.unreliable and k[0] == st.level]
         if not cands:
             return None
-        weights = [1.0 / math.sqrt(1.0 + c.visits) for _, c in cands]
+        if self.goal_board is not None:
+            # оракул: exp(20 * близость) -- ячейки, похожие на цель, выбираются на порядки чаще
+            weights = [math.exp(20.0 * c.sim) / math.sqrt(1.0 + c.visits) for _, c in cands]
+        else:
+            weights = [1.0 / math.sqrt(1.0 + c.visits) for _, c in cands]
         return self.rng.choices([k for k, _ in cands], weights=weights, k=1)[0]
 
     def _explore_action(self, frame, simple_actions: list[str], has_click: bool) -> tuple[str, dict | None]:
