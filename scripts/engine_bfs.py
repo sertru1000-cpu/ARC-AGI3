@@ -270,7 +270,7 @@ def _old_solve_unused(arc, gid, max_states, max_moves, n_clicks, target_levels=1
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--env-dir", required=True); ap.add_argument("--games", default=None)
     ap.add_argument("--max-states", type=int, default=3000); ap.add_argument("--max-moves", type=int, default=80000); ap.add_argument("--clicks", type=int, default=24)
-    ap.add_argument("--out", default=None); ap.add_argument("--max-levels", type=int, default=1); a = ap.parse_args()
+    ap.add_argument("--out", default=None); ap.add_argument("--max-levels", type=int, default=1); ap.add_argument("--timeout", type=int, default=120, help="потолок секунд на игру (зависшие варианты)"); a = ap.parse_args()
     import logging; logging.disable(logging.WARNING)
     import arc_agi
     from arc_agi import OperationMode
@@ -279,10 +279,17 @@ def main():
     if a.games:
         want = set(a.games.split(",")); gids = [g for g in gids if g.split("-")[0] in want]
     res = {}
+    import signal
+    def _alarm(signum, frame):
+        raise TimeoutError("per-game timeout")
+    signal.signal(signal.SIGALRM, _alarm)
     for gid in gids:
         try:
+            signal.alarm(a.timeout)
             r = solve(arc, gid, a.max_states, a.max_moves, a.clicks, max_levels=a.max_levels)
-        except Exception as exc:   # битый вариант (спрайт вне поля и т.п.) -- пропускаем, не роняя разметку
+            signal.alarm(0)
+        except Exception as exc:
+            signal.alarm(0)   # битый вариант (спрайт вне поля и т.п.) -- пропускаем, не роняя разметку
             r = {"solved": False, "path": None, "states": 0, "moves": 0, "seconds": 0.0, "error": repr(exc)[:200]}
         res[gid] = r
         print(f"{gid}: {'РЕШЕНО' if r['solved'] else 'нет'} | уровней {r.get('levels', 0)} | путь {len(r['path']) if r['path'] else '-'} {r.get('per_level', '')} | состояний {r['states']} | ходов {r['moves']} | {r['seconds']} с", flush=True)
