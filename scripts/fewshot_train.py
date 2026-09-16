@@ -60,9 +60,25 @@ class Data:
         self.game = d["game"]; self.vid = d["vid"]; self.games = list(d["games"]); self.src = d["src"]
         self.by_game = {g: np.where(self.game == g)[0] for g in range(len(self.games))}
 
+    mode = "variants"
+    shuffle = False
+
     def contexts(self, i, k, rng, wrong_game=False):
-        """k индексов переходов той же игры (или чужой при wrong_game), из других вариантов, чем у i."""
+        """k индексов переходов той же игры (или чужой при wrong_game): режим variants -- из других вариантов, чем у i;
+        режим online (критик р.7) -- предыдущие шаги ТОЙ ЖЕ партии (индексы того же vid меньше i), т.е. первые
+        реальные взаимодействия именно с этой игрой; при wrong_game -- префикс партии чужой игры той же длины."""
         g = int(self.game[i])
+        if self.mode == "online":
+            if k == 0:
+                return np.zeros(0, np.int64)
+            if wrong_game:
+                others = [x for x in self.by_game if x != g]
+                g2 = rng.choice(others); pool = self.by_game[g2]
+                j = int(rng.choice(pool)); prev = pool[(self.vid[pool] == self.vid[j]) & (pool < j)]
+            else:
+                pool = self.by_game[g]; prev = pool[(self.vid[pool] == self.vid[i]) & (pool < i)]
+            prev = prev[-k:] if len(prev) > k else prev
+            return prev.astype(np.int64)
         if wrong_game:
             others = [x for x in self.by_game if x != g and len(self.by_game[x]) >= k]
             g = rng.choice(others)
@@ -104,10 +120,14 @@ def evaluate(model, data, idxs, k, dev, seed=0, wrong_game=False, bs=64):
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--data", required=True); ap.add_argument("--hold", default="sp80,sk48,ls20,cd82,lf52"); ap.add_argument("--out", required=True)
-    ap.add_argument("--steps", type=int, default=3000); ap.add_argument("--bs", type=int, default=32); ap.add_argument("--seed", type=int, default=0); a = ap.parse_args()
+    ap.add_argument("--steps", type=int, default=3000); ap.add_argument("--bs", type=int, default=32); ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--context", default="variants", choices=["variants", "online"]); ap.add_argument("--shuffle-labels", action="store_true"); a = ap.parse_args()
     torch.manual_seed(a.seed); rng = np.random.default_rng(a.seed); random.seed(a.seed)
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    data = Data(a.data); hold = set(a.hold.split(","))
+    data = Data(a.data); hold = set(a.hold.split(",")); data.mode = a.context
+    if a.shuffle_labels:
+        # контроль (критик р.7): метки перемешаны внутри обучения -- ожидается точность на уровне частоты класса
+        perm = torch.randperm(len(data.y)); data.y = data.y[perm]; data.cidx = data.cidx[perm]; data.cf = data.cf[perm]
     hold_g = [i for i, g in enumerate(data.games) if g in hold]; train_g = [i for i in range(len(data.games)) if i not in hold_g]
     train_idx = np.concatenate([data.by_game[g] for g in train_g])
     # внутри train: 10% вариантов каждой игры отложены для проверки «та же игра, новый вариант»
@@ -140,10 +160,17 @@ def main():
             print(line, flush=True)
     torch.save({"state": model.state_dict(), "games": data.games}, a.out)
     print("== итог по отложенным играм (ход = точность действия; клик±2 = попадание карты клика в окрестность ±2)")
+    def with_prefix(idxs, k):
+        if data.mode != "online" or k == 0:
+            return idxs
+        pool = idxs; return np.array([i for i in idxs if ((data.vid[pool] == data.vid[i]) & (pool < i)).sum() >= k], np.int64)
     for g in hold_g:
         idxs = data.by_game[g]; row = f"{data.games[g]:5s} n={len(idxs):4d} вариантов {len(np.unique(data.vid[idxs])):3d}:"
         for k in (0, 5, 20):
-            acc, ch, n, cn = evaluate(model, data, idxs, k, dev, seed=1); row += f"  k={k}: {acc:.3f}/{ch:.2f}"
+            sub = with_prefix(idxs, k)
+            if len(sub) == 0:
+                row += f"  k={k}: —(n=0)"; continue
+            acc, ch, n, cn = evaluate(model, data, sub, k, dev, seed=1); row += f"  k={k}: {acc:.3f}/{ch:.2f}(n={n})"
         acc, ch, n, cn = evaluate(model, data, idxs, 20, dev, seed=1, wrong_game=True); row += f"  чужой k=20: {acc:.3f}/{ch:.2f}"
         print(row, flush=True)
     for name, idxs in (("train-val", tv),):
