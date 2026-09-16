@@ -106,7 +106,7 @@ def main():
                 found = try_path(env, path)
                 if found:
                     way = "transfer"; break
-            if not found and cands:
+            if not found and cands and a.bfs_moves > 0:
                 # короткий BFS от конца перенесённого пути (уровень не взят, но, возможно, близко)
                 pref = cands[0]
                 env.reset_and_replay([]); prefix = []
@@ -118,7 +118,7 @@ def main():
                 r = B.solve_from(arc, gid, prefix, a.bfs_states, a.bfs_moves) if hasattr(B, "solve_from") else None
                 if r and r.get("solved"):
                     found = r["path"]; way = "transfer+bfs"
-            if not found:
+            if not found and a.bfs_moves > 0:
                 r = B.solve(arc, gid, a.bfs_states, a.bfs_moves, 24)
                 if r.get("solved"):
                     found = r["path"]; way = "bfs"
@@ -131,6 +131,7 @@ def main():
             res[gid] = {"solved": False, "path": None, "error": repr(exc)[:160]}
         if (i + 1) % 25 == 0:
             print(f"  {i + 1}/{len(todo)}: решено {n_solved} {how}, {time.time() - t0:.0f} с", flush=True)
+            Path(a.out).write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
     Path(a.out).write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"итого решено {n_solved} из {len(todo)}: {how}; {time.time() - t0:.0f} с -> {a.out}")
 
