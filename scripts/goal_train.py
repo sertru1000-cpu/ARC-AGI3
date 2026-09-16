@@ -74,7 +74,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--data", required=True); ap.add_argument("--hold", default="sp80,sk48,ls20,cd82,lf52"); ap.add_argument("--out", required=True)
     ap.add_argument("--steps", type=int, default=3000); ap.add_argument("--groups", type=int, default=32); ap.add_argument("--seed", type=int, default=0); a = ap.parse_args()
     torch.manual_seed(a.seed); rng = np.random.default_rng(a.seed)
-    dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    import os; dev = torch.device(os.environ.get("GOAL_DEVICE") or ("mps" if torch.backends.mps.is_available() else "cpu"))
     d, X, Xn, y, game, grp, dist, games = load(a.data); hold = set(a.hold.split(","))
     hold_g = [i for i, g in enumerate(games) if g in hold]
     by_grp = {}
