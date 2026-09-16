@@ -1,33 +1,4 @@
-"""Перебор на стоковом Duck (16.09, слово владельца «перебор в бою — тоже попробуем», затем «перенести слой в хвост игры — давай,
-и теперь будем запускать только это вместо базы»). Режим tail (боевой): перебор запускается, когда до конца игры осталось
-<= _BF_TAIL_S секунд И модель не брала уровень >= _BF_STALL_S секунд (уровень ищется от текущего); бюджет = остаток времени.
-Режим pre (первая сборка): перебор до первого вызова модели. Ходы -- через публичный taaf Game.execute_action (зачётные,
-мимо истории модели), поэтому слой работает и на публичном бандле Duck, и на atlas_src. Слой стоит в ОБОИХ режимах
-(TRUE_SUBMISSION тоже), выключатель -- переменная окружения BFS_LAYER=0.
 
-Замысел: в начале каждой игры, до первого вызова модели, обвязка сама ищет уровень 1 перебором по настоящей среде:
-состояние = доска с маской «часов», раскрытие узла = RESET + повтор пути + ход (снимков среды в бою нет, режим ONLINE),
-алфавит = стрелки/SPACE из valid_actions + «живые» клики (точки сетки, меняющие доску из старта). Бюджет на игру:
-_BF_MOVES ходов (12000) и _BF_SECONDS секунд (600). Нашли уровень -- модель начинает с уровня 2; не нашли -- RESET, модель играет как база.
-Ходы перебора идут через step_env(probe=True): зачётные, но не пишутся в историю модели. Маркер [[BFS]] в stdout на игру,
-итог в /kaggle/working/bfs_stats.json.
-
-Пороги, записанные ДО пуска, против базы runs/flash_v1_phaseA (10.25, 40 уровней): ИЗМЕРЕНО локально (docs/bfs2_compare_16_09.txt)
-уровень 1 берётся перебором в 15/25 игр при неограниченном бюджете; в бюджет 12000 ходов (с повтором пути) укладываются примерно ar25, ft09, lf52, lp85, ls20,
-sk48 (2849 ходов со снимками, с повтором пути -- нет), sp80, tu93, vc33, cd82 -- из них база не берёт sk48, sp80, cd82 (ур.1).
-Ожидание по уровням: +2..3 над 40; по баллу RHAE: ≈ +0 (уровень за тысячи ходов стоит ~0), возможен вред от потраченного
-времени (до 10 мин из 132 на игру). Польза -- дельта >= +4 балла и парный критерий p < 0.05; вред -- <= -4; иначе шум.
-Механизм: строк [[BFS]] = 25, суммарные ходы перебора в логе. Только оффлайн (TRUE_SUBMISSION=False).
-Проба: --probe ставит потолок игры 1800 с (сравнение с docs/base30_flash_v1_h115.json, 3.32).
-"""
-import argparse, json, os, sys
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_lvfact_reset_notebook import build  # noqa: E402
-
-PROBE_CAP_S = 1800.0
-
-BFS_CELL = r'''
 # =====================================================================
 # ПЕРЕБОР ПЕРЕД МОДЕЛЬЮ (16.09): до первого вызова модели обвязка ищет уровень 1 перебором по настоящей среде
 # (RESET + повтор пути + ход; состояние = доска с маской часов; клики -- «живые» точки сетки). Только оффлайн.
@@ -37,8 +8,8 @@ from collections import deque as _bf_deque
 import numpy as _bf_np
 import inference.framework.solver as _bf_solver
 import arcengine as _bf_arcengine
-_BF_MOVES, _BF_SECONDS, _BF_MAX_STATES, _BF_CLICK_STEP = __MOVES__, __SECONDS__, 4000, 4
-_BF_MODE, _BF_TAIL_S, _BF_STALL_S = "__MODE__", __TAIL__, __STALL__   # tail: перебор в хвосте игры; pre: до первого вызова
+_BF_MOVES, _BF_SECONDS, _BF_MAX_STATES, _BF_CLICK_STEP = 12000, 600.0, 4000, 4
+_BF_MODE, _BF_TAIL_S, _BF_STALL_S = "tail", 600.0, 600.0   # tail: перебор в хвосте игры; pre: до первого вызова
 _bf_stats = {"games": 0, "levels": 0, "moves": 0, "seconds": 0.0, "per_game": {}}
 _BF_SIMPLE = ("ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5")
 _BF_M2E = {"ACTION1": "UP", "ACTION2": "DOWN", "ACTION3": "LEFT", "ACTION4": "RIGHT", "ACTION5": "SPACE"}
@@ -255,34 +226,3 @@ if _bf_os.environ.get("BFS_LAYER", "1") != "0":
     _bf_solver._HarnessGameSession.play = _bf_play
     _bf_atexit.register(_bf_dump)
     print("[[BFS]] слой установлен (%s): ходов %d, секунд %.0f, хвост %.0f с, застой %.0f с; TRUE_SUBMISSION=%s" % (_BF_MODE, _BF_MOVES, _BF_SECONDS, _BF_TAIL_S, _BF_STALL_S, TRUE_SUBMISSION), flush=True)
-'''
-
-
-def cell(moves: int, seconds: float, mode: str = "tail", tail_s: float = 600.0, stall_s: float = 600.0) -> str:
-    return (BFS_CELL.replace("__MOVES__", str(moves)).replace("__SECONDS__", repr(float(seconds))).replace("__MODE__", mode)
-            .replace("__TAIL__", repr(float(tail_s))).replace("__STALL__", repr(float(stall_s))))
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", action="store_true", help="потолок игры %s с (проба 30 мин)" % PROBE_CAP_S)
-    ap.add_argument("--moves", type=int, default=12000); ap.add_argument("--seconds", type=float, default=600.0)
-    ap.add_argument("--mode", default="tail", choices=["tail", "pre"]); ap.add_argument("--tail", type=float, default=600.0); ap.add_argument("--stall", type=float, default=600.0)
-    a = ap.parse_args()
-    out = "kernels/notebooks_stockflash_bfs" + ("tail" if a.mode == "tail" else "")
-    slug = "sergueimakarov/arc3-stock-flash-bfs" + ("tail" if a.mode == "tail" else "")
-    build(cell(a.moves, a.seconds, a.mode, a.tail, a.stall), out, slug, "arc3 stock flash bfs" + (" tail" if a.mode == "tail" else ""), "_bf_stats = ")
-    if a.probe:
-        p = os.path.join(out, "submission.ipynb")
-        nb = json.load(open(p, encoding="utf-8"))
-        c15 = "".join(nb["cells"][15]["source"])
-        marker = "# Play the benchmark; watchdog stop and teardown run even if it raises."
-        assert marker in c15
-        c15 = c15.replace(marker, "if not TRUE_SUBMISSION:\n    bm.solver.max_runtime_s_per_game = %r    # проба вне боя\n\n" % PROBE_CAP_S + marker, 1)
-        nb["cells"][15]["source"] = c15.splitlines(keepends=True)
-        json.dump(nb, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        print("ok   проба: потолок игры %s с" % PROBE_CAP_S)
-
-
-if __name__ == "__main__":
-    main()
