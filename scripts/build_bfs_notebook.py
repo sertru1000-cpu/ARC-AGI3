@@ -270,7 +270,7 @@ def main() -> None:
     ap.add_argument("--mode", default="tail", choices=["tail", "pre"]); ap.add_argument("--tail", type=float, default=600.0); ap.add_argument("--stall", type=float, default=600.0)
     a = ap.parse_args()
     out = "kernels/notebooks_stockflash_bfs" + ("tail" if a.mode == "tail" else "")
-    slug = "sergueimakarov/arc3-stock-flash-bfs" + ("tail" if a.mode == "tail" else "")
+    slug = "sergueimakarov/arc3-stock-flash-bfs" + ("-tail" if a.mode == "tail" else "")
     build(cell(a.moves, a.seconds, a.mode, a.tail, a.stall), out, slug, "arc3 stock flash bfs" + (" tail" if a.mode == "tail" else ""), "_bf_stats = ")
     if a.probe:
         p = os.path.join(out, "submission.ipynb")
