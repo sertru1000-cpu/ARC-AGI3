@@ -335,6 +335,23 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">bfs: перебор перед моделью (стоковый Duck Flash-Next + слой)</span><span class="v-date">собрано 16.09 20:00 &middot; пуш пробы 30 мин &mdash; только по слову владельца</span></div>
+          <span class="badge phase-a">проба 30 мин против базы-30 3.32 (13 игр с уровнем)</span>
+        </div>
+        <p class="summary"><strong>Слово владельца 16.09: «перебор в бою &mdash; тоже попробуем».</strong> До первого вызова модели обвязка сама ищет уровень 1 перебором по настоящей среде: состояние = доска с маской «часов», раскрытие узла = RESET + повтор пути + ход (снимков среды в бою нет: режим ONLINE, локального объекта игры нет &mdash; проверено по коду решателя), алфавит = стрелки/SPACE + «живые» клики сетки с шагом 4, склеенные по одинаковому эффекту на доске (sp80/cd82: счётчик кликов делает живой любую точку). Бюджет 12000 ходов и 600 с на игру; нашли &mdash; модель стартует с уровня 2, нет &mdash; RESET и модель играет как база. Ходы идут через <code>step_env(probe=True)</code>: зачётные, но в историю модели не попадают.</p>
+        <ul class="changes">
+          <li>код: <code>scripts/build_bfs_notebook.py</code> (ячейка 15, обёртка <code>_HarnessGameSession.play</code>, маркер <code>[[BFS]]</code>, итог <code>/kaggle/working/bfs_stats.json</code>), сухой прогон <code>scripts/test_bfs_patch.py</code> на настоящем модуле solver и локальном движке; кернел <code>arc3-stock-flash-bfs</code>, каталог <code>kernels/notebooks_stockflash_bfs</code>. Только оффлайн (TRUE_SUBMISSION=False).</li>
+          <li>сухой прогон 16.09 (12 игр): уровень 1 найден в lp85, ft09, sp80, ls20, cd82, tu93, vc33 (590&ndash;5300 ходов, &le; 2 с локально); не найден: sk48, ar25, dc22 (бюджет 12000 ходов исчерпан &mdash; повтор пути дороже снимка в 4&ndash;10 раз), lf52 (клики-цели появляются после ходов, стартовый алфавит их не видит), sc25 (нет живых ходов). База не берёт уровень 1 в sp80 и cd82 &mdash; это и есть ожидаемый прирост.</li>
+          <li>арифметика RHAE до пуска: уровень за тысячи ходов стоит &asymp; 0 балла (sp80: путь 4, ходов 1644 &rarr; (4/1644)&sup2;&times;100 = 0.0006); польза возможна только если модель с уровня 2 берёт то, чего не брала с уровня 1. Расход времени: до 10 мин из 132 на игру, через шлюз 20&ndash;50 мс/ход.</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска</strong> (проба 30 мин, база-30 3.32, 13 игр с уровнем; полный прогон &mdash; runs/flash_v1_phaseA 10.25, 40 уровней): механизм &mdash; строк [[BFS]] = 25, найдено &ge; 6 игр (по сухому прогону 7); результат &mdash; игр с уровнем &ge; 15 и балл &ge; 3.3 &mdash; слой не мешает, полный прогон; балл &le; 2.3 &mdash; вред (время перебора съедает вызовы). Ожидание, записанное честно: уровней +2 (sp80, cd82), балл &asymp; +0 &plusmn; шум 0.5.</p>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">wmloop: «модель думает, алгоритм ходит» (наш харнес + Flash-Next)</span><span class="v-date">собрано 15.09 00:05 &middot; пуш пробы 30 мин после v5 на API (~00:55)</span></div>
           <span class="badge phase-a">проба 30 мин: работает ли цикл на vLLM; уровни против базы-30 3.32</span>
         </div>
@@ -1542,7 +1559,7 @@
 
   <footer>
     <span>Источники: <span class="mono">docs/plan_top10_by_3009.md</span>, память сессии, <span class="mono">kaggle competitions submissions</span>.</span>
-    <span>обновлено 09.09.2026</span>
+    <span>обновлено 16.09.2026</span>
   </footer>
 
 </div>
