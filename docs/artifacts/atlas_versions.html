@@ -331,6 +331,23 @@
       </div>
     </div>
 
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="v-label"><span class="v-num">bfscarry: перебор после застоя + carry (стоковый Duck Flash-Next + два слоя)</span><span class="v-date">собрано 17.09 &middot; проба 1 ч Фазы A по слову владельца «пуш на 1 час на фазу А»</span></div>
+          <span class="badge wait">проба 1 ч против трёх баз-60: 6.11 / 5.40 / 3.91</span>
+        </div>
+        <p class="summary">Если модель 30 минут не берёт уровень и после перебора ей останется &ge; 15 минут, обвязка один раз на уровень ищет его перебором по настоящей игре (&le; 12000 ходов / 600 с). Найденный путь (в записи ходов модели) идёт во вход блоком LEVEL N SOLVED BY HARNESS SEARCH, модель мира переносится, план стирается; уровни, взятые моделью, обрабатывает carry как в пробах 1–2.</p>
+        <ul class="changes">
+          <li>код: <code>scripts/build_bfscarry_notebook.py --probe</code> (режим stall в <code>build_bfs_notebook.py</code> + <code>build_carry_notebook.py</code>); кернел <code>arc3-stock-flash-bfscarry</code>.</li>
+          <li class="fix">проверки <code>scripts/test_bfscarry_patch.py</code> 16/16 на duck_base: путь перебора из записи модели на чистой игре берёт уровень; найдена и исправлена ошибка порядка (запись перебора разбиралась после сборки стокового промпта).</li>
+          <li>контрфактика <code>scripts/bfs_stall_counterfactual.py</code> на трёх базах (runs/bfs_stall_cf_17_09): застой 1800 — найдено 4/3/5, потеря 0.70/1.39/0.71, выгода-сценарий +0.3…+0.5, нетто &minus;0.30/&minus;1.09/&minus;0.21.</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска</strong>: механизм — переборов 12–22, найдено &ge; 2, путей перебора во входе = найденным, ошибок 0; сигнал — балл &gt; 6.11 И L2 &ge; 8 игр; неотличимо — балл 3.5–6.11 или L2 4–7; вред — балл &lt; 3.5 или уровней &le; 19. Прогноз по контрфактике: нетто &minus;0.2…&minus;1.1.</p>
+      </div>
+    </div>
+
     <div class="entry">
       <div class="node"></div>
       <div class="card">
