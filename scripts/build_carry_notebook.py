@@ -1,208 +1,200 @@
-"""Сборка прогона 2б: постоянное окружение песочницы — импорты и определения переносятся между вызовами.
+"""Перенос модели мира через взятие уровня + полный путь уровня (17.09, слово владельца: «формулировку цели и механики
+модель мира при переходе на новый уровень плюс давать полный путь — передаём при взятии уровня; собирай и пуш на 1 час фаза А»).
 
-ЗАМЕР ДО СБОРКИ (11.09, 1307 ходов базы). Код на ход 225 токенов, из них повторные строки 83.
-Переносить безопасно ТОЛЬКО импорты и верхнеуровневые def/class — 31 токен на ход (около +2% вызовов).
-Повторные присваивания (34 токена: `a=current_frame.ascii.split('\n')` 154 раза) НЕ переносятся —
-в них устаревшая доска. Ожидаемый эффект ниже того, что различит прогон; решение пускать ли — в субботу.
+Что меняет в стоковом Duck (tool_agent.py публичного бандла):
+1. ToolAgent._update_summarized_knowledge_from_step_summary при level_transition обнуляет шесть полей рабочей модели мира
+   (world/goal/action model, findings, questions, plan). Слой сохраняет world_model, goal_model, action_model с пометкой
+   «[carried from level N -- re-check on this board]»; findings/questions/plan по-прежнему стираются (они про старую доску).
+   При run_complete/game_over -- стоковое поведение.
+2. ToolAgent._build_user_prompt: на всех промптах нового уровня перед стоковым текстом -- блок LEVEL N SOLUTION PATH:
+   точная последовательность ходов, взявшая уровень N (от последнего RESET на этом уровне до завершающего хода, в сжатой
+   записи «UP x3»), и сколько ходов всего ушло на уровень. Если путь длиннее _CR_PATH_MAX -- последние _CR_PATH_MAX ходов
+   с пометкой. Путь восстанавливается из history_entries (полная история партии в runtime state; action -- строка
+   вида «MOUSE(row=46, col=38)», RESET -- «RESET»).
+Слой стоит в ОБОИХ режимах (TRUE_SUBMISSION тоже), выключатель -- переменная окружения CARRY_LAYER=0.
+Маркер [[CARRY]] в stdout на каждый перенос, итог /kaggle/working/carry_stats.json.
+Сверка на настоящих историях (события трёх прогонов базы): число ходов на уровень, восстановленное слоем, совпало
+с actions_per_level в 121 случае из 121; путь от последнего RESET -- медиана 23, максимум 119 (кап 150 не срабатывает).
 
-ЧТО ДЕЛАЕТ ПАТЧ.
-  * После успешного вызова (в результате нет поля error) из кода модели берутся верхнеуровневые
-    import / from-import / def (без декораторов, без имён рантайма, только с константными значениями по
-    умолчанию; классы не переносятся — их тело исполняет код); одинаковое имя заменяет прежнее.
-  * Перед следующим вызовом эти определения подставляются в начало кода. Песочница компилирует код
-    под именем <python_tool>, `exec` и `compile` в белом списке нет — поэтому номера строк в трассировке
-    СЪЕЗЖАЮТ на длину подставленного; патч возвращает их в тексте результата к номерам кода модели.
-  * Если ошибка случилась в самой подстановке ДО кода модели и ни одно действие не исполнено —
-    перенесённое сбрасывается и вызов повторяется без подстановки (действий ещё не было, повтор безопасен).
-    Если действия исполнены — повтора нет никогда.
-  * Системная фраза «Every `python` tool call starts fresh...» (prompts.py:80) заменяется описанием переноса,
-    а в конец пользовательского промпта дописывается список перенесённых имён.
+Повод (ИЗМЕРЕНО 17.09): в полном прогоне базы поле Cross-level notes, единственное переживающее переход, донесено
+в 2 промпта из 146 с пометкой о новом уровне; в транскрипте ft09 модель мира уровня 1 содержательна
+(«goal = make grid match the mini-map»), в первом промпте уровня 2 пусто. Прошлый слой lvfact (13–14.09) давал только
+завершающий ход + 8 ходов и доску, модель мира при этом стиралась.
 
-Пушить ВЕРСИЕЙ 2 в `arc3-stock-flash-sched` (существующий кернел с данными соревнования).
+Проба (--probe): потолок игры 3600 с. Точка сравнения -- обрезка на 3600 с трёх прогонов одной базовой конфигурации
+(scripts/truncate_run.py, h115): flash_v1_phaseA 6.11 / keithtyser 5.40 / tufa 3.91 (среднее 5.14);
+второй уровень в 5 / 5 / 5 играх; уровней всего 28 / 27 / 22.
+Пороги, записанные ДО пуска:
+  механизм -- переходов (transitions) >= 15 (у баз 22–28 уровней за час), путей (paths) = переходов, ошибок 0;
+    carried_nonempty >= 30% переходов (модель мира есть в 54% промптов базы: 724 из 1351), иначе перенос инертен и
+    проба меряет только путь -- так и докладывать;
+  сигнал -- второй уровень в >= 8 играх (у всех трёх баз ровно 5) И уровней >= 30 (максимум баз 28);
+  не отличимо -- второй уровень в 4–7 играх или балл в 3.9–6.1;
+  вред -- второй уровень в <= 3 играх ИЛИ балл < 3.5 (ниже минимума баз с запасом).
 
-usage:  .venv/bin/python scripts/build_carry_notebook.py
+usage:  .venv/bin/python scripts/build_carry_notebook.py --probe
 """
-import ast
-import json
-import os
+import argparse, json, os, sys
 
-CELL = r'''
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from build_lvfact_reset_notebook import build  # noqa: E402
+
+PROBE_CAP_S = 3600.0
+
+CARRY_CELL = r'''
 # =====================================================================
-# ПОСТОЯННОЕ ОКРУЖЕНИЕ ПЕСОЧНИЦЫ: импорты и def/class из прошлых успешных вызовов подставляются снова.
-# Переменные НЕ переносятся (в них устаревшая доска). Номера строк в ошибках возвращаются к коду модели.
+# ПЕРЕНОС МОДЕЛИ МИРА ЧЕРЕЗ ВЗЯТИЕ УРОВНЯ + ПОЛНЫЙ ПУТЬ УРОВНЯ (17.09). Выключатель CARRY_LAYER=0.
 # =====================================================================
-import ast as _cast, re as _cre, dataclasses as _cdc
-from collections import OrderedDict as _COD
-import inference.agent.tool_agent as _cta
+import os as _cr_os, json as _cr_json, atexit as _cr_atexit, re as _cr_re
+import inference.agent.tool_agent as _cr_wta
+_CR_KEEP = ("world_model", "goal_model", "action_model")
+_CR_PATH_MAX = __PATH_MAX__
+_CR_TAG = _cr_re.compile(r"^\[carried from level \d+ -- re-check on this board\] ")
+_cr_stats = {"transitions": 0, "carried_nonempty": 0, "carried_fields": 0, "paths": 0, "path_moves": [], "level_moves": [],
+             "prompts_with_path": 0, "errors": 0}
 
-_CARRY_MAX_CHARS = 12000
-_CARRY_RUNTIME = {"current_frame", "previous_frame", "history", "transitions", "last_transition",
-                  "valid_actions", "last_action_result", "action", "result", "print"}
-_CARRY_STATS = {"calls": 0, "prefixed": 0, "stored": 0, "line_fixes": 0, "prefix_errors": 0, "fail": 0, "sys_fail": 0}
-_CARRY_OLD = "- Every `python` tool call starts fresh. Re-import modules or re-define any custom utility logic you need.\n"
-_CARRY_NEW = ("- Imports and top-level `def`/`class` definitions from your earlier successful `python` calls in this game are "
-              "automatically re-loaded before each new call: do not re-import or re-define them unless you want to change them "
-              "(a new definition with the same name replaces the old one). Variables are NOT carried: recompute anything "
-              "derived from `current_frame` or `history` in every call.\n")
-
-_carry_orig_sys = _cta._build_system_prompt
-
-
-def _carry_build_system_prompt(*a, **k):
-    text = _carry_orig_sys(*a, **k)
-    if _CARRY_OLD in text:
-        return text.replace(_CARRY_OLD, _CARRY_NEW)
-    _CARRY_STATS["sys_fail"] += 1
-    print("[CARRY] фраза о свежем старте не найдена в системном промпте", flush=True)
-    return text
-
-
-_cta._build_system_prompt = _carry_build_system_prompt
-
-
-def _carry_items(tree, src):
+def _cr_rle(acts):
     out = []
-    for node in tree.body:
-        if isinstance(node, (_cast.Import, _cast.ImportFrom)):
-            seg = _cast.get_source_segment(src, node)
-            if seg:
-                names = ", ".join(a.asname or a.name.split(".")[0] for a in node.names)
-                out.append(("import:" + seg, seg, names))
-        elif isinstance(node, (_cast.FunctionDef, _cast.AsyncFunctionDef)):
-            # Классы и функции с ВЫЧИСЛЯЕМЫМИ значениями по умолчанию не переносим: их определение
-            # исполняет код (тело класса, выражения в defaults) и может упасть или захватить старую доску.
-            if node.decorator_list or node.name in _CARRY_RUNTIME:
-                continue
-            defaults = list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]
-            if any(not isinstance(d, _cast.Constant) for d in defaults):
-                continue
-            seg = _cast.get_source_segment(src, node)
-            if not seg:
-                continue
-            label = "%s(%s)" % (node.name, ", ".join(x.arg for x in node.args.args))
-            out.append(("def:" + node.name, seg, label))
-    return out
+    for a in acts:
+        if out and out[-1][0] == a:
+            out[-1][1] += 1
+        else:
+            out.append([a, 1])
+    return ", ".join(a if n == 1 else "%s x%d" % (a, n) for a, n in out)
 
+def _cr_path(history_entries, new_level):
+    """(ходов на уровне всего, ходы от последнего RESET до завершающего включительно) для уровня new_level-1."""
+    ents = list(history_entries or [])
+    idx = None
+    for i, e in enumerate(ents):
+        try:
+            if int(getattr(e.frame, "level", 0) or 0) >= int(new_level):
+                idx = i; break
+        except Exception:
+            continue
+    if idx is None or idx == 0:
+        return None
+    # кадр записи -- ПОСЛЕ хода: первая запись с уровнем new_level-1 -- это завершающий ход предыдущего уровня
+    # (или стартовый кадр без хода), поэтому путь начинается со следующей за ней.
+    j = idx - 1
+    while j - 1 >= 0 and int(getattr(ents[j - 1].frame, "level", 0) or 0) == int(new_level) - 1:
+        j -= 1
+    start = j + 1
+    acts = [str(getattr(e, "action", "") or "").strip() for e in ents[start:idx + 1]]
+    acts = [a for a in acts if a]
+    total = len(acts)
+    last_reset = max([k for k, a in enumerate(acts) if a.upper().startswith("RESET")], default=-1)
+    eff = acts[last_reset + 1:]
+    return total, eff
 
-_CARRY_LINE = _cre.compile(r'(File \\?"<python_tool>\\?", line )(\d+)')
+def _cr_block(level_done, total, eff):
+    shown = eff[-_CR_PATH_MAX:]
+    cut = len(eff) - len(shown)
+    head = ("LEVEL %d SOLUTION PATH (exact, from the harness log): level %d was completed by this move sequence "
+            "(%d moves since the last RESET of that level; %d moves spent on the level in total; the final move completed it):"
+            % (level_done, level_done, len(eff), total))
+    body = ("(first %d moves omitted) " % cut if cut > 0 else "") + _cr_rle(shown) + "."
+    tail = ("Your world/goal/action model from level %d is carried into the world model below, marked [carried]. "
+            "Check on the new board whether the same goal and mechanics still hold and whether an analogous sequence applies, "
+            "then act; revise the carried model where the new board contradicts it." % level_done)
+    return head + "\n" + body + "\n" + tail
 
+if _cr_os.environ.get("CARRY_LAYER", "1") != "0":
+    _cr_orig_update = _cr_wta.ToolAgent._update_summarized_knowledge_from_step_summary
+    def _cr_update(self):
+        s = getattr(self, "_last_step_summary", None) or {}
+        if not (s.get("level_transition") and not s.get("run_complete") and not s.get("game_over")):
+            return _cr_orig_update(self)
+        try:
+            know = getattr(self, "_summarized_knowledge", None) or {}
+            saved = {k: _CR_TAG.sub("", str(know.get(k, "") or "")) for k in _CR_KEEP}
+        except Exception as _e:
+            _cr_stats["errors"] += 1; print("[CARRY] сбой чтения модели мира: %r" % (_e,), flush=True)
+            return _cr_orig_update(self)
+        out = _cr_orig_update(self)
+        try:
+            try:
+                new_level = int(s.get("level"))
+            except (TypeError, ValueError):
+                new_level = None
+            prev = (new_level - 1) if new_level else 0
+            n = 0
+            for k, v in saved.items():
+                if v.strip():
+                    self._summarized_knowledge[k] = "[carried from level %d -- re-check on this board] %s" % (prev, v); n += 1
+            _cr_stats["transitions"] += 1; _cr_stats["carried_fields"] += n
+            if n:
+                _cr_stats["carried_nonempty"] += 1
+            print("[[CARRY]] переход на уровень %s: перенесено полей %d (%s)" % (new_level, n, ", ".join(k for k, v in saved.items() if v.strip()) or "-"), flush=True)
+            _cr_dump()
+        except Exception as _e:
+            _cr_stats["errors"] += 1; print("[CARRY] сбой переноса: %r" % (_e,), flush=True)
+        return out
+    _cr_wta.ToolAgent._update_summarized_knowledge_from_step_summary = _cr_update
 
-def _carry_first_line(content):
-    m = _CARRY_LINE.search(content)
-    return int(m.group(2)) if m else None
+    _cr_orig_prompt = _cr_wta.ToolAgent._build_user_prompt
+    def _cr_prompt(self, action_num, *args, **kwargs):
+        text = _cr_orig_prompt(self, action_num, *args, **kwargs)
+        try:
+            st = getattr(self, "_cr_state", None)
+            if st is None:
+                st = {"level": None, "block": None}; self._cr_state = st
+            lv = getattr(kwargs.get("current_frame"), "level", None)
+            if lv is not None:
+                lv = int(lv)
+                if st["level"] is not None and lv > st["level"]:
+                    st["block"] = None
+                    got = _cr_path(kwargs.get("history_entries"), lv)
+                    if got is not None:
+                        total, eff = got
+                        st["block"] = _cr_block(lv - 1, total, eff)
+                        _cr_stats["paths"] += 1; _cr_stats["path_moves"].append(len(eff)); _cr_stats["level_moves"].append(total)
+                        print("[[CARRY]] путь уровня %d: %d ходов от последнего RESET, всего %d" % (lv - 1, len(eff), total), flush=True)
+                        _cr_dump()
+                st["level"] = lv if st["level"] is None else max(st["level"], lv)
+            if st.get("block"):
+                _cr_stats["prompts_with_path"] += 1
+                return st["block"] + "\n\n" + text
+            return text
+        except Exception as _e:
+            _cr_stats["errors"] += 1; print("[CARRY] сбой промпта: %r" % (_e,), flush=True)
+            return text
+    _cr_wta.ToolAgent._build_user_prompt = _cr_prompt
 
-
-def _carry_fix_lines(content, P):
-    def rep(m):
-        n = int(m.group(2))
-        _CARRY_STATS["line_fixes"] += 1
-        return m.group(1) + (str(n - P) if n > P else "%d (inside re-loaded definitions)" % n)
-    return _CARRY_LINE.sub(rep, content)
-
-
-_carry_orig_run = _cta.ToolAgent._run_python_tool
-
-
-def _carry_run_python_tool(self, state_path, arguments):
-    # подготовка: любой сбой здесь — вызов без переноса, код ещё не исполнялся
-    try:
-        code = str((arguments or {}).get("code", "")).rstrip()
-        store = getattr(self, "_carry_store", None)
-        if store is None:
-            store = _COD()
-            self._carry_store = store
-        _CARRY_STATS["calls"] += 1
-        tree = _cast.parse(code)
-        prefix = "\n".join(seg for seg, _ in store.values())
-    except Exception:
-        return _carry_orig_run(self, state_path, arguments)
-
-    if prefix:
-        new_args = dict(arguments)
-        new_args["code"] = prefix + "\n" + code
-        P = prefix.count("\n") + 1
-        _CARRY_STATS["prefixed"] += 1
-    else:
-        new_args, P = arguments, 0
-    res = _carry_orig_run(self, state_path, new_args)   # ИСПОЛНЯЕТСЯ ОДИН РАЗ
-
-    # разбор результата: любой сбой здесь — вернуть результат как есть, НИКОГДА не запускать повторно
-    try:
-        content = res.content
-        is_error = '"error"' in content
-        if P and is_error and not res.step_executed:
-            first = _carry_first_line(content)
-            if first is not None and first <= P:
-                # ошибка в самой подстановке, код модели не начинался, действий нет — сброс и чистый повтор
-                _CARRY_STATS["prefix_errors"] += 1
-                store.clear()
-                print("[CARRY] ошибка в перенесённых определениях — сброс и вызов без подстановки", flush=True)
-                return _carry_orig_run(self, state_path, arguments)
-        if P:
-            content = _carry_fix_lines(content, P)
-        if not is_error:
-            for key, seg, label in _carry_items(tree, code):
-                store.pop(key, None)
-                store[key] = (seg, label)
-                _CARRY_STATS["stored"] += 1
-            while store and sum(len(s) + 1 for s, _ in store.values()) > _CARRY_MAX_CHARS:
-                store.popitem(last=False)
-        return res if content == res.content else _cdc.replace(res, content=content)
-    except Exception as _exc:
-        _CARRY_STATS["fail"] += 1
-        print("[CARRY] сбой разбора результата: %r" % (_exc,), flush=True)
-        return res
-
-
-_cta.ToolAgent._run_python_tool = _carry_run_python_tool
-
-_carry_orig_prompt = _cta.ToolAgent._build_user_prompt
-
-
-def _carry_build_user_prompt(self, action_num, **kw):
-    text = _carry_orig_prompt(self, action_num, **kw)
-    try:
-        store = getattr(self, "_carry_store", None)
-        if store:
-            labels = [label for _, label in store.values()][-30:]
-            text += "\n\nRE-LOADED in python from your earlier calls (already defined, do not rewrite): " + "; ".join(labels)
-    except Exception:
-        pass
-    return text
-
-
-_cta.ToolAgent._build_user_prompt = _carry_build_user_prompt
-
-print("CARRY: перенос импортов и def/class между вызовами python (%s). Замер до сборки: переносимо 31 из 83 "
-      "повторных токенов кода на ход, около +2%% вызовов." % ("бой" if TRUE_SUBMISSION else "Фаза A"), flush=True)
+    def _cr_dump():
+        try:
+            _cr_os.makedirs("/kaggle/working", exist_ok=True)
+            _cr_json.dump(_cr_stats, open("/kaggle/working/carry_stats.json", "w"), indent=1)
+        except Exception:
+            pass
+    _cr_atexit.register(_cr_dump)
+    print("[[CARRY]] слой установлен: модель мира (world/goal/action) переносится через взятие уровня, путь уровня во входе "
+          "(до %d ходов); TRUE_SUBMISSION=%s" % (_CR_PATH_MAX, TRUE_SUBMISSION), flush=True)
 '''
 
 
+def cell(path_max: int) -> str:
+    return CARRY_CELL.replace("__PATH_MAX__", str(int(path_max)))
+
+
 def main() -> None:
-    src = json.load(open("kernels/notebooks_stockflash/submission.ipynb", encoding="utf-8"))
-    nb = json.loads(json.dumps(src))
-    body = "".join(nb["cells"][15]["source"])
-    anchor = "    seconds=budget - 600.0\n)"
-    at = body.find(anchor)
-    if at < 0 or body.find("await bm.run(") < 0:
-        raise SystemExit("не нашёл стоковый soft_end или запуск прогона")
-    at += len(anchor)
-    code = body[:at] + "\n" + CELL + body[at:]
-    nb["cells"][15]["source"] = code.splitlines(keepends=True)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--probe", action="store_true", help="потолок игры %s с (проба 1 ч)" % PROBE_CAP_S)
+    ap.add_argument("--path-max", type=int, default=150)
+    a = ap.parse_args()
     out = "kernels/notebooks_stockflash_carry"
-    os.makedirs(out, exist_ok=True)
-    open(os.path.join(out, "cell15.py"), "w", encoding="utf-8").write(CELL)
-    json.dump(nb, open(os.path.join(out, "submission.ipynb"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    meta = json.load(open("kernels/notebooks_stockflash_sched/kernel-metadata.json"))
-    json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
-    compile(code, "c15", "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
-    diff = [i for i in range(18) if "".join(nb["cells"][i]["source"]) != "".join(src["cells"][i]["source"])]
-    print("ok   изменена только ячейка 15:", diff == [15])
-    print("ok   исполнение исходного метода вне try, повторный запуск только без действий:",
-          "res = _carry_orig_run(self, state_path, new_args)   # ИСПОЛНЯЕТСЯ ОДИН РАЗ" in CELL and "not res.step_executed" in CELL)
-    print("ok   потолок на игру не трогаем:", "max_runtime_s_per_game" not in CELL)
-    print("ok   слаг для пуша:", meta["id"])
-    print("ok   компилируется, %d символов" % len(code))
+    slug = "sergueimakarov/arc3-stock-flash-carry"
+    build(cell(a.path_max), out, slug, "arc3 stock flash carry", "_cr_stats = ")
+    if a.probe:
+        p = os.path.join(out, "submission.ipynb")
+        nb = json.load(open(p, encoding="utf-8"))
+        c15 = "".join(nb["cells"][15]["source"])
+        marker = "# Play the benchmark; watchdog stop and teardown run even if it raises."
+        assert marker in c15
+        c15 = c15.replace(marker, "if not TRUE_SUBMISSION:\n    bm.solver.max_runtime_s_per_game = %r    # проба вне боя\n\n" % PROBE_CAP_S + marker, 1)
+        nb["cells"][15]["source"] = c15.splitlines(keepends=True)
+        json.dump(nb, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        print("ok   проба: потолок игры %s с" % PROBE_CAP_S)
 
 
 if __name__ == "__main__":
