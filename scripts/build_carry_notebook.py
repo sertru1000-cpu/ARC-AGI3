@@ -99,6 +99,33 @@ def _cr_block(level_done, total, eff):
             "then act; revise the carried model where the new board contradicts it." % level_done)
     return head + "\n" + body + "\n" + tail
 
+def _cr_block_bfs(rec):
+    level_done = int(rec.get("level_done") or 0); path = list(rec.get("path") or [])
+    shown = path[-_CR_PATH_MAX:]; cut = len(path) - len(shown)
+    head = ("LEVEL %d SOLVED BY HARNESS SEARCH (not by your own moves): while you were stuck, the harness searched the real game and "
+            "completed level %d with this move sequence from the start of that level (right after RESET; %d moves in the path, "
+            "%d search moves in total). You are now on level %d -- ignore any line saying you are still on the same level:"
+            % (level_done, level_done, len(path), int(rec.get("moves") or 0), level_done + 1))
+    body = ("(first %d moves omitted) " % cut if cut > 0 else "") + _cr_rle(shown) + "."
+    tail = ("Study what this sequence did to infer the goal and mechanics of level %d, update the world model below (your model from level %d "
+            "is carried, marked [carried]), then check whether the same goal holds on the new board and act." % (level_done, level_done))
+    return head + "\n" + body + "\n" + tail
+
+def _cr_carry_fields(self, prev_level, wipe_rest):
+    """world/goal/action -- с пометкой уровня; при wipe_rest findings/questions/plan стираются (как в стоке при переходе)."""
+    know = getattr(self, "_summarized_knowledge", None)
+    if not isinstance(know, dict):
+        return 0
+    n = 0
+    for k in _CR_KEEP:
+        v = _CR_TAG.sub("", str(know.get(k, "") or ""))
+        if v.strip():
+            know[k] = "[carried from level %d -- re-check on this board] %s" % (prev_level, v); n += 1
+    if wipe_rest:
+        for k in ("recent_findings", "open_questions", "current_plan"):
+            know[k] = ""
+    return n
+
 if _cr_os.environ.get("CARRY_LAYER", "1") != "0":
     _cr_orig_update = _cr_wta.ToolAgent._update_summarized_knowledge_from_step_summary
     def _cr_update(self):
@@ -134,11 +161,28 @@ if _cr_os.environ.get("CARRY_LAYER", "1") != "0":
 
     _cr_orig_prompt = _cr_wta.ToolAgent._build_user_prompt
     def _cr_prompt(self, action_num, *args, **kwargs):
+        st = getattr(self, "_cr_state", None)
+        if st is None:
+            st = {"level": None, "block": None}; self._cr_state = st
+        try:
+            # уровень, взятый перебором (слой BFS, если стоит): разбираем ДО сборки стокового промпта, чтобы перенесённая
+            # модель мира и стёртый план попали в этот же промпт
+            cb = getattr(self, "_step_env_callback", None); sess = getattr(cb, "__self__", None)
+            bf = list(getattr(sess, "_bf_found", []) or []) if sess is not None else []
+            if len(bf) > int(st.get("bf_seen", 0)):
+                rec = bf[-1]; st["bf_seen"] = len(bf)
+                st["block"] = _cr_block_bfs(rec)
+                n = _cr_carry_fields(self, int(rec.get("level_done") or 0), True)
+                st["level"] = max(int(st["level"] or 0), int(rec.get("level_done") or 0) + 1)
+                _cr_stats["bfs_paths"] = int(_cr_stats.get("bfs_paths", 0)) + 1; _cr_stats["transitions"] += 1; _cr_stats["carried_fields"] += n
+                if n:
+                    _cr_stats["carried_nonempty"] += 1
+                print("[[CARRY]] путь перебора уровня %d во входе: %d ходов, перенесено полей %d" % (int(rec.get("level_done") or 0), len(rec.get("path") or []), n), flush=True)
+                _cr_dump()
+        except Exception as _e:
+            _cr_stats["errors"] += 1; print("[CARRY] сбой записи перебора: %r" % (_e,), flush=True)
         text = _cr_orig_prompt(self, action_num, *args, **kwargs)
         try:
-            st = getattr(self, "_cr_state", None)
-            if st is None:
-                st = {"level": None, "block": None}; self._cr_state = st
             lv = getattr(kwargs.get("current_frame"), "level", None)
             if lv is not None:
                 lv = int(lv)

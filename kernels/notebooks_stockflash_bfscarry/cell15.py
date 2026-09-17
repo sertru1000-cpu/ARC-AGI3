@@ -1,33 +1,4 @@
-"""Перебор на стоковом Duck (16.09, слово владельца «перебор в бою — тоже попробуем», затем «перенести слой в хвост игры — давай,
-и теперь будем запускать только это вместо базы»). Режим tail (боевой): перебор запускается, когда до конца игры осталось
-<= _BF_TAIL_S секунд И модель не брала уровень >= _BF_STALL_S секунд (уровень ищется от текущего); бюджет = остаток времени.
-Режим pre (первая сборка): перебор до первого вызова модели. Ходы -- через публичный taaf Game.execute_action (зачётные,
-мимо истории модели), поэтому слой работает и на публичном бандле Duck, и на atlas_src. Слой стоит в ОБОИХ режимах
-(TRUE_SUBMISSION тоже), выключатель -- переменная окружения BFS_LAYER=0.
 
-Замысел: в начале каждой игры, до первого вызова модели, обвязка сама ищет уровень 1 перебором по настоящей среде:
-состояние = доска с маской «часов», раскрытие узла = RESET + повтор пути + ход (снимков среды в бою нет, режим ONLINE),
-алфавит = стрелки/SPACE из valid_actions + «живые» клики (точки сетки, меняющие доску из старта). Бюджет на игру:
-_BF_MOVES ходов (12000) и _BF_SECONDS секунд (600). Нашли уровень -- модель начинает с уровня 2; не нашли -- RESET, модель играет как база.
-Ходы перебора идут через step_env(probe=True): зачётные, но не пишутся в историю модели. Маркер [[BFS]] в stdout на игру,
-итог в /kaggle/working/bfs_stats.json.
-
-Пороги, записанные ДО пуска, против базы runs/flash_v1_phaseA (10.25, 40 уровней): ИЗМЕРЕНО локально (docs/bfs2_compare_16_09.txt)
-уровень 1 берётся перебором в 15/25 игр при неограниченном бюджете; в бюджет 12000 ходов (с повтором пути) укладываются примерно ar25, ft09, lf52, lp85, ls20,
-sk48 (2849 ходов со снимками, с повтором пути -- нет), sp80, tu93, vc33, cd82 -- из них база не берёт sk48, sp80, cd82 (ур.1).
-Ожидание по уровням: +2..3 над 40; по баллу RHAE: ≈ +0 (уровень за тысячи ходов стоит ~0), возможен вред от потраченного
-времени (до 10 мин из 132 на игру). Польза -- дельта >= +4 балла и парный критерий p < 0.05; вред -- <= -4; иначе шум.
-Механизм: строк [[BFS]] = 25, суммарные ходы перебора в логе. Только оффлайн (TRUE_SUBMISSION=False).
-Проба: --probe ставит потолок игры 1800 с (сравнение с docs/base30_flash_v1_h115.json, 3.32).
-"""
-import argparse, json, os, sys
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_lvfact_reset_notebook import build  # noqa: E402
-
-PROBE_CAP_S = 1800.0
-
-BFS_CELL = r'''
 # =====================================================================
 # ПЕРЕБОР ПЕРЕД МОДЕЛЬЮ (16.09): до первого вызова модели обвязка ищет уровень 1 перебором по настоящей среде
 # (RESET + повтор пути + ход; состояние = доска с маской часов; клики -- «живые» точки сетки). Только оффлайн.
@@ -37,9 +8,9 @@ from collections import deque as _bf_deque
 import numpy as _bf_np
 import inference.framework.solver as _bf_solver
 import arcengine as _bf_arcengine
-_BF_MOVES, _BF_SECONDS, _BF_MAX_STATES, _BF_CLICK_STEP = __MOVES__, __SECONDS__, 4000, 4
-_BF_MODE, _BF_TAIL_S, _BF_STALL_S = "__MODE__", __TAIL__, __STALL__   # tail: перебор в хвосте игры; pre: до первого вызова; stall: после застоя
-_BF_MIN_LEFT = __MINLEFT__   # stall: перебор только если после него модели остаётся >= _BF_MIN_LEFT с
+_BF_MOVES, _BF_SECONDS, _BF_MAX_STATES, _BF_CLICK_STEP = 12000, 600.0, 4000, 4
+_BF_MODE, _BF_TAIL_S, _BF_STALL_S = "stall", 600.0, 1800.0   # tail: перебор в хвосте игры; pre: до первого вызова; stall: после застоя
+_BF_MIN_LEFT = 900.0   # stall: перебор только если после него модели остаётся >= _BF_MIN_LEFT с
 _bf_stats = {"games": 0, "levels": 0, "moves": 0, "seconds": 0.0, "per_game": {}}
 _BF_SIMPLE = ("ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5")
 _BF_M2E = {"ACTION1": "UP", "ACTION2": "DOWN", "ACTION3": "LEFT", "ACTION4": "RIGHT", "ACTION5": "SPACE"}
@@ -269,34 +240,177 @@ if _bf_os.environ.get("BFS_LAYER", "1") != "0":
     _bf_solver._HarnessGameSession.play = _bf_play
     _bf_atexit.register(_bf_dump)
     print("[[BFS]] слой установлен (%s): ходов %d, секунд %.0f, хвост %.0f с, застой %.0f с, остаток модели %.0f с; TRUE_SUBMISSION=%s" % (_BF_MODE, _BF_MOVES, _BF_SECONDS, _BF_TAIL_S, _BF_STALL_S, _BF_MIN_LEFT, TRUE_SUBMISSION), flush=True)
-'''
 
 
-def cell(moves: int, seconds: float, mode: str = "tail", tail_s: float = 600.0, stall_s: float = 600.0, min_left: float = 600.0) -> str:
-    return (BFS_CELL.replace("__MOVES__", str(moves)).replace("__SECONDS__", repr(float(seconds))).replace("__MODE__", mode)
-            .replace("__TAIL__", repr(float(tail_s))).replace("__STALL__", repr(float(stall_s))).replace("__MINLEFT__", repr(float(min_left))))
+# =====================================================================
+# ПЕРЕНОС МОДЕЛИ МИРА ЧЕРЕЗ ВЗЯТИЕ УРОВНЯ + ПОЛНЫЙ ПУТЬ УРОВНЯ (17.09). Выключатель CARRY_LAYER=0.
+# =====================================================================
+import os as _cr_os, json as _cr_json, atexit as _cr_atexit, re as _cr_re
+import inference.agent.tool_agent as _cr_wta
+_CR_KEEP = ("world_model", "goal_model", "action_model")
+_CR_PATH_MAX = 150
+_CR_TAG = _cr_re.compile(r"^\[carried from level \d+ -- re-check on this board\] ")
+_cr_stats = {"transitions": 0, "carried_nonempty": 0, "carried_fields": 0, "paths": 0, "path_moves": [], "level_moves": [],
+             "prompts_with_path": 0, "errors": 0}
 
+def _cr_rle(acts):
+    out = []
+    for a in acts:
+        if out and out[-1][0] == a:
+            out[-1][1] += 1
+        else:
+            out.append([a, 1])
+    return ", ".join(a if n == 1 else "%s x%d" % (a, n) for a, n in out)
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", action="store_true", help="потолок игры %s с (проба 30 мин)" % PROBE_CAP_S)
-    ap.add_argument("--moves", type=int, default=12000); ap.add_argument("--seconds", type=float, default=600.0)
-    ap.add_argument("--mode", default="tail", choices=["tail", "pre", "stall"]); ap.add_argument("--tail", type=float, default=600.0); ap.add_argument("--stall", type=float, default=600.0)
-    a = ap.parse_args()
-    out = "kernels/notebooks_stockflash_bfs" + ("tail" if a.mode == "tail" else "")
-    slug = "sergueimakarov/arc3-stock-flash-bfs" + ("-tail" if a.mode == "tail" else "")
-    build(cell(a.moves, a.seconds, a.mode, a.tail, a.stall), out, slug, "arc3 stock flash bfs" + (" tail" if a.mode == "tail" else ""), "_bf_stats = ")
-    if a.probe:
-        p = os.path.join(out, "submission.ipynb")
-        nb = json.load(open(p, encoding="utf-8"))
-        c15 = "".join(nb["cells"][15]["source"])
-        marker = "# Play the benchmark; watchdog stop and teardown run even if it raises."
-        assert marker in c15
-        c15 = c15.replace(marker, "if not TRUE_SUBMISSION:\n    bm.solver.max_runtime_s_per_game = %r    # проба вне боя\n\n" % PROBE_CAP_S + marker, 1)
-        nb["cells"][15]["source"] = c15.splitlines(keepends=True)
-        json.dump(nb, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        print("ok   проба: потолок игры %s с" % PROBE_CAP_S)
+def _cr_path(history_entries, new_level):
+    """(ходов на уровне всего, ходы от последнего RESET до завершающего включительно) для уровня new_level-1."""
+    ents = list(history_entries or [])
+    idx = None
+    for i, e in enumerate(ents):
+        try:
+            if int(getattr(e.frame, "level", 0) or 0) >= int(new_level):
+                idx = i; break
+        except Exception:
+            continue
+    if idx is None or idx == 0:
+        return None
+    # кадр записи -- ПОСЛЕ хода: первая запись с уровнем new_level-1 -- это завершающий ход предыдущего уровня
+    # (или стартовый кадр без хода), поэтому путь начинается со следующей за ней.
+    j = idx - 1
+    while j - 1 >= 0 and int(getattr(ents[j - 1].frame, "level", 0) or 0) == int(new_level) - 1:
+        j -= 1
+    start = j + 1
+    acts = [str(getattr(e, "action", "") or "").strip() for e in ents[start:idx + 1]]
+    acts = [a for a in acts if a]
+    total = len(acts)
+    last_reset = max([k for k, a in enumerate(acts) if a.upper().startswith("RESET")], default=-1)
+    eff = acts[last_reset + 1:]
+    return total, eff
 
+def _cr_block(level_done, total, eff):
+    shown = eff[-_CR_PATH_MAX:]
+    cut = len(eff) - len(shown)
+    head = ("LEVEL %d SOLUTION PATH (exact, from the harness log): level %d was completed by this move sequence "
+            "(%d moves since the last RESET of that level; %d moves spent on the level in total; the final move completed it):"
+            % (level_done, level_done, len(eff), total))
+    body = ("(first %d moves omitted) " % cut if cut > 0 else "") + _cr_rle(shown) + "."
+    tail = ("Your world/goal/action model from level %d is carried into the world model below, marked [carried]. "
+            "Check on the new board whether the same goal and mechanics still hold and whether an analogous sequence applies, "
+            "then act; revise the carried model where the new board contradicts it." % level_done)
+    return head + "\n" + body + "\n" + tail
 
-if __name__ == "__main__":
-    main()
+def _cr_block_bfs(rec):
+    level_done = int(rec.get("level_done") or 0); path = list(rec.get("path") or [])
+    shown = path[-_CR_PATH_MAX:]; cut = len(path) - len(shown)
+    head = ("LEVEL %d SOLVED BY HARNESS SEARCH (not by your own moves): while you were stuck, the harness searched the real game and "
+            "completed level %d with this move sequence from the start of that level (right after RESET; %d moves in the path, "
+            "%d search moves in total). You are now on level %d -- ignore any line saying you are still on the same level:"
+            % (level_done, level_done, len(path), int(rec.get("moves") or 0), level_done + 1))
+    body = ("(first %d moves omitted) " % cut if cut > 0 else "") + _cr_rle(shown) + "."
+    tail = ("Study what this sequence did to infer the goal and mechanics of level %d, update the world model below (your model from level %d "
+            "is carried, marked [carried]), then check whether the same goal holds on the new board and act." % (level_done, level_done))
+    return head + "\n" + body + "\n" + tail
+
+def _cr_carry_fields(self, prev_level, wipe_rest):
+    """world/goal/action -- с пометкой уровня; при wipe_rest findings/questions/plan стираются (как в стоке при переходе)."""
+    know = getattr(self, "_summarized_knowledge", None)
+    if not isinstance(know, dict):
+        return 0
+    n = 0
+    for k in _CR_KEEP:
+        v = _CR_TAG.sub("", str(know.get(k, "") or ""))
+        if v.strip():
+            know[k] = "[carried from level %d -- re-check on this board] %s" % (prev_level, v); n += 1
+    if wipe_rest:
+        for k in ("recent_findings", "open_questions", "current_plan"):
+            know[k] = ""
+    return n
+
+if _cr_os.environ.get("CARRY_LAYER", "1") != "0":
+    _cr_orig_update = _cr_wta.ToolAgent._update_summarized_knowledge_from_step_summary
+    def _cr_update(self):
+        s = getattr(self, "_last_step_summary", None) or {}
+        if not (s.get("level_transition") and not s.get("run_complete") and not s.get("game_over")):
+            return _cr_orig_update(self)
+        try:
+            know = getattr(self, "_summarized_knowledge", None) or {}
+            saved = {k: _CR_TAG.sub("", str(know.get(k, "") or "")) for k in _CR_KEEP}
+        except Exception as _e:
+            _cr_stats["errors"] += 1; print("[CARRY] сбой чтения модели мира: %r" % (_e,), flush=True)
+            return _cr_orig_update(self)
+        out = _cr_orig_update(self)
+        try:
+            try:
+                new_level = int(s.get("level"))
+            except (TypeError, ValueError):
+                new_level = None
+            prev = (new_level - 1) if new_level else 0
+            n = 0
+            for k, v in saved.items():
+                if v.strip():
+                    self._summarized_knowledge[k] = "[carried from level %d -- re-check on this board] %s" % (prev, v); n += 1
+            _cr_stats["transitions"] += 1; _cr_stats["carried_fields"] += n
+            if n:
+                _cr_stats["carried_nonempty"] += 1
+            print("[[CARRY]] переход на уровень %s: перенесено полей %d (%s)" % (new_level, n, ", ".join(k for k, v in saved.items() if v.strip()) or "-"), flush=True)
+            _cr_dump()
+        except Exception as _e:
+            _cr_stats["errors"] += 1; print("[CARRY] сбой переноса: %r" % (_e,), flush=True)
+        return out
+    _cr_wta.ToolAgent._update_summarized_knowledge_from_step_summary = _cr_update
+
+    _cr_orig_prompt = _cr_wta.ToolAgent._build_user_prompt
+    def _cr_prompt(self, action_num, *args, **kwargs):
+        st = getattr(self, "_cr_state", None)
+        if st is None:
+            st = {"level": None, "block": None}; self._cr_state = st
+        try:
+            # уровень, взятый перебором (слой BFS, если стоит): разбираем ДО сборки стокового промпта, чтобы перенесённая
+            # модель мира и стёртый план попали в этот же промпт
+            cb = getattr(self, "_step_env_callback", None); sess = getattr(cb, "__self__", None)
+            bf = list(getattr(sess, "_bf_found", []) or []) if sess is not None else []
+            if len(bf) > int(st.get("bf_seen", 0)):
+                rec = bf[-1]; st["bf_seen"] = len(bf)
+                st["block"] = _cr_block_bfs(rec)
+                n = _cr_carry_fields(self, int(rec.get("level_done") or 0), True)
+                st["level"] = max(int(st["level"] or 0), int(rec.get("level_done") or 0) + 1)
+                _cr_stats["bfs_paths"] = int(_cr_stats.get("bfs_paths", 0)) + 1; _cr_stats["transitions"] += 1; _cr_stats["carried_fields"] += n
+                if n:
+                    _cr_stats["carried_nonempty"] += 1
+                print("[[CARRY]] путь перебора уровня %d во входе: %d ходов, перенесено полей %d" % (int(rec.get("level_done") or 0), len(rec.get("path") or []), n), flush=True)
+                _cr_dump()
+        except Exception as _e:
+            _cr_stats["errors"] += 1; print("[CARRY] сбой записи перебора: %r" % (_e,), flush=True)
+        text = _cr_orig_prompt(self, action_num, *args, **kwargs)
+        try:
+            lv = getattr(kwargs.get("current_frame"), "level", None)
+            if lv is not None:
+                lv = int(lv)
+                if st["level"] is not None and lv > st["level"]:
+                    st["block"] = None
+                    got = _cr_path(kwargs.get("history_entries"), lv)
+                    if got is not None:
+                        total, eff = got
+                        st["block"] = _cr_block(lv - 1, total, eff)
+                        _cr_stats["paths"] += 1; _cr_stats["path_moves"].append(len(eff)); _cr_stats["level_moves"].append(total)
+                        print("[[CARRY]] путь уровня %d: %d ходов от последнего RESET, всего %d" % (lv - 1, len(eff), total), flush=True)
+                        _cr_dump()
+                st["level"] = lv if st["level"] is None else max(st["level"], lv)
+            if st.get("block"):
+                _cr_stats["prompts_with_path"] += 1
+                return st["block"] + "\n\n" + text
+            return text
+        except Exception as _e:
+            _cr_stats["errors"] += 1; print("[CARRY] сбой промпта: %r" % (_e,), flush=True)
+            return text
+    _cr_wta.ToolAgent._build_user_prompt = _cr_prompt
+
+    def _cr_dump():
+        try:
+            _cr_os.makedirs("/kaggle/working", exist_ok=True)
+            _cr_json.dump(_cr_stats, open("/kaggle/working/carry_stats.json", "w"), indent=1)
+        except Exception:
+            pass
+    _cr_atexit.register(_cr_dump)
+    print("[[CARRY]] слой установлен: модель мира (world/goal/action) переносится через взятие уровня, путь уровня во входе "
+          "(до %d ходов); TRUE_SUBMISSION=%s" % (_CR_PATH_MAX, TRUE_SUBMISSION), flush=True)
