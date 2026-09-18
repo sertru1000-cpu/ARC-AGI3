@@ -16,7 +16,7 @@
 Что печатает (это и есть результат пробы):
   [[DSV4]] список файлов с размерами; выбранный квант; время загрузки; токенов/с на генерации; ответ модели.
 Пороги (записаны до пуска): сервер поднялся и ответил осмысленным текстом; скорость >= 30 токенов/с суммарно при
-4 параллельных запросах -- иначе для 25 игр за 132 минуты модель бесполезна (нужно ~250 токенов/с, но 30 -- порог,
+двух параллельных запросах -- иначе для 25 игр за 132 минуты модель бесполезна (нужно ~250 токенов/с, но 30 -- порог,
 ниже которого дальше идти точно нет смысла).
 
 usage:  .venv/bin/python scripts/build_dsv4_smoke_notebook.py
@@ -69,7 +69,7 @@ else:
     os.chmod(server_bin, 0o755)
     for lib in glob.glob(os.path.dirname(server_bin) + "/../lib*"):
         os.environ["LD_LIBRARY_PATH"] = lib + ":" + os.environ.get("LD_LIBRARY_PATH", "")
-    cmd = ("%s -m %s --host 127.0.0.1 --port 8080 -ngl 999 -c %d --parallel %d"
+    cmd = ("%s -m %s --host 127.0.0.1 --port 8080 -ngl 999 -c %d --parallel %d "
            "--flash-attn on --log-disable" % (server_bin, model, CTX, PARALLEL))
     print("[[DSV4]] запуск:", cmd, flush=True)
     t0 = time.time()
@@ -110,7 +110,7 @@ else:
             n = out.get("usage", {}).get("completion_tokens", 0)
             print("[[DSV4]] ответ за %.1f с, токенов %s, скорость %.1f ток/с" % (dt, n, n / max(dt, 1e-9)), flush=True)
             print("[[DSV4]] текст ответа: %s" % txt[:400].replace("\n", " "), flush=True)
-        # параллельная нагрузка: 4 запроса разом
+        # параллельная нагрузка: PARALLEL запросов разом
         import threading
         res = []
         def one(i):
