@@ -15,8 +15,8 @@
 
 Что печатает (это и есть результат пробы):
   [[DSV4]] список файлов с размерами; выбранный квант; время загрузки; токенов/с на генерации; ответ модели.
-Пороги (записаны до пуска): сервер поднялся и ответил осмысленным текстом; скорость >= 30 токенов/с суммарно при
-двух параллельных запросах -- иначе для 25 игр за 132 минуты модель бесполезна (нужно ~250 токенов/с, но 30 -- порог,
+Пороги (записаны до пуска): сервер поднялся и ответил осмысленным текстом; скорость >= 30 токенов/с суммарно (v3: 63.5 на одном запросе, 102.8 на двух -- порог пройден); в v4
+проверяются пустой content (модель пишет в reasoning_content), реальная занятость видеопамяти и скорость на 8 запросах -- иначе для 25 игр за 132 минуты модель бесполезна (нужно ~250 токенов/с, но 30 -- порог,
 ниже которого дальше идти точно нет смысла).
 
 usage:  .venv/bin/python scripts/build_dsv4_smoke_notebook.py
@@ -27,8 +27,8 @@ CELL = r'''
 import glob, json, os, subprocess, sys, time, urllib.request
 
 MAX_GB = 88.0          # больше не влезет в 96 ГБ вместе с KV-кэшем
-CTX = 4096
-PARALLEL = 2
+CTX = 81920      # 4 места по 20к токенов: столько занимает промпт нашей обвязки
+PARALLEL = 4
 
 def sh(cmd, **kw):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, **kw).stdout
@@ -101,9 +101,9 @@ else:
     print("[[DSV4]] сервер поднялся: %s, загрузка %.0f с" % (ok, load_s), flush=True)
     if ok:
         body = json.dumps({"model": "dsv4", "messages": [
-            {"role": "user", "content": "You see a 3x3 grid of coloured cells. Reply with one short sentence: what "
-                                        "information would you need to infer the goal of an unknown puzzle game?"}],
-            "max_tokens": 200, "temperature": 0.6}).encode()
+            {"role": "user", "content": "Reply with exactly one short sentence: what information would you need to "
+                                        "infer the goal of an unknown grid puzzle game?"}],
+            "max_tokens": 300, "temperature": 0.6, "chat_template_kwargs": {"enable_thinking": False}}).encode()
         t1 = time.time(); out = None
         try:
             req = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=body,
@@ -113,11 +113,41 @@ else:
         except Exception as exc:
             print("[[DSV4]] запрос не прошёл: %r" % (exc,), flush=True)
         dt = time.time() - t1
+        print("[[DSV4]] видеопамять после загрузки: %s" % sh("nvidia-smi --query-gpu=memory.used --format=csv,noheader").strip(), flush=True)
         if out:
-            txt = out["choices"][0]["message"]["content"]
+            print("[[DSV4]] ответ целиком (первые 1200 знаков): %s" % json.dumps(out, ensure_ascii=False)[:1200], flush=True)
+            _m = out["choices"][0].get("message", {})
+            txt = _m.get("content") or _m.get("reasoning_content") or ""
             n = out.get("usage", {}).get("completion_tokens", 0)
             print("[[DSV4]] ответ за %.1f с, токенов %s, скорость %.1f ток/с" % (dt, n, n / max(dt, 1e-9)), flush=True)
             print("[[DSV4]] текст ответа: %s" % txt[:400].replace("\n", " "), flush=True)
+        # ДЛИННЫЙ ПРОМПТ: главный расход в бою -- чтение 20к токенов на каждый вызов
+        _board = "\n".join("".join("ABCDEFGHIJKLMNOP"[(i * 7 + j * 3) % 16] for j in range(64)) for i in range(64))
+        _prompt = ("You are playing an unknown grid game. Board history follows.\n" + (_board + "\n\n") * 4 +
+                   "Reply with one short sentence: which single action would you try next and why?")
+        _b = json.dumps({"model": "dsv4", "messages": [{"role": "user", "content": _prompt}],
+                         "max_tokens": 120, "temperature": 0.6,
+                         "chat_template_kwargs": {"enable_thinking": False}}).encode()
+        _t3 = time.time(); _outl = None
+        try:
+            _rq = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=_b,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(_rq, timeout=1200) as r:
+                _outl = json.loads(r.read())
+        except Exception as exc:
+            _body = ""
+            try:
+                _body = exc.read().decode()[:300]
+            except Exception:
+                pass
+            print("[[DSV4]] длинный промпт не прошёл: %r %s" % (exc, _body), flush=True)
+        _dt3 = time.time() - _t3
+        if _outl:
+            _u = _outl.get("usage", {})
+            print("[[DSV4]] ДЛИННЫЙ ПРОМПТ: %d токенов прочитано, %d сгенерировано, за %.1f с -> чтение %.0f ток/с"
+                  % (_u.get("prompt_tokens", 0), _u.get("completion_tokens", 0), _dt3,
+                     _u.get("prompt_tokens", 0) / max(_dt3, 1e-9)), flush=True)
+            print("[[DSV4]] ответ на длинный: %s" % (_outl["choices"][0]["message"].get("content") or "")[:200], flush=True)
         # параллельная нагрузка: PARALLEL запросов разом
         import threading
         res = []
