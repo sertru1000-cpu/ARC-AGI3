@@ -335,6 +335,22 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">predhint: цель как предикат, без перебора</span><span class="v-date">собрано 18.09 &middot; проба 80 мин Фазы A по слову владельца «вообще без перебора, но предикат передаём»</span></div>
+          <span class="badge wait">проба 80 мин против трёх баз-80: 7.23 / 6.32 / 5.46</span>
+        </div>
+        <p class="summary">Слой не делает ни одного хода движка. Обвязка читает состояния после ходов модели, копит образцы уровня, а в момент, когда МОДЕЛЬ берёт уровень, снимает кадр взятия и выводит утверждения, истинные только там. До трёх утверждений идут во вход на следующих уровнях с пометкой «вид цели тот же, числа другие». Перебор убран сознательно: он не берёт уровень в 16&ndash;18 играх из 25, а его ходы обнуляют уровень &mdash; потеря 2.2&ndash;2.3 балла из 5.5&ndash;7.2.</p>
+        <ul class="changes">
+          <li>код: <code>scripts/build_predhint_notebook.py --probe</code>; выключатель <code>PREDHINT=0</code>, маркер <code>[[PRED]]</code>, итог <code>/kaggle/working/predhint_stats.json</code>.</li>
+          <li>проверки <code>scripts/test_predhint_patch.py</code>: обёртка не добавляет ходов, образцы копятся и сбрасываются по уровням, на настоящих записях цель выведена в 5 играх из 5 и каждое утверждение отделяет цель от всех образцов.</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска</strong> (базы-80: уровней 32/30/31, L1 20/19/21, L2 6/7/8, доля L2|L1 0.30/0.37/0.38): механизм &mdash; [[PRED]] &ge; 15 уровней, непустая цель &ge; 10, ошибок 0. <strong>Главное число</strong> &mdash; доля L2|L1 &ge; 0.55 (при L1 = 20 это второй уровень в 11 играх). Балл: сигнал &gt; 7.23; неотличимо 4.5&ndash;7.23; вред &lt; 4.5.</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">goalhint: перебор берёт уровень 1, цель из кадра взятия — во вход модели</span><span class="v-date">собрано 18.09 &middot; <strong>пуш v1 18.09 06:43 МСК</strong>, проба 80 мин Фазы A по слову владельца «ставь на 80 минут» &middot; не разобрана</span></div>
           <span class="badge wait">проба 80 мин против трёх баз-80: 7.23 / 6.32 / 5.46</span>
         </div>

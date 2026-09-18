@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_lvfact_reset_notebook import build  # noqa: E402
 import build_bfs_notebook as _bfs  # noqa: E402
 
-GOAL_CELL = r'''
+GOAL_HELPERS = r'''
 # =====================================================================
 # ЦЕЛЬ ИЗ КАДРА ВЗЯТИЯ УРОВНЯ -> ВО ВХОД МОДЕЛИ (18.09). Выключатель GOALHINT=0.
 # =====================================================================
@@ -125,7 +125,9 @@ def _gh_block(level_done, stmts, same_kind):
     return head + "\n" + body + "\n" + tail
 
 
-if _gh_os.environ.get("GOALHINT", "1") != "0":
+'''
+
+GOAL_WIRE_BFS = r'''if _gh_os.environ.get("GOALHINT", "1") != "0":
     _gh_orig_prompt = _gh_wta.ToolAgent._build_user_prompt
 
     def _gh_prompt(self, action_num, *args, **kwargs):
@@ -181,7 +183,7 @@ def main() -> None:
     ap.add_argument("--probe", action="store_true"); ap.add_argument("--cap", type=float, default=4800.0)
     ap.add_argument("--moves", type=int, default=12000); ap.add_argument("--seconds", type=float, default=600.0)
     a = ap.parse_args()
-    cell = _bfs.cell(a.moves, a.seconds, "pre", 600.0, 600.0, 600.0) + "\n" + GOAL_CELL
+    cell = _bfs.cell(a.moves, a.seconds, "pre", 600.0, 600.0, 600.0) + "\n" + GOAL_HELPERS + GOAL_WIRE_BFS
     out = "kernels/notebooks_stockflash_goalhint"
     build(cell, out, "sergueimakarov/arc3-stock-flash-goalhint", "arc3 stock flash goalhint", "_gh_stats = ")
     if a.probe:
