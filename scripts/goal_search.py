@@ -32,7 +32,7 @@ import arc_agi
 from arc_agi import OperationMode
 from engine_bfs2 import Snap, Counter as Cnt, step, root_snap, simple_actions, active_clicks, clock_mask, KeyOf as Key
 from goal_predicates import comps, shape_key
-from goal_distance import dist_shapes, dist_bbox, dist_inside, dist_merge
+from goal_distance import dist_shapes, dist_bbox, dist_inside, dist_merge, match_cost, shape_gap, region_gap
 
 
 def state_features(g, mask):
@@ -43,10 +43,16 @@ def state_features(g, mask):
     bg = int(vals[counts.argmax()])
     cnt = {int(v): int(c) for v, c in zip(vals, counts)}
     cm = {c: comps(gg == c) for c in cnt if c != bg}
-    return {"bg": bg, "cnt": cnt, "comps": cm, "grid": gg, "ncolors": len(cnt)}
+    h, w = gg.shape
+    holes = [x for x in comps(gg == bg)
+             if x["bbox"][0] > 0 and x["bbox"][1] > 0 and x["bbox"][2] < h - 1 and x["bbox"][3] < w - 1 and x["n"] <= 0.25 * gg.size]
+    from goal_predicates import regions as _regions
+    return {"bg": bg, "cnt": cnt, "comps": cm, "grid": gg, "ncolors": len(cnt), "holes": holes,
+            "regions": _regions(gg, bg),
+            "shapes": {c: {shape_key(x["cells"]) for x in cs} for c, cs in cm.items()}}
 
 
-def candidates(f0):
+def candidates(f0, lib=None):
     """беспараметрические кандидаты в цель + мера остатка (0 = цель достигнута), нормированные по стартовому состоянию."""
     out = []
     cols = [c for c in f0["cnt"] if c != f0["bg"]]
@@ -68,6 +74,18 @@ def candidates(f0):
     out.append(("C10 столбец одного цвета", lambda f: _line_residual(f, 1)))
     n0c = max(1, f0["ncolors"])
     out.append(("C11 меньше цветов", lambda f, n0c=n0c: max(0, f["ncolors"] - 1) / n0c))
+    shapes_seen = {r["sub"].shape for r in f0.get("regions", [])}
+    for sh in shapes_seen:   # C17: узор одной области сошёлся с узором другой такого же размера
+        out.append(("C17 узоры областей %dx%d сошлись" % sh, lambda f, sh=sh: region_gap(f, sh)))
+    for c in cols:   # C15: деталь встала в выемку (дополняющий объект)
+        out.append(("C15 цвет %d в пустоту" % c, lambda f, c=c: match_cost(f["comps"].get(c, []), f.get("holes", []))))
+    if lib:          # C16: объект принял форму образца, виденного в любой момент игры
+        for c in cols:
+            for d, sd in lib.items():
+                if d == c or not sd:
+                    continue
+                out.append(("C16 цвет %d принимает форму образца %d" % (c, d),
+                            lambda f, c=c, sd=frozenset(sd): shape_gap(f["shapes"].get(c, set()), sd)))
     return out
 
 

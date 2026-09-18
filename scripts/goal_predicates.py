@@ -71,11 +71,38 @@ def features(g, mask):
     bg = int(vals[counts.argmax()]) if len(vals) else 0
     f = {"bg": bg, "colors": {int(v): int(c) for v, c in zip(vals, counts)}, "ncolors": int(len(vals)), "grid": gg}
     f["comps"] = {int(v): comps(gg == int(v)) for v in vals if int(v) != bg}
+    f["shapes"] = {c: {shape_key(x["cells"]) for x in cs} for c, cs in f["comps"].items()}
+    # ПУСТОТЫ: области фонового цвета, не касающиеся края доски (дыры внутри фигур) -- «дополняющий объект»
+    h, w = gg.shape
+    f["holes"] = [x for x in comps(gg == bg)
+                  if x["bbox"][0] > 0 and x["bbox"][1] > 0 and x["bbox"][2] < h - 1 and x["bbox"][3] < w - 1 and x["n"] <= 0.25 * gg.size]
+    f["hole_shapes"] = {shape_key(x["cells"]) for x in f["holes"]}
+    f["regions"] = regions(gg, bg)
     return f
 
 
+def _norm_pattern(sub):
+    """узор области без привязки к цветам: цвета заменены рангами по частоте (сравнение «такой же рисунок»)."""
+    vals, counts = np.unique(sub, return_counts=True)
+    order = {int(v): i for i, (v, _) in enumerate(sorted(zip(vals, counts), key=lambda x: (-x[1], x[0])))}
+    return tuple(tuple(order[int(v)] for v in row) for row in sub)
+
+
+def regions(gg, bg, max_regions=12):
+    """прямоугольные области-кандидаты: рамки крупных не-фоновых областей (доска, мини-образец, панель)."""
+    out = []
+    for c, cs in ((int(v), comps(gg == int(v))) for v in np.unique(gg[gg >= 0]) if int(v) != bg):
+        for x in sorted(cs, key=lambda z: -z["n"])[:3]:
+            y0, x0, y1, x1 = x["bbox"]
+            if (y1 - y0 + 1) >= 3 and (x1 - x0 + 1) >= 3:
+                out.append({"bbox": x["bbox"], "sub": gg[y0:y1 + 1, x0:x1 + 1]})
+    return out[:max_regions]
+
+
 # ---- шаблоны: каждый по целевому состоянию даёт список конкретных предикатов (id, функция) ----
-def templates(f_goal):
+def templates(f_goal, lib=None):
+    """lib -- библиотека форм, виденных В ЛЮБОЙ момент игры: {цвет: множество форм}. Нужна для целей вида
+    «объект принял форму образца», когда образца на текущем кадре уже (или ещё) нет."""
     out = []
     bg = f_goal["bg"]; cols = [c for c in f_goal["colors"] if c != bg]; gg = f_goal["grid"]
 
@@ -109,6 +136,28 @@ def templates(f_goal):
         out.append(("T7 цвет %d -- вся не-фоновая часть" % c, "T7",
                     lambda f, c=c: f["colors"].get(c, 0) > 0 and sum(v for k, v in f["colors"].items() if k != f["bg"]) == f["colors"].get(c, 0)))
     out.append(("T11 различных цветов ровно %d" % f_goal["ncolors"], "T11", lambda f, k=f_goal["ncolors"]: f["ncolors"] == k))
+    # T17: содержимое одной области доски совпало с содержимым другой (доска против мини-образца)
+    for i, ra in enumerate(f_goal.get("regions", [])):
+        for rb in f_goal.get("regions", [])[i + 1:]:
+            if ra["sub"].shape == rb["sub"].shape and _norm_pattern(ra["sub"]) == _norm_pattern(rb["sub"]):
+                out.append(("T17 узор области %s совпал с областью %s" % (ra["bbox"], rb["bbox"]), "T17",
+                            lambda f, sh=ra["sub"].shape: _regions_match(f, sh)))
+                break
+    # T15: фигура цвета c совпала с ПУСТОТОЙ (дополняющий объект: деталь встала в выемку)
+    for c in cols:
+        if f_goal["shapes"].get(c, set()) & f_goal["hole_shapes"]:
+            out.append(("T15 фигура цвета %d совпала с пустотой" % c, "T15",
+                        lambda f, c=c: bool(f["shapes"].get(c, set()) & f["hole_shapes"])))
+    # T16: формы цвета c совпали с формами, виденными РАНЬШЕ у цвета d (образец мог исчезнуть с доски)
+    if lib:
+        for c in cols:
+            sc = f_goal["shapes"].get(c, set())
+            if not sc:
+                continue
+            for d, sd in lib.items():
+                if d != c and sc & sd:
+                    out.append(("T16 формы цвета %d повторяют виденные формы цвета %d" % (c, d), "T16",
+                                lambda f, c=c, sd=frozenset(sd): bool(f["shapes"].get(c, set()) & sd)))
     out.append(("T10 есть строка одного не-фонового цвета", "T10", lambda f: _full_line(f, 0)))
     out.append(("T10 есть столбец одного не-фонового цвета", "T10", lambda f: _full_line(f, 1)))
     for c in cols:
@@ -119,6 +168,13 @@ def templates(f_goal):
             out.append(("T13 клетки цвета %d совпали с клетками цвета %d" % (c, d), "T13", lambda f, c=c, d=d: _inside(f, c, d)))
             out.append(("T8 цвет %d внутри рамки цвета %d" % (c, d), "T8", lambda f, c=c, d=d: _in_bbox(f, c, d)))
     return out
+
+
+def _regions_match(f, shape):
+    """есть ли ДВЕ области одинакового размера с одинаковым узором (с точностью до переименования цветов)."""
+    rs = [r for r in f.get("regions", []) if r["sub"].shape == shape]
+    pats = [_norm_pattern(r["sub"]) for r in rs]
+    return len(pats) != len(set(pats))
 
 
 def _no_adj(f, c):

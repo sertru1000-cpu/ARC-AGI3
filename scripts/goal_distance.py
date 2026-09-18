@@ -96,3 +96,28 @@ def dist_merge(f, c):
     for i in range(len(A)):
         gaps.append(min(abs(cents[i][0] - cents[j][0]) + abs(cents[i][1] - cents[j][1]) for j in range(len(A)) if j != i))
     return min(1.0, float(np.mean(gaps)) / 64.0 + (len(A) - 1) / (len(A) + 4.0) * 0.25)
+
+
+def shape_gap(shapes_a, shapes_b):
+    """плотная мера «формы a повторяют формы b»: минимальная доля несовпавших клеток при наложении (0 = совпало)."""
+    if not shapes_a or not shapes_b:
+        return 1.0
+    best = 1.0
+    for a in shapes_a:
+        for b in shapes_b:
+            inter = len(a & b); union = len(a | b)
+            if union:
+                best = min(best, 1.0 - inter / union)
+    return best
+
+
+def region_gap(f, shape):
+    """плотная мера «две области одного размера имеют одинаковый узор»: минимальная доля несовпавших клеток."""
+    rs = [r["sub"] for r in f.get("regions", []) if r["sub"].shape == shape]
+    if len(rs) < 2:
+        return 1.0
+    best = 1.0
+    for i, a in enumerate(rs):
+        for b in rs[i + 1:]:
+            best = min(best, float((a != b).mean()))
+    return best
