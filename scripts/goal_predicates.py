@@ -99,10 +99,16 @@ def regions(gg, bg, max_regions=12):
     return out[:max_regions]
 
 
+# Перенос вида цели на СЛЕДУЮЩИЙ уровень, измерено 18.09 на 30 парах уровней (runs/goal_cross_replay_v5.json):
+# T1 100%, T18 100%, T3 75%, T9 75%, T6 50%, T11 50%, T20 43% | T4 12%, T16 12%, T12 11%, T19/T17/T14 0%.
+# SHOW -- виды, которые можно показывать модели как цель; остальные годятся только для отделения цели внутри уровня.
+SHOW_TYPES = ("T1", "T18", "T3", "T9", "T6", "T11", "T20")
+
+
 # ---- шаблоны: каждый по целевому состоянию даёт список конкретных предикатов (id, функция) ----
-def templates(f_goal, lib=None):
-    """lib -- библиотека форм, виденных В ЛЮБОЙ момент игры: {цвет: множество форм}. Нужна для целей вида
-    «объект принял форму образца», когда образца на текущем кадре уже (или ещё) нет."""
+def templates(f_goal, lib=None, f_start=None):
+    """lib -- библиотека форм, виденных В ЛЮБОЙ момент игры: {цвет: множество форм}; f_start -- признаки СТАРТА уровня.
+    Цель почти всегда про ИЗМЕНЕНИЕ относительно старта (T18-T21), а не про вид одного кадра."""
     out = []
     bg = f_goal["bg"]; cols = [c for c in f_goal["colors"] if c != bg]; gg = f_goal["grid"]
 
@@ -111,15 +117,17 @@ def templates(f_goal, lib=None):
             out.append(("T1 нет цвета %d" % c, "T1", lambda f, c=c: f["colors"].get(c, 0) == 0))
     for c in cols:
         k = f_goal["colors"][c]
-        out.append(("T2 цвета %d ровно %d клеток" % (c, k), "T2", lambda f, c=c, k=k: f["colors"].get(c, 0) == k))
+        if k <= 2:   # «остался один» -- содержательно; «ровно 464» -- описание картинки, а не цель
+            out.append(("T2 цвета %d ровно %d клеток" % (c, k), "T2", lambda f, c=c, k=k: f["colors"].get(c, 0) == k))
         cs = f_goal["comps"].get(c, [])
         if len(cs) == 1:
             out.append(("T3 цвет %d -- одна область" % c, "T3", lambda f, c=c: len(f["comps"].get(c, [])) == 1))
         out.append(("T4 областей цвета %d ровно %d" % (c, len(cs)), "T4", lambda f, c=c, m=len(cs): len(f["comps"].get(c, [])) == m))
         if cs:
             n = max(x["n"] for x in cs)
-            out.append(("T9 крупнейшая область цвета %d = %d" % (c, n), "T9",
-                        lambda f, c=c, n=n: bool(f["comps"].get(c)) and max(x["n"] for x in f["comps"][c]) == n))
+            if n == f_goal["colors"].get(c, 0):   # весь цвет собран в одну область -- это цель; «крупнейшая = 40» -- нет
+                out.append(("T9 весь цвет %d собран в одну область (%d клеток)" % (c, n), "T9",
+                            lambda f, c=c: bool(f["comps"].get(c)) and max(x["n"] for x in f["comps"][c]) == f["colors"].get(c, 0)))
             big = max(cs, key=lambda x: x["n"]); y0, x0, y1, x1 = big["bbox"]
             if big["n"] == (y1 - y0 + 1) * (x1 - x0 + 1):
                 out.append(("T6 цвет %d -- прямоугольник" % c, "T6",
@@ -136,6 +144,23 @@ def templates(f_goal, lib=None):
         out.append(("T7 цвет %d -- вся не-фоновая часть" % c, "T7",
                     lambda f, c=c: f["colors"].get(c, 0) > 0 and sum(v for k, v in f["colors"].items() if k != f["bg"]) == f["colors"].get(c, 0)))
     out.append(("T11 различных цветов ровно %d" % f_goal["ncolors"], "T11", lambda f, k=f_goal["ncolors"]: f["ncolors"] == k))
+    # ---- цели об ИЗМЕНЕНИИ относительно старта уровня (18.09: 18 из 26 прежних целей были описанием кадра) ----
+    if f_start:
+        for c in list(f_start["colors"]):
+            n0 = f_start["colors"].get(c, 0); n1 = f_goal["colors"].get(c, 0)
+            if n0 and n1 == 0:
+                out.append(("T18 цвет %d полностью убран с доски" % c, "T18", lambda f, c=c: f["colors"].get(c, 0) == 0))
+            elif n0 and n1 < n0:
+                out.append(("T19 клеток цвета %d стало меньше, чем в начале уровня (%d -> %d)" % (c, n0, n1), "T19",
+                            lambda f, c=c, n0=n0: 0 < f["colors"].get(c, 0) < n0))
+            k0 = len(f_start["comps"].get(c, [])); k1 = len(f_goal["comps"].get(c, []))
+            if k0 > 1 and k1 < k0:
+                out.append(("T20 областей цвета %d стало меньше, чем в начале (%d -> %d)" % (c, k0, k1), "T20",
+                            lambda f, c=c, k0=k0: 0 < len(f["comps"].get(c, [])) < k0))
+        for c in f_goal["colors"]:
+            if c not in f_start["colors"] and c != bg:
+                out.append(("T21 на доске появился цвет %d, которого не было в начале" % c, "T21",
+                            lambda f, c=c: f["colors"].get(c, 0) > 0))
     # T17: содержимое одной области доски совпало с содержимым другой (доска против мини-образца)
     for i, ra in enumerate(f_goal.get("regions", [])):
         for rb in f_goal.get("regions", [])[i + 1:]:

@@ -91,8 +91,9 @@ def separating(goal, negs, lib=None):
     mask = np.zeros_like(goal, dtype=bool)
     f_goal = features(goal, mask)
     f_negs = [features(g, mask) for g in negs if g.shape == goal.shape]
+    f_start = f_negs[0] if f_negs else None      # первое состояние уровня = старт уровня
     out = []
-    for nm, tid, fn in templates(f_goal, lib):
+    for nm, tid, fn in templates(f_goal, lib, f_start):
         try:
             if fn(f_goal) and not any(fn(x) for x in f_negs):
                 out.append((nm, tid, fn))
@@ -133,12 +134,14 @@ def main():
             s1, _, _ = seps[k]; s2, fg2, fn2 = seps[k + 1]
             t1 = {t for _, t, _ in s1}; t2 = {t for _, t, _ in s2}
             hold = sep = 0
+            per_type = {}
             for nm, tid, fn in s1:
+                d = per_type.setdefault(tid, {"n": 0, "sep": 0}); d["n"] += 1
                 try:
                     if fn(fg2):
                         hold += 1
                         if not any(fn(x) for x in fn2):
-                            sep += 1
+                            sep += 1; d["sep"] += 1
                 except Exception:
                     pass
             ctrl = 0
@@ -150,7 +153,7 @@ def main():
                             ctrl += 1
                     except Exception:
                         pass
-            pairs.append({"from": k, "to": k + 1, "types_common": sorted(t1 & t2), "types_from": sorted(t1), "types_to": sorted(t2),
+            pairs.append({"per_type": per_type, "from": k, "to": k + 1, "types_common": sorted(t1 & t2), "types_from": sorted(t1), "types_to": sorted(t2),
                           "preds_hold": hold, "preds_separate": sep, "control_random": ctrl,
                           "negatives": len(fn2), "preds_from": len(s1)})
         row["pairs"] = pairs
