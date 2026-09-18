@@ -8,17 +8,17 @@ We ran a 26-day ablation programme on ARC-AGI-3 with a fixed open-weights agent 
 
 ## 1. Setup
 
-All measurements use the 25 public ARC-AGI-3 games, the Duck harness (ARC-AGI-3 Milestone 1 winner) and Qwen3.8-Flash-Next-NVFP4 served by vLLM on one RTX Pro 6000, the configuration the public leaderboard line converged on. Scores are RHAE. A local deterministic replica of the engine reproduces recorded trajectories exactly (561 of 561 actions; reconstructed per-level action counts matched the official counters in 121 of 121 levels), which makes counterfactual analysis free.
+All measurements use the 25 public games, the Duck harness (Milestone 1 winner) and Qwen3.8-Flash-Next-NVFP4 on one RTX Pro 6000 — the configuration the public leaderboard converged on. A deterministic local replica reproduces recorded trajectories exactly (561/561 actions; per-level action counts matched official counters on 121/121 levels), making counterfactual analysis free.
 
-**Baseline spread is the unit of measurement.** Three runs of the *identical* configuration score 1.67 / 2.73 / 3.32 at a 30-minute per-game cap, 3.91 / 5.40 / 6.11 at 60 minutes, and 5.46 / 6.32 / 7.23 at 80 minutes. In competition submissions the same build scored 1.85 to 4.09 over ten days. Any claim about a layer that ignores this spread is unfalsifiable; we pre-registered thresholds against three truncations of base runs before every probe.
+**Baseline spread is the unit of measurement.** Three runs of the *identical* configuration score 1.67 / 2.73 / 3.32 at a 30-minute per-game cap and 5.46 / 6.32 / 7.23 at 80 minutes; the same build scored 1.85–4.09 across ten competition submissions. Any claim ignoring this spread is unfalsifiable, so every probe was pre-registered against three truncations of base runs.
 
 ## 2. Twenty layers, no signal
 
 Layers (each with pre-registered thresholds, a sign test on paired per-game deltas and a paired bootstrap): goal gate with refutation, stuck reset, scripted explorer, level-fact injection, macro-actions, prefix caching, best-of-N voting, ten executable-world-model variants, history truncation, oracle rule injection, doubled call budget, world-model carry, three search layers. No delta fell outside baseline spread; every bootstrap interval covered zero. Three findings are counter-intuitive:
 
-* **More calls do not buy levels past a point.** Doubling calls per game (56 → 112) moved 40 → 41 levels; the extra budget went into revisiting states (returns ×2.5).
-* **Removing reasoning tokens destroys the agent** (2.91 vs 9.43), while *adding* input information — oracle rules, world-model digests, level facts — changes almost nothing. In a controlled stand test, the model restated an injected rule in 27 of 27 answers and still did not act on it.
-* **History is working memory, not clutter.** Truncating it lowered the action rate from 44% to 22%.
+* Doubling calls per game (56 → 112) moved 40 → 41 levels; the extra budget went into revisiting states (returns ×2.5).
+* Removing reasoning tokens destroys the agent (2.91 vs 9.43), while *adding* input information — oracle rules, world-model digests, level facts — changes almost nothing: in a stand test the model restated an injected rule in 27 of 27 answers and still did not act on it.
+* History is working memory: truncating it halved the action rate (44% → 22%).
 
 ## 3. Mechanics without goals
 
@@ -30,7 +30,7 @@ We define a level goal as a predicate over board state drawn from a 21-template 
 
 * **Separation, honestly controlled.** The true completion state is separated from every other state of its level on 44 of 53 levels (83%). When a random non-goal state is declared the goal and the same dictionary search re-fits its parameters, it is separated in 536 of 1060 trials (51%). Our first control (8%) re-used parameters fitted to the true goal and therefore tested the wrong hypothesis; the honest gap is 83 against 51, not 90 against 8.
 * **Cross-level transfer, leave-one-game-out** (26 pairs; per-kind transfer rates estimated on the other 14 games): Coverage@1 = 27% for all three parameter-transfer rules, Coverage@3 = 35% for the monotone rule ("fewer than before"), 31% for the point estimate. The first prediction is false in 46-62% of pairs. Nulls: the same transfer from a *pseudo-goal* of the same level covers 1-2%, and from another game's goal 0-1% — so what transfers is the goal, but weakly.
-* **Per-kind precision** drives a curated vocabulary. "Colour c is gone" and "colour c present at level start is now gone" transfer 6/6 each; "all of colour c joined into one group" 3/4; "exactly m components of colour c" only 4/34 (12%), and shape-match templates 11–12%. Restricting the shown vocabulary to kinds above 40% raises transfer precision from 31% to 70% at the cost of coverage (23 of 53 levels vs 38).
+* **Per-kind precision** curates the vocabulary: "colour c is gone" and "colour c present at level start is now gone" transfer 6/6 each, "exactly m components of colour c" only 4/34 (12%), shape matches 11–12%. Keeping kinds above 40% raises precision from 31% to 70% and halves coverage (23 of 53 levels vs 38).
 
 ## 5. Search guided by goal hypotheses
 
@@ -52,6 +52,6 @@ The remaining zero-cost use is to give the model the verified goal of the level 
 2. **A measurement discipline:** baseline spread from ≥3 identical runs; pre-registered thresholds; counterfactual evaluation on a deterministic replica that predicted a layer's sign before compute was spent; controls that re-fit parameters to a pseudo-goal, which overturned two of our own headline numbers; and the observation that whole-run score cannot measure a layer acting after level 1.
 3. **A goal vocabulary with measured per-kind transfer,** turning "the agent lacks goals" into numbers a successor system can build on.
 
-We also tested the natural extension to *histories* (ever / never / count / before / within / action-run predicates, with a description-length penalty and the requirement that the predicate first becomes true at the completing step). It covers all 53 levels — and fails its control completely: a random prefix of a trajectory, where no level was cleared, is "separated" in 986 of 986 trials. An expressive temporal language describes anything, so coverage without a control is worthless.
+The natural extension to *histories* (ever / never / count / before / within / action-run, with a description-length penalty and the requirement that the predicate first becomes true at the completing step) covers all 53 levels and fails its control completely: a random trajectory prefix, where no level was cleared, is "separated" in 986 of 986 trials. Coverage without a control is worthless.
 
 **What would change our mind:** a goal-conditioned progress measure that separates winning from sibling actions at AUC ≥ 0.6 using only a *transferred* goal; or evidence that the next-level rate rises on ≥60 first-level games. Absent either, our reading is that on a small fixed model the binding constraint is turning a known goal into a plan, not naming the goal.
