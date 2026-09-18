@@ -1,0 +1,23 @@
+{
+  "id": "sergueimakarov/arc3-dsv4-duck",
+  "title": "arc3 dsv4 duck",
+  "code_file": "submission.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "machine_shape": "NvidiaRtxPro6000",
+  "enable_tpu": false,
+  "enable_internet": false,
+  "keywords": [],
+  "dataset_sources": [
+    "keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1",
+    "bachhg/dsv4-llamacpp-runtime-sm120-ba360efe-r1",
+    "johnannis/test-ok-3-q2-new"
+  ],
+  "kernel_sources": [],
+  "competition_sources": [
+    "arc-prize-2026-arc-agi-3"
+  ],
+  "model_sources": []
+}
