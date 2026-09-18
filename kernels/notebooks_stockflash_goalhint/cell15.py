@@ -1,33 +1,4 @@
-"""Перебор на стоковом Duck (16.09, слово владельца «перебор в бою — тоже попробуем», затем «перенести слой в хвост игры — давай,
-и теперь будем запускать только это вместо базы»). Режим tail (боевой): перебор запускается, когда до конца игры осталось
-<= _BF_TAIL_S секунд И модель не брала уровень >= _BF_STALL_S секунд (уровень ищется от текущего); бюджет = остаток времени.
-Режим pre (первая сборка): перебор до первого вызова модели. Ходы -- через публичный taaf Game.execute_action (зачётные,
-мимо истории модели), поэтому слой работает и на публичном бандле Duck, и на atlas_src. Слой стоит в ОБОИХ режимах
-(TRUE_SUBMISSION тоже), выключатель -- переменная окружения BFS_LAYER=0.
 
-Замысел: в начале каждой игры, до первого вызова модели, обвязка сама ищет уровень 1 перебором по настоящей среде:
-состояние = доска с маской «часов», раскрытие узла = RESET + повтор пути + ход (снимков среды в бою нет, режим ONLINE),
-алфавит = стрелки/SPACE из valid_actions + «живые» клики (точки сетки, меняющие доску из старта). Бюджет на игру:
-_BF_MOVES ходов (12000) и _BF_SECONDS секунд (600). Нашли уровень -- модель начинает с уровня 2; не нашли -- RESET, модель играет как база.
-Ходы перебора идут через step_env(probe=True): зачётные, но не пишутся в историю модели. Маркер [[BFS]] в stdout на игру,
-итог в /kaggle/working/bfs_stats.json.
-
-Пороги, записанные ДО пуска, против базы runs/flash_v1_phaseA (10.25, 40 уровней): ИЗМЕРЕНО локально (docs/bfs2_compare_16_09.txt)
-уровень 1 берётся перебором в 15/25 игр при неограниченном бюджете; в бюджет 12000 ходов (с повтором пути) укладываются примерно ar25, ft09, lf52, lp85, ls20,
-sk48 (2849 ходов со снимками, с повтором пути -- нет), sp80, tu93, vc33, cd82 -- из них база не берёт sk48, sp80, cd82 (ур.1).
-Ожидание по уровням: +2..3 над 40; по баллу RHAE: ≈ +0 (уровень за тысячи ходов стоит ~0), возможен вред от потраченного
-времени (до 10 мин из 132 на игру). Польза -- дельта >= +4 балла и парный критерий p < 0.05; вред -- <= -4; иначе шум.
-Механизм: строк [[BFS]] = 25, суммарные ходы перебора в логе. Только оффлайн (TRUE_SUBMISSION=False).
-Проба: --probe ставит потолок игры 1800 с (сравнение с docs/base30_flash_v1_h115.json, 3.32).
-"""
-import argparse, json, os, sys
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_lvfact_reset_notebook import build  # noqa: E402
-
-PROBE_CAP_S = 1800.0
-
-BFS_CELL = r'''
 # =====================================================================
 # ПЕРЕБОР ПЕРЕД МОДЕЛЬЮ (16.09): до первого вызова модели обвязка ищет уровень 1 перебором по настоящей среде
 # (RESET + повтор пути + ход; состояние = доска с маской часов; клики -- «живые» точки сетки). Только оффлайн.
@@ -37,9 +8,9 @@ from collections import deque as _bf_deque
 import numpy as _bf_np
 import inference.framework.solver as _bf_solver
 import arcengine as _bf_arcengine
-_BF_MOVES, _BF_SECONDS, _BF_MAX_STATES, _BF_CLICK_STEP = __MOVES__, __SECONDS__, 4000, 4
-_BF_MODE, _BF_TAIL_S, _BF_STALL_S = "__MODE__", __TAIL__, __STALL__   # tail: перебор в хвосте игры; pre: до первого вызова; stall: после застоя
-_BF_MIN_LEFT = __MINLEFT__   # stall: перебор только если после него модели остаётся >= _BF_MIN_LEFT с
+_BF_MOVES, _BF_SECONDS, _BF_MAX_STATES, _BF_CLICK_STEP = 12000, 600.0, 4000, 4
+_BF_MODE, _BF_TAIL_S, _BF_STALL_S = "pre", 600.0, 600.0   # tail: перебор в хвосте игры; pre: до первого вызова; stall: после застоя
+_BF_MIN_LEFT = 600.0   # stall: перебор только если после него модели остаётся >= _BF_MIN_LEFT с
 _bf_stats = {"games": 0, "levels": 0, "moves": 0, "seconds": 0.0, "per_game": {}}
 _BF_SIMPLE = ("ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5")
 _BF_M2E = {"ACTION1": "UP", "ACTION2": "DOWN", "ACTION3": "LEFT", "ACTION4": "RIGHT", "ACTION5": "SPACE"}
@@ -277,34 +248,152 @@ if _bf_os.environ.get("BFS_LAYER", "1") != "0":
     _bf_solver._HarnessGameSession.play = _bf_play
     _bf_atexit.register(_bf_dump)
     print("[[BFS]] слой установлен (%s): ходов %d, секунд %.0f, хвост %.0f с, застой %.0f с, остаток модели %.0f с; TRUE_SUBMISSION=%s" % (_BF_MODE, _BF_MOVES, _BF_SECONDS, _BF_TAIL_S, _BF_STALL_S, _BF_MIN_LEFT, TRUE_SUBMISSION), flush=True)
-'''
 
 
-def cell(moves: int, seconds: float, mode: str = "tail", tail_s: float = 600.0, stall_s: float = 600.0, min_left: float = 600.0) -> str:
-    return (BFS_CELL.replace("__MOVES__", str(moves)).replace("__SECONDS__", repr(float(seconds))).replace("__MODE__", mode)
-            .replace("__TAIL__", repr(float(tail_s))).replace("__STALL__", repr(float(stall_s))).replace("__MINLEFT__", repr(float(min_left))))
+# =====================================================================
+# ЦЕЛЬ ИЗ КАДРА ВЗЯТИЯ УРОВНЯ -> ВО ВХОД МОДЕЛИ (18.09). Выключатель GOALHINT=0.
+# =====================================================================
+import os as _gh_os, json as _gh_json, atexit as _gh_atexit
+import numpy as _gh_np
+import inference.agent.tool_agent as _gh_wta
+_gh_stats = {"games": 0, "goals": 0, "statements": [], "prompts": 0, "errors": 0}
+_GH_MAX = 3   # сколько утверждений о цели показывать модели
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", action="store_true", help="потолок игры %s с (проба 30 мин)" % PROBE_CAP_S)
-    ap.add_argument("--moves", type=int, default=12000); ap.add_argument("--seconds", type=float, default=600.0)
-    ap.add_argument("--mode", default="tail", choices=["tail", "pre", "stall"]); ap.add_argument("--tail", type=float, default=600.0); ap.add_argument("--stall", type=float, default=600.0)
-    a = ap.parse_args()
-    out = "kernels/notebooks_stockflash_bfs" + ("tail" if a.mode == "tail" else "")
-    slug = "sergueimakarov/arc3-stock-flash-bfs" + ("-tail" if a.mode == "tail" else "")
-    build(cell(a.moves, a.seconds, a.mode, a.tail, a.stall), out, slug, "arc3 stock flash bfs" + (" tail" if a.mode == "tail" else ""), "_bf_stats = ")
-    if a.probe:
-        p = os.path.join(out, "submission.ipynb")
-        nb = json.load(open(p, encoding="utf-8"))
-        c15 = "".join(nb["cells"][15]["source"])
-        marker = "# Play the benchmark; watchdog stop and teardown run even if it raises."
-        assert marker in c15
-        c15 = c15.replace(marker, "if not TRUE_SUBMISSION:\n    bm.solver.max_runtime_s_per_game = %r    # проба вне боя\n\n" % PROBE_CAP_S + marker, 1)
-        nb["cells"][15]["source"] = c15.splitlines(keepends=True)
-        json.dump(nb, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        print("ok   проба: потолок игры %s с" % PROBE_CAP_S)
+def _gh_comps(mask):
+    h, w = mask.shape; seen = _gh_np.zeros_like(mask, dtype=bool); out = []
+    for y0 in range(h):
+        for x0 in range(w):
+            if not mask[y0, x0] or seen[y0, x0]:
+                continue
+            st = [(y0, x0)]; seen[y0, x0] = True; cells = []
+            while st:
+                y, x = st.pop(); cells.append((y, x))
+                for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    yy, xx = y + dy, x + dx
+                    if 0 <= yy < h and 0 <= xx < w and mask[yy, xx] and not seen[yy, xx]:
+                        seen[yy, xx] = True; st.append((yy, xx))
+            ys = [c[0] for c in cells]; xs = [c[1] for c in cells]
+            out.append({"n": len(cells), "shape": frozenset((y - min(ys), x - min(xs)) for y, x in cells)})
+    return out
 
 
-if __name__ == "__main__":
-    main()
+def _gh_feat(g):
+    vals, counts = _gh_np.unique(g, return_counts=True)
+    bg = int(vals[counts.argmax()]) if len(vals) else 0
+    cnt = {int(v): int(c) for v, c in zip(vals, counts)}
+    cm = {c: _gh_comps(g == c) for c in cnt if c != bg}
+    return {"bg": bg, "cnt": cnt, "ncolors": len(cnt), "comps": cm,
+            "shapes": {c: {x["shape"] for x in cs} for c, cs in cm.items()}}
+
+
+def _gh_preds(f_goal):
+    """(ранг, фраза, проверка) для словаря целей; параметры взяты из кадра ЦЕЛИ. Ранг = насколько утверждение
+    содержательно: исчезновение цвета и совпадение форм информативнее, чем «ровно N клеток» у крупного цвета.
+    Цвета, занимающие больше пятой части доски (фон и заливка), в утверждения о количестве не идут."""
+    out = []; bg = f_goal["bg"]; cols = [c for c in f_goal["cnt"] if c != bg]
+    total = max(1, sum(f_goal["cnt"].values())); big = {c for c in cols if f_goal["cnt"][c] > 0.2 * total}
+    for c in range(16):
+        if f_goal["cnt"].get(c, 0) == 0 and c not in (bg,):
+            out.append((0, "no cells of colour %d are left on the board" % c, lambda f, c=c: f["cnt"].get(c, 0) == 0))
+    for c in cols:
+        cs = f_goal["comps"].get(c, []); m = len(cs)
+        for d in cols:
+            if c < d and (f_goal["shapes"].get(c, set()) & f_goal["shapes"].get(d, set())):
+                out.append((1, "a shape of colour %d matches a shape of colour %d" % (c, d),
+                            lambda f, c=c, d=d: bool(f["shapes"].get(c, set()) & f["shapes"].get(d, set()))))
+        if m == 1:
+            out.append((2, "all cells of colour %d are joined into one group" % c, lambda f, c=c: len(f["comps"].get(c, [])) == 1))
+        elif c not in big:
+            out.append((3, "colour %d forms exactly %d connected group(s)" % (c, m), lambda f, c=c, m=m: len(f["comps"].get(c, [])) == m))
+        if cs and c not in big:
+            n = max(x["n"] for x in cs)
+            out.append((4, "the largest group of colour %d has exactly %d cells" % (c, n),
+                        lambda f, c=c, n=n: bool(f["comps"].get(c)) and max(x["n"] for x in f["comps"][c]) == n))
+            k = f_goal["cnt"][c]
+            out.append((5, "exactly %d cells of colour %d remain" % (k, c), lambda f, c=c, k=k: f["cnt"].get(c, 0) == k))
+    out.append((6, "exactly %d distinct colours are on the board" % f_goal["ncolors"],
+                lambda f, k=f_goal["ncolors"]: f["ncolors"] == k))
+    return sorted(out, key=lambda x: x[0])
+
+
+def _gh_infer(goal, samples):
+    """утверждения, истинные в кадре цели и ложные во всех образцах не-целевых состояний."""
+    if goal is None:
+        return []
+    f_goal = _gh_feat(goal)
+    f_neg = [_gh_feat(g) for g in samples if getattr(g, "shape", None) == goal.shape]
+    out = []
+    for _rank, text, fn in _gh_preds(f_goal):
+        try:
+            if not fn(f_goal) or any(fn(x) for x in f_neg):
+                continue
+        except Exception:
+            continue
+        out.append(text)
+    return out[:_GH_MAX]
+
+
+def _gh_block(level_done, stmts, same_kind):
+    head = ("HARNESS-INFERRED GOAL. The harness solved level %d by its own search and looked at the board at the moment "
+            "that level was completed. Compared with every other board seen on that level, these statements were true "
+            "only there:" % level_done)
+    body = "\n".join("  - %s" % s for s in stmts)
+    if same_kind:
+        tail = ("You are now past that level. Levels of one game usually share the KIND of goal and differ in the numbers "
+                "(more objects, obstacles, distractors), so aim for the same kind of condition on this board and re-derive "
+                "the exact numbers yourself. State the goal you settle on in `Goal model:` and verify it before long plans.")
+    else:
+        tail = ("Use this as the goal of the current level unless the board contradicts it; state your own goal in "
+                "`Goal model:` and verify it.")
+    return head + "\n" + body + "\n" + tail
+
+
+if _gh_os.environ.get("GOALHINT", "1") != "0":
+    _gh_orig_prompt = _gh_wta.ToolAgent._build_user_prompt
+
+    def _gh_prompt(self, action_num, *args, **kwargs):
+        st = getattr(self, "_gh_state", None)
+        if st is None:
+            st = {"block": None, "level": None}; self._gh_state = st
+        try:
+            cb = getattr(self, "_step_env_callback", None); sess = getattr(cb, "__self__", None)
+            raw = getattr(sess, "_bf_goal_raw", None) if sess is not None else None
+            if raw is not None and not st.get("done"):
+                st["done"] = True
+                stmts = _gh_infer(raw.get("goal"), raw.get("samples") or [])
+                _gh_stats["games"] += 1
+                if stmts:
+                    _gh_stats["goals"] += 1; _gh_stats["statements"].append(stmts)
+                    st["stmts"] = stmts; st["level_done"] = int(raw.get("level_done") or 1)
+                    st["block"] = _gh_block(st["level_done"], stmts, False)
+                    print("[[GOAL]] уровень %d взят перебором; цель: %s" % (st["level_done"], " | ".join(stmts)), flush=True)
+                else:
+                    print("[[GOAL]] уровень %d взят перебором, но ни одно утверждение не отделило цель" % int(raw.get("level_done") or 1), flush=True)
+                _gh_dump()
+            lv = getattr(kwargs.get("current_frame"), "level", None)
+            if lv is not None and st.get("stmts"):
+                lv = int(lv)
+                if st["level"] is not None and lv > st["level"]:
+                    st["block"] = _gh_block(st["level_done"], st["stmts"], True)   # тот же вид цели, другие числа
+                st["level"] = lv if st["level"] is None else max(st["level"], lv)
+        except Exception as _e:
+            _gh_stats["errors"] += 1; print("[GOAL] сбой: %r" % (_e,), flush=True)
+        text = _gh_orig_prompt(self, action_num, *args, **kwargs)
+        if st.get("block"):
+            _gh_stats["prompts"] += 1
+            return st["block"] + "\n\n" + text
+        return text
+
+    _gh_wta.ToolAgent._build_user_prompt = _gh_prompt
+
+    def _gh_dump():
+        try:
+            _gh_os.makedirs("/kaggle/working", exist_ok=True)
+            _gh_json.dump(_gh_stats, open("/kaggle/working/goalhint_stats.json", "w"), ensure_ascii=False, indent=1)
+        except Exception:
+            pass
+
+    _gh_atexit.register(_gh_dump)
+    print("[[GOAL]] слой установлен: перебор берёт уровень 1, цель выводится по кадру взятия и идёт во вход модели "
+          "(до %d утверждений); TRUE_SUBMISSION=%s" % (_GH_MAX, TRUE_SUBMISSION), flush=True)
