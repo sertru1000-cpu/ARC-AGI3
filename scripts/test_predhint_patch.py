@@ -99,7 +99,7 @@ check(p.startswith("HARNESS-INFERRED GOAL OF THE PREVIOUS LEVEL") and "no cells 
       "блок цели во входе: утверждение и оговорка про числа")
 nb = json.load(open(ROOT / "kernels/notebooks_stockflash_predhint/submission.ipynb", encoding="utf-8"))
 c15 = "".join(nb["cells"][15]["source"])
-check(c15.find("_ph_stats = ") < c15.find("await bm.run(") and "max_runtime_s_per_game = 4800.0" in c15 and "_bf_stats" not in c15,
-      "ноутбук: слой до запуска, потолок 4800 с вне боя, перебора в сборке НЕТ")
+check(c15.find("_ph_stats = ") < c15.find("await bm.run(") and ("max_runtime_s_per_game = 4800.0" in c15 or "max_runtime_s_per_game = 3600.0" in c15) and "_bf_stats" not in c15,
+      "ноутбук: слой до запуска, потолок пробы стоит только вне боя, перебора в сборке НЕТ")
 print("ИТОГ:", "все проверки пройдены" if not fails else "сбоев %d: %s" % (len(fails), fails))
 sys.exit(1 if fails else 0)

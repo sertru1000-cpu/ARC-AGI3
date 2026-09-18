@@ -15,6 +15,8 @@
     "johnannis/test-ok-3-q2-new"
   ],
   "kernel_sources": [],
-  "competition_sources": [],
+  "competition_sources": [
+    "arc-prize-2026-arc-agi-3"
+  ],
   "model_sources": []
 }

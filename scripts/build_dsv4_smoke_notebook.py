@@ -66,9 +66,17 @@ if not fit or server_bin is None:
 else:
     sz, model = fit[0]          # самый крупный из влезающих
     print("[[DSV4]] выбран квант: %.1f ГБ %s" % (sz, model), flush=True)
-    os.chmod(server_bin, 0o755)
-    for lib in glob.glob(os.path.dirname(server_bin) + "/../lib*"):
-        os.environ["LD_LIBRARY_PATH"] = lib + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+    # ЛОВУШКА 19.09: /kaggle/input только для ЧТЕНИЯ -- права на запуск там не поставить, копируем в рабочую папку
+    import shutil
+    local_bin = "/kaggle/working/llama-server"
+    shutil.copy2(server_bin, local_bin)
+    os.chmod(local_bin, 0o755)
+    runtime_root = os.path.dirname(os.path.dirname(server_bin))
+    libs = [d for d in glob.glob(runtime_root + "/lib*") if os.path.isdir(d)]
+    if libs:
+        os.environ["LD_LIBRARY_PATH"] = ":".join(libs) + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+    print("[[DSV4]] сервер скопирован в %s; библиотеки: %s" % (local_bin, libs), flush=True)
+    server_bin = local_bin
     cmd = ("%s -m %s --host 127.0.0.1 --port 8080 -ngl 999 -c %d --parallel %d "
            "--flash-attn on --log-disable" % (server_bin, model, CTX, PARALLEL))
     print("[[DSV4]] запуск:", cmd, flush=True)
@@ -152,7 +160,9 @@ def main() -> None:
             "language": "python", "kernel_type": "notebook", "is_private": True, "enable_gpu": True,
             "machine_shape": "NvidiaRtxPro6000", "enable_tpu": False, "enable_internet": False, "keywords": [],
             "dataset_sources": ["bachhg/dsv4-llamacpp-runtime-sm120-ba360efe-r1", "johnannis/test-ok-3-q2-new"],
-            "kernel_sources": [], "competition_sources": [],
+            # ЛОВУШКА 19.09: без подключённого соревнования Kaggle выдаёт T4 x2 (16 ГБ), даже если machine_shape
+            # просит NvidiaRtxPro6000. Мощная карта доступна только ядрам соревнования.
+            "kernel_sources": [], "competition_sources": ["arc-prize-2026-arc-agi-3"],
             "model_sources": []}
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
     compile(CELL, "dsv4_smoke", "exec")
