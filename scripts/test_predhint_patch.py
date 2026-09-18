@@ -10,7 +10,7 @@ usage:  .venv/bin/python scripts/test_predhint_patch.py --bundle runs/peer_kerne
 """
 import argparse, json, os, sys, types
 from pathlib import Path
-ap = argparse.ArgumentParser(); ap.add_argument("--bundle", required=True)
+ap = argparse.ArgumentParser(); ap.add_argument("--bundle", default="runs/peer_kernels/duck_smoke_live")
 ap.add_argument("--cell", default="kernels/notebooks_stockflash_predhint/cell15.py")
 ap.add_argument("--run", default="runs/flash_v1_phaseA"); ap.add_argument("--games", default="ar25,ft09,vc33,re86,su15")
 a = ap.parse_args()

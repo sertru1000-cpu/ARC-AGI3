@@ -31,6 +31,27 @@ _ph_stats = {"levels": 0, "goals": 0, "empty": 0, "prompts": 0, "errors": 0, "st
 _ph_orig_exec = _ph_solver._HarnessGameSession._execute_action
 
 
+def _ph_frames(state):
+    """кадры анимации последнего хода. В бандле, который ставит стоковый ноутбук, функции _raw_frames НЕТ
+    (ЛОВУШКА 18.09: она есть только в другом бандле) -- читаем raw.frame напрямую, с запасными путями."""
+    raw = getattr(state, "raw", None)
+    seq = getattr(raw, "frame", None)
+    out = []
+    for x in (seq or []):
+        try:
+            g = _gh_np.asarray(x, dtype=_gh_np.int16)
+        except Exception:
+            continue
+        if g.ndim == 2 and g.size:
+            out.append(g)
+    if not out:
+        try:
+            out = [_gh_np.asarray(_ph_solver._grid_from_state(state), dtype=_gh_np.int16)]
+        except Exception:
+            out = []
+    return out
+
+
 def _ph_exec(self, action, *a, **k):
     """только ЧТЕНИЕ после хода модели: образцы состояний уровня и кадр взятия. Ходов не добавляет."""
     payload = _ph_orig_exec(self, action, *a, **k)
@@ -40,7 +61,7 @@ def _ph_exec(self, action, *a, **k):
             st = {"samples": [], "n": 0}; self._ph_state = st
         cur = self.game.current_state
         if isinstance(payload, dict) and payload.get("level_completed"):
-            frames = [_gh_np.asarray(x, dtype=_gh_np.int16) for x in _ph_solver._raw_frames(cur)]
+            frames = _ph_frames(cur)
             goal = (frames[:-1] or frames)[-1] if frames else None
             stmts = _gh_infer(goal, st["samples"])
             lvl = int(getattr(cur, "levels_completed", 0) or 0)
