@@ -335,6 +335,23 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">dsv4q3-duck: DeepSeek-V4-Flash в 3 битах (UD-IQ3_XXS), часть экспертов в памяти хоста</span><span class="v-date">собрано 19.09 &middot; <strong>пуш v1 19.09 13:32 МСК</strong>, все 25 игр, 30 мин на игру, по слову владельца «пуш сейчас» &middot; идёт параллельно с dsv4-duck v7 &middot; не разобрана</span></div>
+          <span class="badge phase-a">проба 25 игр &times; 30 мин (&asymp; 3.3 ч квоты)</span>
+        </div>
+        <p class="summary">То же, что dsv4-duck v7, но квант точнее: 3 бита вместо 2. Файл 104.2 ГБ больше всей карты (97 887 MiB), поэтому эксперты первых трёх слоёв из 43 (&asymp; 7 ГБ) держатся в памяти хоста ключом <code>--n-cpu-moe 3</code>. Вопрос пробы: окупает ли прибавка точности потерю скорости на вынесенных экспертах.</p>
+        <ul class="changes">
+          <li>код: <code>scripts/build_dsv4_duck_notebook.py --quant q3 --n-cpu-moe 3 --games all --cap 1800 --ctx 131072 --parallel 4 --max-output 1500</code>; кернел <code>arc3-dsv4q3-duck</code> (отдельный слаг: новая версия в dsv4-duck закрыла бы через API вывод идущей v7).</li>
+          <li>веса: <code>benitomallamaci/dsv4flash-q3-part1…3</code>, 4 части собираются ссылками в одну папку (проверено на поддельном дереве папок Kaggle); шаблон чата с вызовами инструментов в кванте есть (прочитан из заголовка первой части).</li>
+          <li>новое: после загрузки печатаются видеопамять и память хоста &mdash; по ним решается, сколько экспертов выносить.</li>
+        </ul>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска.</strong> Механизм: <code>[[DSV4]] квант из 4 частей</code>, сервер готов, сбоев анализатора 0, все 25 игр отыграны, запас видеопамяти после загрузки напечатан. Точка сравнения та же, что у v7 (обрезка трёх баз на Qwen до 1800 с): уровней 17 / 16 / 12 &mdash; сигнал &ge; 21, неотличимо 12&ndash;20, вред &le; 11. Отдельно &mdash; сравнение с 2-битной v7 на тех же играх: скорость (токенов на вызов, вызовов на игру) и уровни. Риск нового слага: в первом прогоне могут не смонтироваться данные соревнования (так было 11.09) &mdash; видно в первые минуты.</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">dsv4-duck: более сильная модель в ядре (DeepSeek-V4-Flash вместо Qwen3.8-Flash-Next)</span><span class="v-date">собрано 18.09 &middot; пуш v1&ndash;v5 19.09 (все упали на настройке) &middot; v6 (4 игры) снята &middot; <strong>пуш v7 19.09 08:20 МСК: все 25 игр, 30 мин на игру</strong> по слову владельца «гоняй сразу на всех 25 играх 30 минут» &middot; не разобрана</span></div>
           <span class="badge phase-a">проба 25 игр &times; 30 мин (&asymp; 3.3 ч квоты)</span>
         </div>
