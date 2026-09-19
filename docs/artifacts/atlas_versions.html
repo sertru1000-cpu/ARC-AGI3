@@ -335,6 +335,18 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">seed-AA: воспроизводима ли партия базы при одном зерне</span><span class="v-date">собрано 19.09 &middot; <strong>пуш 19:07 МСК</strong> в arc3-stock-flash-predhint (новая версия) по слову владельца «приступай к 1 и 2» &middot; не разобрана</span></div>
+          <span class="badge phase-a">4 игры &times; 2 прохода &times; 30 мин &asymp; 45 мин квоты</span>
+        </div>
+        <p class="summary">Стоковая база без правок обвязки, <code>LOCAL_ANALYZER_SEED=17</code> (обвязка кладёт одно зерно в каждый запрос), игры lp85, r11l, tu93, lf52, каждая играется дважды одновременно. Проверяется допущение, на котором держится парный протокол измерений критика раунда 10: одинаковое зерно &rArr; одинаковая партия даже при пакетной работе сервера.</p>
+        <p class="score-note" style="margin-top:0.5rem;"><strong>Пороги до пуска.</strong> Механизм: <code>[[SEEDAA]]</code> в логе, 8 партий (4 игры &times; 2 прохода). Главное число — длина совпадающего начала последовательностей ходов двух проходов. <strong>Воспроизводимо</strong>: в &ge; 3 играх из 4 совпадает &ge; 80% ходов — парный протокол с одним зерном на игру годится. <strong>Частично</strong>: совпадают первые &ge; 10 ходов, дальше расходятся. <strong>Не воспроизводимо</strong>: расхождение в первых 5 ходах в &ge; 3 играх — зерно партию не фиксирует, парам нужны многие зёрна, протокол дорог.</p>
+      </div>
+    </div>
+
+    <div class="entry waiting">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">DeepSeek: две пробы рычагов скорости на одну волну (4 игры)</span><span class="v-date">собраны 19.09 &middot; <strong>пуш 16:55 МСК</strong>: A = arc3-dsv4q3-duck v3, B = arc3-dsv4-duck v8, по слову владельца «давай, а второй версией ставь 2 бита целиком на карте» &middot; не разобраны</span></div>
           <span class="badge phase-a">2 &times; (4 игры &times; 30 мин) &asymp; 2 &times; 45 мин квоты</span>
         </div>
