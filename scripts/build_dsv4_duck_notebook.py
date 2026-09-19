@@ -41,7 +41,9 @@ print("[[DSV4]] квантов найдено %%d, подходящих %%d; с�
 if not _ds_fit or _ds_server is None:
     raise RuntimeError("[[DSV4]] нет подходящего кванта или llama-server")
 _ds_size, _ds_model = _ds_fit[0]
-_ds_os.chmod(_ds_server, 0o755)
+import shutil as _ds_sh
+_ds_local = "/kaggle/working/llama-server"; _ds_sh.copy2(_ds_server, _ds_local); _ds_os.chmod(_ds_local, 0o755)
+_ds_server = _ds_local
 _ds_cmd = ("%%s -m %%s --host 127.0.0.1 --port 8080 -ngl 999 -c %%d --parallel %%d --flash-attn on --log-disable"
            %% (_ds_server, _ds_model, _DS_CTX, _DS_PARALLEL))
 print("[[DSV4]] запуск: %%s (квант %%.1f ГБ)" %% (_ds_cmd, _ds_size), flush=True)
@@ -99,9 +101,10 @@ def main() -> None:
     assert marker2 in c15
     patch = ("if not TRUE_SUBMISSION:\n"
              "    bm.solver.max_runtime_s_per_game = %r    # проба вне боя\n"
+             "    bm.solver.concurrency = %d              # ровно столько мест у llama-server\n"
              "    _ds_want = [%s]\n"
              "    bm.games = [g for g in bm.games if str(getattr(g, 'env_name', getattr(g, 'game_id', '')))[:4] in _ds_want]\n"
-             "    print('[[DSV4]] игр в пробе: %%d' %% len(bm.games), flush=True)\n\n" % (a.cap, games))
+             "    print('[[DSV4]] игр в пробе: %%d' %% len(bm.games), flush=True)\n\n" % (a.cap, a.parallel, games))
     c15 = c15.replace(marker2, patch + marker2, 1)
     nb["cells"][15]["source"] = c15.splitlines(keepends=True)
 
