@@ -44,7 +44,7 @@ _ds_size, _ds_model = _ds_fit[0]
 import shutil as _ds_sh
 _ds_local = "/kaggle/working/llama-server"; _ds_sh.copy2(_ds_server, _ds_local); _ds_os.chmod(_ds_local, 0o755)
 _ds_server = _ds_local
-_ds_cmd = ("%%s -m %%s --host 127.0.0.1 --port 8080 -ngl 999 -c %%d --parallel %%d --flash-attn on --log-disable"
+_ds_cmd = ("%%s -m %%s --host 127.0.0.1 --port 8080 -ngl 999 -c %%d --parallel %%d --flash-attn on --log-disable --jinja"
            %% (_ds_server, _ds_model, _DS_CTX, _DS_PARALLEL))
 print("[[DSV4]] запуск: %%s (квант %%.1f ГБ)" %% (_ds_cmd, _ds_size), flush=True)
 _ds_log = open("/kaggle/working/llama-server.log", "w")
@@ -68,16 +68,22 @@ _ds_os.environ["LOCAL_ANALYZER_MODEL_ID"] = "dsv4"
 _ds_os.environ["INFERENCE_ANALYZER_MODEL"] = "dsv4"
 _ds_os.environ["LOCAL_ANALYZER_API_KEY"] = "local"
 _ds_os.environ["LOCAL_ANALYZER_PROVIDER"] = "vllm"
-_ds_os.environ["LOCAL_ANALYZER_CONTEXT_WINDOW"] = str(_DS_CTX)
-print("[[DSV4]] анализатор перенаправлен на llama.cpp", flush=True)
+# ЛОВУШКА 19.09: llama.cpp делит общий контекст на места, обвязке надо сообщать контекст ОДНОГО места,
+# иначе она строит промпт длиннее места и получает 400 (запрос 20573 токенов при доступных 20480)
+_ds_os.environ["LOCAL_ANALYZER_CONTEXT_WINDOW"] = str(_DS_CTX // _DS_PARALLEL)
+# ИЗМЕРЕНО 19.09 (версия 3): модель выдала по 64-69 тысяч токенов на игру и сделала 4-51 ход -- всё время ушло
+# в рассуждение. Ограничиваем длину ответа и просим шаблон без размышления (как делали для Qwen).
+_ds_os.environ["LOCAL_ANALYZER_MAX_OUTPUT"] = "%(maxout)d"
+_ds_os.environ["LLM_DISABLE_THINKING"] = "1"
+print("[[DSV4]] анализатор перенаправлен на llama.cpp; потолок ответа %(maxout)d токенов", flush=True)
 '''
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--games", default="tu93,ft09,lp85,sp80"); ap.add_argument("--cap", type=float, default=1800.0)
-    ap.add_argument("--ctx", type=int, default=16384); ap.add_argument("--parallel", type=int, default=4)
-    ap.add_argument("--max-gb", type=float, default=88.0)
+    ap.add_argument("--ctx", type=int, default=131072); ap.add_argument("--parallel", type=int, default=4)
+    ap.add_argument("--max-gb", type=float, default=88.0); ap.add_argument("--max-output", type=int, default=1500)
     a = ap.parse_args()
     src = json.load(open("kernels/notebooks_stockflash/submission.ipynb", encoding="utf-8"))
     nb = json.loads(json.dumps(src))
@@ -87,25 +93,35 @@ def main() -> None:
     marker = 'for command in json.loads((BUNDLE_DIR / "setup_commands.json").read_text()):'
     assert marker in c9, "ячейка 9: не нашёл цикл команд установки"
     c9 = c9.replace(marker, 'for command in []:   # [[DSV4]] команды бандла отключены: vLLM не поднимаем')
-    c9 += "\n" + (START_SERVER % {"ctx": a.ctx, "parallel": a.parallel, "max_gb": a.max_gb})
+    c9 += "\n" + (START_SERVER % {"ctx": a.ctx, "parallel": a.parallel, "max_gb": a.max_gb, "maxout": a.max_output})
     nb["cells"][9]["source"] = c9.splitlines(keepends=True)
 
     # 2) сторож vLLM не запускать
     c15 = "".join(nb["cells"][15]["source"])
     assert "vllm_watchdog.start_background(" in c15
+    # сторож vLLM не просто не запускается -- его модуль даже не ЗАГРУЖАЕТСЯ: serving_setup.py требует переменных
+    # окружения от команд бандла, которые мы отключили (падение 19.09: KeyError TAAF_KAGGLE_BUNDLE_DIR)
+    c15 = c15.replace("vllm_watchdog_setup = vllm_watchdog.load_setup(BUNDLE_DIR / 'serving_setup.py')",
+                      "vllm_watchdog_setup = None   # [[DSV4]] сторожа vLLM нет")
     c15 = c15.replace("vllm_watchdog.start_background(", "_DSV4_SKIP_WATCHDOG = (")
     c15 = c15.replace("vllm_watchdog.stop_background(timeout_seconds=15.0)", "pass   # [[DSV4]] сторожа нет")
     # 3) проба: свои игры и потолок
-    games = ", ".join('"%s"' % g for g in a.games.split(","))
+    games = ", ".join('"%s"' % g for g in a.games.split(",")) if a.games != "all" else ""
     marker2 = "# Play the benchmark; watchdog stop and teardown run even if it raises."
     assert marker2 in c15
+    # --games all: играем все 25, отбор не ставим (тогда и стоковая проверка покрытия проходит сама)
+    sel = ("" if a.games == "all" else
+           "    _ds_want = [%s]\n"
+           "    bm.games = [g for g in bm.games if str(getattr(g, 'env_name', getattr(g, 'game_id', '')))[:4] in _ds_want]\n" % games)
     patch = ("if not TRUE_SUBMISSION:\n"
              "    bm.solver.max_runtime_s_per_game = %r    # проба вне боя\n"
              "    bm.solver.concurrency = %d              # ровно столько мест у llama-server\n"
-             "    _ds_want = [%s]\n"
-             "    bm.games = [g for g in bm.games if str(getattr(g, 'env_name', getattr(g, 'game_id', '')))[:4] in _ds_want]\n"
-             "    print('[[DSV4]] игр в пробе: %%d' %% len(bm.games), flush=True)\n\n" % (a.cap, a.parallel, games))
+             "%s"
+             "    print('[[DSV4]] игр в пробе: %%d' %% len(bm.games), flush=True)\n\n" % (a.cap, a.parallel, sel))
     c15 = c15.replace(marker2, patch + marker2, 1)
+    cov = "if len(public_runs) != 25 or public_run_ids != list(PUBLIC_GAME_IDS):"
+    if cov in c15:
+        c15 = c15.replace(cov, "if TRUE_SUBMISSION and (len(public_runs) != 25 or public_run_ids != list(PUBLIC_GAME_IDS)):")
     nb["cells"][15]["source"] = c15.splitlines(keepends=True)
 
     out = "kernels/notebooks_dsv4_duck"

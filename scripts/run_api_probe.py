@@ -1,0 +1,127 @@
+"""Прогон боевой обвязки Duck ЛОКАЛЬНО на внешней модели через API (19.09, по слову владельца «может мы на API
+попробуем сначала?»).
+
+Зачем. Вся затея с DeepSeek-V4-Flash в ядре держится на непроверенном допущении: «модель сильнее -> уровней больше».
+Проверка этого допущения на Kaggle стоит квоты (30 минут пробы = час машины) и упирается в возню с llama.cpp.
+Через API то же самое меряется на маке за копейки: обвязка та же самая (бандл duck_smoke_live, тот, что уходит в бой),
+движок тот же (environment_files, наш детерминированный повтор боя), меняется ТОЛЬКО ядро-модель.
+
+Чего эта проба НЕ даёт: модель по API не может быть сабмитом -- в боевом ядре интернета нет. Это измерительный
+инструмент, а не путь к баллу. Если выигрыша нет -- линия «сильная модель в ядре» закрывается бесплатно; если есть --
+тогда имеет смысл тратить квоту на сборку с llama.cpp.
+
+Сравнивать с базой-30 (1.67 / 2.73 / 3.32) можно только при том же потолке на игру и том же наборе игр.
+
+usage:
+  .venv/bin/python scripts/run_api_probe.py --games tu93,ft09,lp85,sp80 --cap 1800 --model gemini-3.6-flash
+"""
+import argparse, asyncio, json, os, pickle, sys, time
+from datetime import datetime, timedelta
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+BUNDLE = ROOT / "runs/peer_kernels/duck_smoke_live"
+SRC = BUNDLE / "src"
+for p in (SRC / "ARC3-Inference", SRC / "tufa-arc-agi-framework/src"):
+    sys.path.insert(0, str(p))
+
+
+def load_env_file() -> None:
+    f = ROOT / ".env"
+    if not f.exists():
+        return
+    for line in f.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--games", default="tu93,ft09,lp85,sp80")
+    ap.add_argument("--cap", type=float, default=1800.0, help="потолок на игру, секунд")
+    ap.add_argument("--concurrency", type=int, default=4)
+    ap.add_argument("--model", default="gemini-3.6-flash")
+    ap.add_argument("--base-url", default="https://generativelanguage.googleapis.com/v1beta/openai")
+    ap.add_argument("--api-key-env", default="LLM_API_KEY_AISTUDIO")
+    ap.add_argument("--provider", default="openrouter")
+    ap.add_argument("--context", type=int, default=131072)
+    ap.add_argument("--max-output", type=int, default=2048)
+    ap.add_argument("--out", default="")
+    a = ap.parse_args()
+
+    load_env_file()
+    key = os.environ.get(a.api_key_env, "").strip()
+    if not key:
+        print("нет ключа в переменной %s" % a.api_key_env)
+        return 2
+
+    # обвязка ходит в модель по совместимому протоколу -- ей всё равно, кто за ним стоит
+    os.environ["LOCAL_ANALYZER_BASE_URL"] = a.base_url
+    os.environ["LOCAL_ANALYZER_MODEL_ID"] = a.model
+    os.environ["INFERENCE_ANALYZER_MODEL"] = a.model
+    os.environ["LOCAL_ANALYZER_API_KEY"] = key
+    # ЛОВУШКА: режим "openai"/"vllm" дописывает в запрос top_k и chat_template_kwargs -- чужой сервер их не знает
+    # и отвечает 400. Режим "openrouter" шлёт голый совместимый запрос, он подходит любому внешнему API.
+    os.environ["LOCAL_ANALYZER_PROVIDER"] = a.provider
+    os.environ["LOCAL_ANALYZER_CONTEXT_WINDOW"] = str(a.context)
+    os.environ["LOCAL_ANALYZER_MAX_OUTPUT"] = str(a.max_output)
+    os.environ.setdefault("RECORDINGS_DIR", str(ROOT / "runs/_api_recordings"))
+
+    out = Path(a.out) if a.out else ROOT / ("runs/api_probe_%s_%s" % (a.model.replace("/", "_"), datetime.now().strftime("%d%m_%H%M")))
+    out.mkdir(parents=True, exist_ok=True)
+
+    import arc_agi
+    import taaf.game_api
+
+    with open(BUNDLE / "deploy_target.pkl", "rb") as f:
+        target = pickle.load(f)
+    target.actual_run_as_submission = False
+    target.is_competition_rerun = False
+    with open(BUNDLE / "benchmark_initial.pkl", "rb") as f:
+        bm = pickle.load(f)
+    bm.job_dir = out
+
+    env_dir = str(ROOT / "environment_files")
+    spec = taaf.game_api.ArcadeSpec(operation_mode=arc_agi.OperationMode.OFFLINE, environments_dir=env_dir)
+    arcade = arc_agi.Arcade(operation_mode=arc_agi.OperationMode.OFFLINE, environments_dir=env_dir)
+    ids = [e.game_id for e in arcade.available_environments]
+    want = set(a.games.split(",")) if a.games != "all" else None
+    ids = [g for g in ids if want is None or g[:4] in want]
+    if not ids:
+        print("игр не выбрано; доступны:", [g[:4] for g in arcade.available_environments])
+        return 2
+    bm.games = [taaf.game_api.GameAPI(env_name=g, arcade_spec=spec) for g in ids]
+    bm.n_passes = 1
+    bm.game_weights = None
+    bm.solver.max_runtime_s_per_game = a.cap
+    bm.solver.concurrency = a.concurrency
+
+    print("игр %d: %s | модель %s | потолок %.0f с | одновременно %d | вывод %s"
+          % (len(bm.games), ",".join(g[:4] for g in ids), a.model, a.cap, a.concurrency, out), flush=True)
+    t0 = time.time()
+    soft_end = datetime.now() + timedelta(seconds=a.cap * max(1, len(bm.games) / max(1, a.concurrency)) + 300)
+    asyncio.run(bm.run(soft_end_time=soft_end, runtime_environment=target, minimal_diagnostics=True))
+    bm._save_json()
+    print("прогон занял %.1f мин" % ((time.time() - t0) / 60), flush=True)
+
+    rows = []
+    for run in bm.game_runs:
+        rows.append({"game": run.game_id[:4], "state": run.state, "score": run.final_score,
+                     "actions": len(run.history), "levels": getattr(run, "levels_completed", None)})
+        print("  %s: %s уровней=%s ходов=%d балл=%s" % (rows[-1]["game"], run.state, rows[-1]["levels"],
+                                                        rows[-1]["actions"], rows[-1]["score"]), flush=True)
+    try:
+        from inference.tools.eval import evaluate_runs
+        summary = evaluate_runs([out])
+        print("СЧЁТ:", summary)
+        json.dump({"rows": rows, "summary": repr(summary)}, open(out / "probe_summary.json", "w"), ensure_ascii=False, indent=1)
+    except Exception as exc:
+        print("счётчик не отработал: %r" % (exc,))
+        json.dump({"rows": rows}, open(out / "probe_summary.json", "w"), ensure_ascii=False, indent=1)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
