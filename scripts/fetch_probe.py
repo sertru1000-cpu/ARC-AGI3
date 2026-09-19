@@ -116,9 +116,33 @@ def summarize(out: Path) -> None:
         print("\nответы модели: %d; обрыв по длине %d (%.0f%%), вызов инструмента %d, нормальный конец %d"
               % (n, fr["length"], 100.0 * fr["length"] / n, fr["tool_calls"], fr["stop"]))
 
+    # Тайминги llama-server (19.09): без --log-disable сервер пишет на каждый запрос строки
+    # «prompt eval time = X ms / N tokens» (чтение промпта) и «eval time = Y ms / M tokens» (генерация).
+    # По ним видно, на что уходит время вызова -- на чтение или на генерацию.
+    srv = out / "llama-server.log"
+    if srv.exists() and srv.stat().st_size > 1000:
+        st = srv.read_text(encoding="utf-8", errors="replace")
+        pe = [(float(a), int(b)) for a, b in re.findall(r"prompt eval time =\s*([\d.]+) ms /\s*(\d+) tokens", st)]
+        ev = [(float(a), int(b)) for a, b in re.findall(r"(?<!prompt )eval time =\s*([\d.]+) ms /\s*(\d+) tokens", st)]
+        if pe or ev:
+            import statistics as _st
+            tp = sum(a for a, _ in pe) / 1000; te = sum(a for a, _ in ev) / 1000
+            print("\nтайминги сервера: запросов %d; чтение промпта %.0f с (%.0f%%), генерация %.0f с (%.0f%%)"
+                  % (len(ev), tp, 100 * tp / max(1e-9, tp + te), te, 100 * te / max(1e-9, tp + te)))
+            if pe:
+                print("  чтение: медиана %d токенов за %.1f с (%.0f ток/с)" % (
+                    _st.median(b for _, b in pe), _st.median(a for a, _ in pe) / 1000,
+                    sum(b for _, b in pe) / max(1e-9, tp)))
+            if ev:
+                print("  генерация: медиана %d токенов за %.1f с (%.1f ток/с на запрос)" % (
+                    _st.median(b for _, b in ev), _st.median(a for a, _ in ev) / 1000,
+                    sum(b for _, b in ev) / max(1e-9, te)))
+
     # лог ядра -- САМЫЙ БОЛЬШОЙ .log (рядом лежит почти пустой llama-server.log; 19.09 разборщик взял его и
     # написал «сервер НЕ НАЙДЕНО» при живом сервере)
-    logs = sorted(list(out.glob("*.log")) + list(out.glob("**/*.log")), key=lambda q: q.stat().st_size, reverse=True)
+    # журнал самого сервера (llama-server.log) исключается: с включёнными таймингами он бывает больше лога ядра
+    logs = sorted({q for q in list(out.glob("*.log")) + list(out.glob("**/*.log")) if q.name != "llama-server.log"},
+                  key=lambda q: q.stat().st_size, reverse=True)
     log = logs[0] if logs else None
     if log:
         t = log.read_text(encoding="utf-8", errors="replace")
