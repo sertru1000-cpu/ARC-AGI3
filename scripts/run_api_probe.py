@@ -53,6 +53,7 @@ def main() -> int:
     ap.add_argument("--max-output", type=int, default=2048)
     ap.add_argument("--out", default="")
     ap.add_argument("--bundle", default="runs/peer_kernels/duck_smoke_live", help="бандл обвязки; harness/duck -- наш форк")
+    ap.add_argument("--min-balance", type=float, default=1.0, help="минимальный остаток на счёте OpenRouter, $")
     ap.add_argument("--reasoning", choices=["default", "on", "off"], default="default",
                     help="рассуждение модели у провайдера: off -- дописать в запрос reasoning.enabled=false (OpenRouter)")
     a = ap.parse_args()
@@ -62,6 +63,24 @@ def main() -> int:
     if not key:
         print("нет ключа в переменной %s" % a.api_key_env)
         return 2
+
+    # ЛОВУШКА 19.09: на бесплатном уровне OpenRouter (total_credits = 0) сервис отпускает ~$0.15 в долг, а дальше
+    # отвечает 402, и обвязка полчаса «играет» отказами -- оба прогона DeepSeek так и испортились. Проверяем счёт ДО старта.
+    if "openrouter.ai" in a.base_url:
+        import urllib.request as _u
+        def _get(path):
+            rq = _u.Request("https://openrouter.ai/api/v1/" + path, headers={"Authorization": "Bearer " + key})
+            return json.load(_u.urlopen(rq, timeout=30)).get("data", {})
+        try:
+            credits = _get("credits"); kinfo = _get("key")
+            bal = float(credits.get("total_credits", 0)) - float(credits.get("total_usage", 0))
+            print("OpenRouter: кредитов $%.2f, потрачено $%.2f, остаток $%.2f, лимит ключа %s"
+                  % (float(credits.get("total_credits", 0)), float(credits.get("total_usage", 0)), bal, kinfo.get("limit_remaining")), flush=True)
+            if bal < a.min_balance:
+                print("ОТКАЗ: остаток на счёте $%.2f меньше порога $%.2f -- пополните OpenRouter (иначе прогон измерит отказы 402)"
+                      % (bal, a.min_balance)); return 4
+        except Exception as exc:
+            print("счёт OpenRouter проверить не удалось: %r" % (exc,))
 
     # обвязка ходит в модель по совместимому протоколу -- ей всё равно, кто за ним стоит
     os.environ["LOCAL_ANALYZER_BASE_URL"] = a.base_url
