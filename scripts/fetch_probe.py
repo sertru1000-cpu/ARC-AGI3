@@ -67,14 +67,31 @@ def summarize(out: Path) -> None:
         gw = sum(1 for r in rows if (r[1] or 0) >= 1)
         sc = [r[4] for r in rows if r[4] is not None]
         avg = sum(sc) / len(sc) if sc else 0.0
+        # ЛОВУШКА 19.09: баллы считаются ДВУМЯ формулами и смешивать их нельзя. Наши пороги и обрезки баз
+        # записаны с потолком 115 (так считает final_score в benchmark.json у ПОЛНЫХ прогонов), а score.json
+        # пишет замороженный счётчик соревнования. Для сверки с базой считаем h115 сами, той же формулой,
+        # что и обрезка баз (scripts/truncate_run.py: вес уровня = его номер).
+        h115 = 0.0
+        for r in b["game_runs"]:
+            base = r.get("base_actions_per_level") or []; per = r.get("actions_per_level") or []
+            n = r.get("number_of_levels") or 0; done = r.get("levels_completed") or 0
+            num = den = 0.0
+            for i in range(n):
+                w = i + 1; den += w
+                if i < done and i < len(per) and per[i] and i < len(base):
+                    num += min(115.0, (base[i] / per[i]) ** 2 * 100) * w
+            h115 += (num / den if den else 0.0)
+        h115 /= max(1, len(b["game_runs"]))
         sj = out / "score.json"
         if not sj.exists():
             found = list(out.glob("**/score.json")); sj = found[0] if found else None
         frozen = json.loads(sj.read_text(encoding="utf-8")).get("score") if sj and sj.exists() else None
-        print("\nИТОГ: игр %d, уровней %d, игр с уровнем %d, средний балл %.2f%s"
-              % (len(rows), lv, gw, avg,
-                 "" if frozen is None else " (замороженный счётчик score.json: %.2f -- судим по нему)" % frozen))
-        print("БАЗА-30 (три обрезки): уровней %s, игр с уровнем %s, балл %s" % (BASE30["levels"], BASE30["games"], BASE30["score"]))
+        print("\nИТОГ: игр %d, уровней %d, игр с уровнем %d" % (len(rows), lv, gw))
+        print("  балл h115 (сопоставим с базами ниже): %.2f" % h115)
+        print("  балл замороженного счётчика score.json: %s" % ("%.2f" % frozen if frozen is not None else "нет файла"))
+        if len(rows) != 25:
+            print("  ВНИМАНИЕ: игр не 25, среднее считается по другому набору -- с базами напрямую не сравнивать")
+        print("БАЗА-30 h115 (три обрезки): уровней %s, игр с уровнем %s, балл %s" % (BASE30["levels"], BASE30["games"], BASE30["score"]))
         verdict = "СИГНАЛ" if lv >= 21 else ("ВРЕД" if lv <= 11 else "НЕОТЛИЧИМО ОТ БАЗЫ")
         print("ПО ЗАПИСАННОМУ ПОРОГУ (уровни: сигнал >= 21, вред <= 11): %s" % verdict)
 
