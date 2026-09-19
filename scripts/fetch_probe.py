@@ -95,6 +95,27 @@ def summarize(out: Path) -> None:
         verdict = "СИГНАЛ" if lv >= 21 else ("ВРЕД" if lv <= 11 else "НЕОТЛИЧИМО ОТ БАЗЫ")
         print("ПО ЗАПИСАННОМУ ПОРОГУ (уровни: сигнал >= 21, вред <= 11): %s" % verdict)
 
+    # Обрывы ответа по длине (19.09): в записях рассуждений у каждого ответа модели есть строка
+    # «[MODEL RESPONSE META] finish_reason: … tool_call_count: …». Ответ с finish_reason=length обрезан потолком
+    # LOCAL_ANALYZER_MAX_OUTPUT и почти всегда теряет вызов инструмента, то есть ход. В v5 так кончались 47% ответов.
+    import collections
+    fr = collections.Counter()
+    for ev in sorted(out.glob("**/*_events.jsonl")):
+        for line in ev.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                e = json.loads(line)
+            except Exception:
+                continue
+            if e.get("type") != "analysis":
+                continue
+            for m in re.finditer(r"finish_reason: (\w+)\s*\|?\s*tool_call_count: (\d+)", str(e.get("transcript", "")).replace("\n", " | ")):
+                fr[m.group(1)] += 1
+                fr["с вызовом" if int(m.group(2)) > 0 else "без вызова"] += 1
+    n = fr["length"] + fr["stop"] + fr["tool_calls"]
+    if n:
+        print("\nответы модели: %d; обрыв по длине %d (%.0f%%), вызов инструмента %d, нормальный конец %d"
+              % (n, fr["length"], 100.0 * fr["length"] / n, fr["tool_calls"], fr["stop"]))
+
     log = None
     for p in list(out.glob("*.log")) + list(out.glob("**/*.log")):
         log = p; break
