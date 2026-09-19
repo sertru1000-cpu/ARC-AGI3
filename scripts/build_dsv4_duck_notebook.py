@@ -23,6 +23,9 @@ import glob as _ds_glob, os as _ds_os, subprocess as _ds_sub, time as _ds_time, 
 
 _DS_CTX, _DS_PARALLEL, _DS_MAX_GB = %(ctx)d, %(parallel)d, %(max_gb).1f
 _DS_PICK, _DS_EXTRA = %(pick)r, %(extra)r
+# журнал сервера: без --log-disable llama-server пишет тайминги каждого запроса (чтение промпта / генерация) в
+# /kaggle/working/llama-server.log -- без них непонятно, на что уходит время вызова (19.09)
+_DS_LOGFLAG = %(logflag)r
 import re as _ds_re
 _ds_gguf = []
 for _root, _dirs, _files in _ds_os.walk("/kaggle/input"):
@@ -60,8 +63,8 @@ _ds_size, _ds_model = _ds_fit[0]
 import shutil as _ds_sh
 _ds_local = "/kaggle/working/llama-server"; _ds_sh.copy2(_ds_server, _ds_local); _ds_os.chmod(_ds_local, 0o755)
 _ds_server = _ds_local
-_ds_cmd = ("%%s -m %%s --host 127.0.0.1 --port 8080 -ngl 999 -c %%d --parallel %%d --flash-attn on --log-disable --jinja %%s"
-           %% (_ds_server, _ds_model, _DS_CTX, _DS_PARALLEL, _DS_EXTRA)).strip()
+_ds_cmd = ("%%s -m %%s --host 127.0.0.1 --port 8080 -ngl 999 -c %%d --parallel %%d --flash-attn on %%s--jinja %%s"
+           %% (_ds_server, _ds_model, _DS_CTX, _DS_PARALLEL, _DS_LOGFLAG, _DS_EXTRA)).strip()
 print("[[DSV4]] запуск: %%s (квант %%.1f ГБ)" %% (_ds_cmd, _ds_size), flush=True)
 _ds_log = open("/kaggle/working/llama-server.log", "w")
 _ds_proc = _ds_sub.Popen(_ds_cmd, shell=True, stdout=_ds_log, stderr=_ds_sub.STDOUT)
@@ -113,6 +116,7 @@ def main() -> None:
     # --quant q3: публичный UD-IQ3_XXS от Unsloth (4 части в трёх датасетах, 104.2 ГБ -- больше всей карты),
     # поэтому часть экспертов выносится в память хоста ключом --n-cpu-moe (слои экспертов ~2.3 ГБ каждый)
     ap.add_argument("--quant", choices=["q2", "q3"], default="q2")
+    ap.add_argument("--server-log", choices=["on", "off"], default="off", help="on -- журнал сервера с таймингами запросов")
     ap.add_argument("--thinking", choices=["on", "off"], default="on",
                     help="рассуждение модели; on -- как фактически шли все пробы до 19.09 и как работает база Qwen")
     ap.add_argument("--n-cpu-moe", type=int, default=3)
@@ -129,7 +133,8 @@ def main() -> None:
     pick = "IQ2XXS" if a.quant == "q2" else "UD-IQ3_XXS"
     extra = "" if a.quant == "q2" else "--n-cpu-moe %d" % a.n_cpu_moe
     c9 += "\n" + (START_SERVER % {"ctx": a.ctx, "parallel": a.parallel, "max_gb": a.max_gb, "maxout": a.max_output,
-                                  "pick": pick, "extra": extra, "thinking": "1" if a.thinking == "on" else "0"})
+                                  "pick": pick, "extra": extra, "thinking": "1" if a.thinking == "on" else "0",
+                                  "logflag": "" if a.server_log == "on" else "--log-disable "})
     nb["cells"][9]["source"] = c9.splitlines(keepends=True)
 
     # 2) сторож vLLM не запускать
