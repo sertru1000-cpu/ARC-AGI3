@@ -97,8 +97,11 @@ _ds_os.environ["LOCAL_ANALYZER_CONTEXT_WINDOW"] = str(_DS_CTX // _DS_PARALLEL)
 # ИЗМЕРЕНО 19.09 (версия 3): модель выдала по 64-69 тысяч токенов на игру и сделала 4-51 ход -- всё время ушло
 # в рассуждение. Ограничиваем длину ответа и просим шаблон без размышления (как делали для Qwen).
 _ds_os.environ["LOCAL_ANALYZER_MAX_OUTPUT"] = "%(maxout)d"
-_ds_os.environ["LLM_DISABLE_THINKING"] = "1"
-print("[[DSV4]] анализатор перенаправлен на llama.cpp; потолок ответа %(maxout)d токенов", flush=True)
+# ИСПРАВЛЕНО 19.09: раньше здесь стояло LLM_DISABLE_THINKING=1 -- обвязка Duck эту переменную НЕ ЧИТАЕТ
+# (проверено grep по harness/duck), её выключатель -- LOCAL_ANALYZER_ENABLE_THINKING (по умолчанию включено).
+# Поэтому v4-v7 и 3-битная v1 шли С рассуждением. Теперь режим задаётся явно ключом сборщика --thinking.
+_ds_os.environ["LOCAL_ANALYZER_ENABLE_THINKING"] = "%(thinking)s"
+print("[[DSV4]] анализатор перенаправлен на llama.cpp; потолок ответа %(maxout)d токенов; рассуждение %(thinking)s", flush=True)
 '''
 
 
@@ -110,6 +113,8 @@ def main() -> None:
     # --quant q3: публичный UD-IQ3_XXS от Unsloth (4 части в трёх датасетах, 104.2 ГБ -- больше всей карты),
     # поэтому часть экспертов выносится в память хоста ключом --n-cpu-moe (слои экспертов ~2.3 ГБ каждый)
     ap.add_argument("--quant", choices=["q2", "q3"], default="q2")
+    ap.add_argument("--thinking", choices=["on", "off"], default="on",
+                    help="рассуждение модели; on -- как фактически шли все пробы до 19.09 и как работает база Qwen")
     ap.add_argument("--n-cpu-moe", type=int, default=3)
     ap.add_argument("--slug", default="")
     a = ap.parse_args()
@@ -124,7 +129,7 @@ def main() -> None:
     pick = "IQ2XXS" if a.quant == "q2" else "UD-IQ3_XXS"
     extra = "" if a.quant == "q2" else "--n-cpu-moe %d" % a.n_cpu_moe
     c9 += "\n" + (START_SERVER % {"ctx": a.ctx, "parallel": a.parallel, "max_gb": a.max_gb, "maxout": a.max_output,
-                                  "pick": pick, "extra": extra})
+                                  "pick": pick, "extra": extra, "thinking": "1" if a.thinking == "on" else "0"})
     nb["cells"][9]["source"] = c9.splitlines(keepends=True)
 
     # 2) сторож vLLM не запускать
