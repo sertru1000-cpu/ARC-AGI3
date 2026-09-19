@@ -53,6 +53,8 @@ def main() -> int:
     ap.add_argument("--max-output", type=int, default=2048)
     ap.add_argument("--out", default="")
     ap.add_argument("--bundle", default="runs/peer_kernels/duck_smoke_live", help="бандл обвязки; harness/duck -- наш форк")
+    ap.add_argument("--reasoning", choices=["default", "on", "off"], default="default",
+                    help="рассуждение модели у провайдера: off -- дописать в запрос reasoning.enabled=false (OpenRouter)")
     a = ap.parse_args()
 
     load_env_file()
@@ -86,6 +88,20 @@ def main() -> int:
     with open(BUNDLE / "benchmark_initial.pkl", "rb") as f:
         bm = pickle.load(f)
     bm.job_dir = out
+
+    # Рассуждение (19.09, слово владельца «thinking выключи»). В режиме "openrouter" обвязка шлёт голый запрос
+    # без переключателя рассуждения, а DeepSeek на OpenRouter по умолчанию рассуждает. Проверено запросом:
+    # "reasoning": {"enabled": false} даёт 0 токенов рассуждения, вызов инструмента сохраняется.
+    # Подменяем сборщик запроса только в стенде: боевой код обвязки не трогается.
+    if a.reasoning != "default":
+        import inference.agent.tool_agent as _ta
+        _orig = _ta.build_chat_payload
+        def _with_reasoning(*args, **kwargs):
+            payload = _orig(*args, **kwargs)
+            payload["reasoning"] = {"enabled": a.reasoning == "on"}
+            return payload
+        _ta.build_chat_payload = _with_reasoning
+        print("рассуждение у провайдера: %s" % a.reasoning, flush=True)
 
     env_dir = str(ROOT / "environment_files")
     spec = taaf.game_api.ArcadeSpec(operation_mode=arc_agi.OperationMode.OFFLINE, environments_dir=env_dir)
