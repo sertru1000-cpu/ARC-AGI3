@@ -352,7 +352,7 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
-          <div class="v-label"><span class="v-num">dsv4-duck: более сильная модель в ядре (DeepSeek-V4-Flash вместо Qwen3.8-Flash-Next)</span><span class="v-date">собрано 18.09 &middot; пуш v1&ndash;v5 19.09 (все упали на настройке) &middot; v6 (4 игры) снята &middot; <strong>пуш v7 19.09 08:20 МСК: все 25 игр, 30 мин на игру</strong> по слову владельца «гоняй сразу на всех 25 играх 30 минут» &middot; не разобрана</span></div>
+          <div class="v-label"><span class="v-num">dsv4-duck: более сильная модель в ядре (DeepSeek-V4-Flash вместо Qwen3.8-Flash-Next)</span><span class="v-date">собрано 18.09 &middot; пуш v1&ndash;v5 19.09 (все упали на настройке) &middot; v6 (4 игры) снята &middot; <strong>пуш v7 19.09 08:20 МСК: все 25 игр, 30 мин на игру</strong> по слову владельца «гоняй сразу на всех 25 играх 30 минут» &middot; <strong>разобрана 19.09 16:20: слой не работал</strong> (0 уровней, 36 ходов на 25 игр; 3120 сбоев «не разобраны аргументы вызова инструмента» — JSON оборван потолком 1500 или зацикливанием модели; 48% ответов оборваны до вызова)</span></div>
           <span class="badge phase-a">проба 25 игр &times; 30 мин (&asymp; 3.3 ч квоты)</span>
         </div>
         <p class="summary">Меняется ТОЛЬКО ядро-модель, обвязка стоковая. Вместо vLLM с Qwen3.8-Flash-Next поднимается llama.cpp (сборка под SM120) с квантом DeepSeek-V4-Flash IQ2XXS на 83 ГБ; обвязка Duck говорит с ним по тому же совместимому протоколу, поэтому её код не тронут. Вопрос пробы один: <strong>более сильная модель берёт больше уровней в той же обвязке или нет?</strong></p>

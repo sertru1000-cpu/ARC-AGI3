@@ -116,9 +116,10 @@ def summarize(out: Path) -> None:
         print("\nответы модели: %d; обрыв по длине %d (%.0f%%), вызов инструмента %d, нормальный конец %d"
               % (n, fr["length"], 100.0 * fr["length"] / n, fr["tool_calls"], fr["stop"]))
 
-    log = None
-    for p in list(out.glob("*.log")) + list(out.glob("**/*.log")):
-        log = p; break
+    # лог ядра -- САМЫЙ БОЛЬШОЙ .log (рядом лежит почти пустой llama-server.log; 19.09 разборщик взял его и
+    # написал «сервер НЕ НАЙДЕНО» при живом сервере)
+    logs = sorted(list(out.glob("*.log")) + list(out.glob("**/*.log")), key=lambda q: q.stat().st_size, reverse=True)
+    log = logs[0] if logs else None
     if log:
         t = log.read_text(encoding="utf-8", errors="replace")
         print("\nмеханизм по логу (%s, %.1f МБ):" % (log.name, len(t) / 1e6))
