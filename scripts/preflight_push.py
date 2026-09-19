@@ -101,13 +101,25 @@ def main():
         tail = (r.stdout or "").strip().splitlines()[-1:] or ["(нет вывода)"]
         check(r.returncode == 0, "тест слоя на боевом бандле: %s" % tail[0])
 
-    # 7. потолок пробы
+    # 7. потолок пробы. Штатный боевой потолок стока (7920 с) проверке не подлежит -- прятать под «не в бою»
+    #    нужно только НОВЫЕ присваивания, которых нет в рабочем стоке (поправка 19.09: иначе боевая сборка форка,
+    #    побайтово равная стоку по ячейке 15, получала ложный сбой).
     all_src = "\n".join("".join(c["source"]) for c in nb["cells"] if c.get("cell_type") == "code")
-    caps = re.findall(r"max_runtime_s_per_game\s*=\s*([0-9.]+)", all_src)
-    if caps or a.expect_probe:
-        guarded = "if not TRUE_SUBMISSION:" in all_src and all_src.index("if not TRUE_SUBMISSION:") < all_src.rindex("max_runtime_s_per_game") if caps else False
-        check(bool(caps), "потолок пробы задан: %s" % caps)
+    ref_nb = json.load(open(ROOT / "kernels/notebooks_stockflash/submission.ipynb", encoding="utf-8"))
+    ref_src = "\n".join("".join(c["source"]) for c in ref_nb["cells"] if c.get("cell_type") == "code")
+    pat = r"max_runtime_s_per_game\s*=\s*([0-9.]+)"
+    caps = re.findall(pat, all_src); ref_caps = re.findall(pat, ref_src)
+    new_caps = list(caps)
+    for c in ref_caps:
+        if c in new_caps:
+            new_caps.remove(c)
+    if new_caps or a.expect_probe:
+        guarded = ("if not TRUE_SUBMISSION:" in all_src and
+                   all_src.index("if not TRUE_SUBMISSION:") < all_src.rindex("max_runtime_s_per_game")) if new_caps else False
+        check(bool(new_caps), "потолок пробы задан: %s (штатные из стока: %s)" % (new_caps, ref_caps))
         check(guarded, "потолок пробы стоит под if not TRUE_SUBMISSION (в бою не действует)")
+    else:
+        print("ok   новых потолков нет -- боевой вид, штатный потолок стока %s" % ref_caps)
 
     print("\nИТОГ: %s" % ("ПУШ РАЗРЕШЁН" if not fails else "ПУШ ЗАПРЕЩЁН, сбоев %d" % len(fails)))
     if warns:

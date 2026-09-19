@@ -20,7 +20,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BUNDLE = ROOT / "runs/peer_kernels/duck_smoke_live"
+# --bundle harness/duck -- гонять НАШ форк обвязки (scripts/duck_fork.py); по умолчанию -- боевой бандл как есть.
+# Путь импорта настраивается ДО импорта модулей обвязки, поэтому ключ читается отсюда, а не из argparse.
+_b = sys.argv[sys.argv.index("--bundle") + 1] if "--bundle" in sys.argv else "runs/peer_kernels/duck_smoke_live"
+BUNDLE = (ROOT / _b) if not Path(_b).is_absolute() else Path(_b)
 SRC = BUNDLE / "src"
 for p in (SRC / "ARC3-Inference", SRC / "tufa-arc-agi-framework/src"):
     sys.path.insert(0, str(p))
@@ -49,6 +52,7 @@ def main() -> int:
     ap.add_argument("--context", type=int, default=131072)
     ap.add_argument("--max-output", type=int, default=2048)
     ap.add_argument("--out", default="")
+    ap.add_argument("--bundle", default="runs/peer_kernels/duck_smoke_live", help="бандл обвязки; harness/duck -- наш форк")
     a = ap.parse_args()
 
     load_env_file()
