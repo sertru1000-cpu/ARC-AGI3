@@ -59,7 +59,7 @@ def main():
     arc = arc_agi.Arcade(operation_mode=OperationMode.NORMAL, environments_dir=str(ROOT / "environment_files"))
     alphabet = ["ACTION%d" % i for i in range(1, 6)]
     res = {"различение": {1: [], 2: [], 3: []}, "пучок": {1: [], 2: [], 3: []}, "случайный": {1: [], 2: [], 3: []}}
-    live_sizes = []; per_game = []
+    live_sizes = []; per_game = []; beam_states = []
     for gid, rec in sol.items():
         if not rec.get("solved"):
             continue
@@ -98,6 +98,7 @@ def main():
             sibs = [measure(s, None) for s in alphabet if s != n]
             sibs = [s for s in sibs if s is not None]
             if sibs:
+                beam_states.append((mw[1], [x[1] for x in sibs]))   # для теста обогащения (критик 10Б)
                 for k in (1, 2, 3):
                     res["различение"][k].append(exp_topk(mw[0], [s[0] for s in sibs], k, higher_better=True))
                     res["пучок"][k].append(exp_topk(mw[1], [s[1] for s in sibs], k, higher_better=False))
@@ -123,6 +124,19 @@ def main():
         t1 = float(np.mean(res[name][1])) if n else 0
         verdict = "СТРОИТЬ" if t1 >= 0.5 else ("ЗАКРЫТ" if t1 <= ch + 0.05 else "НЕОПРЕДЕЛЁННО")
         print("  порог для «%s»: top-1 %.2f при случайном %.2f -> %s" % (name, t1, ch, verdict))
+    # Тест обогащения (критик раунда 10Б): сила сигнала пучка в состоянии = насколько лучший ход отрывается от
+    # медианы остальных; в 10% самых «уверенных» состояний выигрышный ход должен быть первым хотя бы вдвое чаще.
+    if beam_states:
+        strength = []; hit = []
+        for dw, ds in beam_states:
+            allv = [dw] + ds; best = min(allv)
+            strength.append(float(np.median(allv) - best))
+            hit.append(exp_topk(dw, ds, 1, higher_better=False))
+        strength = np.asarray(strength); hit = np.asarray(hit)
+        cut = np.quantile(strength, 0.9); top = strength >= cut
+        a_top = float(hit[top].mean()); a_rest = float(hit[~top].mean()) if (~top).any() else 0.0
+        print("  обогащение пучка: в %d самых «уверенных» состояниях top-1 %.2f, в остальных %.2f -> x%.2f (порог x2: %s)"
+              % (int(top.sum()), a_top, a_rest, a_top / max(1e-9, a_rest), "есть" if a_top >= 2 * a_rest else "нет"))
     json.dump({"res": {k: {kk: vv for kk, vv in v.items()} for k, v in res.items()}, "per_game": per_game},
               open(ROOT / "runs/infogain_rank_19_09.json", "w"), ensure_ascii=False, indent=1)
 
