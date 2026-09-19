@@ -22,17 +22,33 @@ START_SERVER = '''
 import glob as _ds_glob, os as _ds_os, subprocess as _ds_sub, time as _ds_time, urllib.request as _ds_url
 
 _DS_CTX, _DS_PARALLEL, _DS_MAX_GB = %(ctx)d, %(parallel)d, %(max_gb).1f
+_DS_PICK, _DS_EXTRA = %(pick)r, %(extra)r
+import re as _ds_re
 _ds_gguf = []
 for _root, _dirs, _files in _ds_os.walk("/kaggle/input"):
     for _f in _files:
-        if _f.endswith(".gguf"):
+        if _f.endswith(".gguf") and _DS_PICK in _f:
             _p = _ds_os.path.join(_root, _f)
             try:
                 _ds_gguf.append((_ds_os.path.getsize(_p) / 1e9, _p))
             except OSError:
                 pass
-_ds_gguf.sort(reverse=True)
-_ds_fit = [(s, p) for s, p in _ds_gguf if s <= _DS_MAX_GB]
+# Квант, разбитый на части (…-00001-of-00004.gguf), лежит в РАЗНЫХ датасетах, то есть в разных папках, а llama.cpp
+# ищет остальные части рядом с первой. Поэтому части ссылками собираются в одну папку, и модель задаётся первой частью.
+_ds_shards = sorted(p for s, p in _ds_gguf if _ds_re.search(r"-\\d{5}-of-\\d{5}\\.gguf$", p))
+if _ds_shards:
+    _ds_dir = "/kaggle/working/dsv4_shards"; _ds_os.makedirs(_ds_dir, exist_ok=True)
+    for _p in _ds_shards:
+        _l = _ds_os.path.join(_ds_dir, _ds_os.path.basename(_p))
+        if not _ds_os.path.exists(_l):
+            _ds_os.symlink(_p, _l)
+    _ds_total = sum(s for s, p in _ds_gguf if p in _ds_shards)
+    _ds_first = sorted(_ds_os.listdir(_ds_dir))[0]
+    print("[[DSV4]] квант из %%d частей, всего %%.1f ГБ: %%s" %% (len(_ds_shards), _ds_total, sorted(_ds_os.listdir(_ds_dir))), flush=True)
+    _ds_fit = [(_ds_total, _ds_os.path.join(_ds_dir, _ds_first))]
+else:
+    _ds_gguf.sort(reverse=True)
+    _ds_fit = [(s, p) for s, p in _ds_gguf if s <= _DS_MAX_GB]
 _ds_server = None
 for _root, _dirs, _files in _ds_os.walk("/kaggle/input"):
     if "llama-server" in _files:
@@ -44,8 +60,8 @@ _ds_size, _ds_model = _ds_fit[0]
 import shutil as _ds_sh
 _ds_local = "/kaggle/working/llama-server"; _ds_sh.copy2(_ds_server, _ds_local); _ds_os.chmod(_ds_local, 0o755)
 _ds_server = _ds_local
-_ds_cmd = ("%%s -m %%s --host 127.0.0.1 --port 8080 -ngl 999 -c %%d --parallel %%d --flash-attn on --log-disable --jinja"
-           %% (_ds_server, _ds_model, _DS_CTX, _DS_PARALLEL))
+_ds_cmd = ("%%s -m %%s --host 127.0.0.1 --port 8080 -ngl 999 -c %%d --parallel %%d --flash-attn on --log-disable --jinja %%s"
+           %% (_ds_server, _ds_model, _DS_CTX, _DS_PARALLEL, _DS_EXTRA)).strip()
 print("[[DSV4]] запуск: %%s (квант %%.1f ГБ)" %% (_ds_cmd, _ds_size), flush=True)
 _ds_log = open("/kaggle/working/llama-server.log", "w")
 _ds_proc = _ds_sub.Popen(_ds_cmd, shell=True, stdout=_ds_log, stderr=_ds_sub.STDOUT)
@@ -61,6 +77,13 @@ while _ds_time.time() - _ds_t0 < 2400:
     except Exception:
         pass
 print("[[DSV4]] сервер готов: %%s за %%.0f с" %% (_ds_ok, _ds_time.time() - _ds_t0), flush=True)
+try:   # запас памяти -- главное число для выбора, сколько экспертов выносить в память хоста
+    _ds_mem = _ds_sub.run("nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader", shell=True,
+                          capture_output=True, text=True, timeout=20).stdout.strip()
+    _ds_ram = _ds_sub.run("free -g | head -2", shell=True, capture_output=True, text=True, timeout=20).stdout.strip()
+    print("[[DSV4]] видеопамять после загрузки: %%s | память хоста:\\n%%s" %% (_ds_mem, _ds_ram), flush=True)
+except Exception as _e:
+    print("[[DSV4]] память не прочитана: %%r" %% (_e,), flush=True)
 if not _ds_ok:
     raise RuntimeError("[[DSV4]] сервер не поднялся за 40 минут")
 _ds_os.environ["LOCAL_ANALYZER_BASE_URL"] = "http://127.0.0.1:8080/v1"
@@ -84,6 +107,11 @@ def main() -> None:
     ap.add_argument("--games", default="tu93,ft09,lp85,sp80"); ap.add_argument("--cap", type=float, default=1800.0)
     ap.add_argument("--ctx", type=int, default=131072); ap.add_argument("--parallel", type=int, default=4)
     ap.add_argument("--max-gb", type=float, default=88.0); ap.add_argument("--max-output", type=int, default=1500)
+    # --quant q3: публичный UD-IQ3_XXS от Unsloth (4 части в трёх датасетах, 104.2 ГБ -- больше всей карты),
+    # поэтому часть экспертов выносится в память хоста ключом --n-cpu-moe (слои экспертов ~2.3 ГБ каждый)
+    ap.add_argument("--quant", choices=["q2", "q3"], default="q2")
+    ap.add_argument("--n-cpu-moe", type=int, default=3)
+    ap.add_argument("--slug", default="")
     a = ap.parse_args()
     src = json.load(open("kernels/notebooks_stockflash/submission.ipynb", encoding="utf-8"))
     nb = json.loads(json.dumps(src))
@@ -93,7 +121,10 @@ def main() -> None:
     marker = 'for command in json.loads((BUNDLE_DIR / "setup_commands.json").read_text()):'
     assert marker in c9, "ячейка 9: не нашёл цикл команд установки"
     c9 = c9.replace(marker, 'for command in []:   # [[DSV4]] команды бандла отключены: vLLM не поднимаем')
-    c9 += "\n" + (START_SERVER % {"ctx": a.ctx, "parallel": a.parallel, "max_gb": a.max_gb, "maxout": a.max_output})
+    pick = "IQ2XXS" if a.quant == "q2" else "UD-IQ3_XXS"
+    extra = "" if a.quant == "q2" else "--n-cpu-moe %d" % a.n_cpu_moe
+    c9 += "\n" + (START_SERVER % {"ctx": a.ctx, "parallel": a.parallel, "max_gb": a.max_gb, "maxout": a.max_output,
+                                  "pick": pick, "extra": extra})
     nb["cells"][9]["source"] = c9.splitlines(keepends=True)
 
     # 2) сторож vLLM не запускать
@@ -124,13 +155,16 @@ def main() -> None:
         c15 = c15.replace(cov, "if TRUE_SUBMISSION and (len(public_runs) != 25 or public_run_ids != list(PUBLIC_GAME_IDS)):")
     nb["cells"][15]["source"] = c15.splitlines(keepends=True)
 
-    out = "kernels/notebooks_dsv4_duck"
+    out = "kernels/notebooks_dsv4_duck" if a.quant == "q2" else "kernels/notebooks_dsv4q3_duck"
     os.makedirs(out, exist_ok=True)
     json.dump(nb, open(os.path.join(out, "submission.ipynb"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     meta = json.load(open("kernels/notebooks_stockflash/kernel-metadata.json"))
-    meta["id"] = "sergueimakarov/arc3-dsv4-duck"; meta["title"] = "arc3 dsv4 duck"
+    slug = a.slug or ("arc3-dsv4-duck" if a.quant == "q2" else "arc3-dsv4q3-duck")
+    meta["id"] = "sergueimakarov/" + slug; meta["title"] = slug.replace("-", " ")
+    weights = (["johnannis/test-ok-3-q2-new"] if a.quant == "q2" else
+               ["benitomallamaci/dsv4flash-q3-part1", "benitomallamaci/dsv4flash-q3-part2", "benitomallamaci/dsv4flash-q3-part3"])
     meta["dataset_sources"] = [d for d in meta["dataset_sources"] if "runtime" not in d] + [
-        "bachhg/dsv4-llamacpp-runtime-sm120-ba360efe-r1", "johnannis/test-ok-3-q2-new"]
+        "bachhg/dsv4-llamacpp-runtime-sm120-ba360efe-r1"] + weights
     meta["model_sources"] = []
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
     for i in (9, 15):
