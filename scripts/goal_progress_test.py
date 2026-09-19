@@ -46,6 +46,7 @@ def main():
     rows = []
     win_better = win_n = sib_better = sib_n = rnd_better = rnd_n = 0
     pairs_auc = []
+    ranks = []   # (место оптимистично, место пессимистично, число вариантов)
     for gid, rec in sol.items():
         if not rec.get("solved"):
             continue
@@ -95,6 +96,11 @@ def main():
                 if rd < d0 - 1e-9:
                     rnd_better += 1
                 pairs_auc += [(1.0 if d_w < ds else 0.5 if d_w == ds else 0.0) for ds in d_sibs]
+                # 19.09, пункт 3 критика раунда 10: МЕСТО выигрышного хода среди всех ходов из состояния по Δd.
+                # Оптимистично -- ничьи в пользу выигрышного, пессимистично -- против; случайный угад = k/(n+1).
+                better = sum(1 for ds in d_sibs if ds < d_w - 1e-9)
+                ties = sum(1 for ds in d_sibs if abs(ds - d_w) <= 1e-9)
+                ranks.append((1 + better, 1 + better + ties, 1 + len(d_sibs)))
             cur = e_win; g = g_w
         rows.append(per_game)
         print("%s: шагов %d, выигрышный ход приближает в %d, братья в %d из %d"
@@ -105,7 +111,14 @@ def main():
     print("  P(мера уменьшилась | ход-брат)        = %d/%d = %.2f" % (sib_better, sib_n, sib_better / max(sib_n, 1)))
     print("  P(мера уменьшилась | случайный ход)   = %d/%d = %.2f" % (rnd_better, rnd_n, rnd_better / max(rnd_n, 1)))
     print("  AUC (Δd отделяет выигрышный ход от братьев) = %.3f" % auc)
-    json.dump({"per_game": rows, "win": [win_better, win_n], "sib": [sib_better, sib_n],
+    if ranks:
+        print("  МЕСТО выигрышного хода по Δd среди %d состояний (вариантов на состояние: медиана %d):"
+              % (len(ranks), int(np.median([r[2] for r in ranks]))))
+        for k in (1, 2, 3):
+            opt = np.mean([r[0] <= k for r in ranks]); pes = np.mean([r[1] <= k for r in ranks])
+            chance = np.mean([min(1.0, k / r[2]) for r in ranks])
+            print("    top-%d: оптимистично %.2f, пессимистично %.2f, случайный угад %.2f" % (k, opt, pes, chance))
+    json.dump({"ranks": ranks, "per_game": rows, "win": [win_better, win_n], "sib": [sib_better, sib_n],
                "rnd": [rnd_better, rnd_n], "auc": auc}, open(ROOT / a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("записано:", a.out)
 

@@ -67,6 +67,7 @@ def main():
     rows = []
     win_better = win_n = sib_better = sib_n = 0
     auc_pairs = []
+    ranks = []
     for e in arc.get_environments():
         gid = e.game_id
         # лучшая запись: наибольшее число взятых уровней
@@ -147,6 +148,7 @@ def main():
             win_n += 1; per["steps"] += 1
             if d_w < d0 - 1e-12:
                 win_better += 1; per["win"] += 1
+            _ds_list = []   # 19.09: Δd братьев этого состояния -- для МЕСТА выигрышного хода (пункт 3 критика раунда 10)
             for sn in ("ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5"):
                 if sn == str(ev["name"]):
                     continue
@@ -164,6 +166,10 @@ def main():
                 if d_s < d0 - 1e-12:
                     sib_better += 1; per["sib"] += 1
                 auc_pairs.append(1.0 if d_w < d_s else (0.5 if d_w == d_s else 0.0))
+                _ds_list.append(d_s)
+            if _ds_list:
+                _b = sum(1 for x in _ds_list if x < d_w - 1e-12); _t = sum(1 for x in _ds_list if abs(x - d_w) <= 1e-12)
+                ranks.append((1 + _b, 1 + _b + _t, 1 + len(_ds_list)))
             cur = e_win
             if int(fr_w.levels_completed or 0) > 1:
                 break
@@ -178,7 +184,14 @@ def main():
     print("  P(остаток уменьшился | ход-брат)       = %d/%d = %.2f" % (sib_better, sib_n, ps))
     print("  разница %.2f; AUC = %.3f" % (pw - ps, auc))
     print("  КРИТЕРИЙ (задан до замера): AUC >= 0.60 И разница >= 0.10 -> %s" % ("ВЫПОЛНЕН" if auc >= 0.6 and pw - ps >= 0.1 else "НЕ ВЫПОЛНЕН"))
-    json.dump({"per_game": rows, "win": [win_better, win_n], "sib": [sib_better, sib_n], "auc": auc},
+    if ranks:
+        print("  МЕСТО выигрышного хода по Δd (перенесённая цель) среди %d состояний (вариантов: медиана %d):"
+              % (len(ranks), int(np.median([r[2] for r in ranks]))))
+        for k in (1, 2, 3):
+            print("    top-%d: оптимистично %.2f, пессимистично %.2f, случайный угад %.2f" % (
+                k, np.mean([r[0] <= k for r in ranks]), np.mean([r[1] <= k for r in ranks]),
+                np.mean([min(1.0, k / r[2]) for r in ranks])))
+    json.dump({"ranks": ranks, "per_game": rows, "win": [win_better, win_n], "sib": [sib_better, sib_n], "auc": auc},
               open(ROOT / a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("записано:", a.out)
 
