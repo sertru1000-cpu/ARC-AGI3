@@ -34,6 +34,15 @@ from typing import Any
 
 SOURCE_DATASET = "keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1"
 RUNTIME_DATASET = "keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1"
+# ФОРК (20.09): проверка ПУТИ ДОСТАВКИ обученной модели. Всё ниже включается только переменной
+# окружения ARC3_LORA_PATH; без неё поведение ядра ровно стоковое. См. scripts/build_empty_lora.py.
+LORA_ALIAS = "policy"
+
+
+def lora_path() -> str:
+    return (os.environ.get("ARC3_LORA_PATH") or "").strip()
+
+
 MODEL_HF_REPO = "RadixArk/Qwen3.8-Flash-Next-NVFP4"
 MODEL_HF_REVISION = "7b719225242aacd3dbd3f9407468c2ee9a9d2594"
 MODEL_MANIFEST_SHA256 = "a09bdad3fe3240c73332c0f99f4388a547205cb488c127f9b9059c9267dd9a5b"
@@ -2303,6 +2312,19 @@ def server_command(
         "--distributed-executor-backend",
         "mp",
     ]
+    if lora_path():
+        command.extend(
+            [
+                "--enable-lora",
+                "--max-loras",
+                "1",
+                "--max-lora-rank",
+                "16",
+                "--lora-modules",
+                f"{LORA_ALIAS}={lora_path()}",
+            ]
+        )
+        print(f"[[LORA]] vLLM flags added, adapter={lora_path()}", flush=True)
     if resolved_tuning["moe_backend"] is not None:
         command.extend(["--moe-backend", str(resolved_tuning["moe_backend"])])
     if int(resolved_tuning["kv_cache_memory_bytes"]) > 0:
@@ -2562,7 +2584,13 @@ def wait_for_server(identity: dict[str, Any], setup_deadline: float) -> dict[str
             )
             rows = models.get("data") or []
             ids = [row.get("id") for row in rows if isinstance(row, dict)]
-            if ids != [SERVED_MODEL_NAME]:
+            expected_ids = [SERVED_MODEL_NAME]
+            if lora_path():
+                # с адаптером /v1/models отдаёт и базу, и псевдоним -- порядок не гарантирован
+                if sorted(ids) != sorted([SERVED_MODEL_NAME, LORA_ALIAS]):
+                    raise RuntimeError(f"vLLM served the wrong model identity: {ids}")
+                print(f"[[LORA]] /v1/models reports {ids}", flush=True)
+            elif ids != expected_ids:
                 raise RuntimeError(f"vLLM served the wrong model identity: {ids}")
             return {"models": models, "ready_seconds": time.monotonic() - started}
         except Exception:
@@ -2928,8 +2956,8 @@ def persist_analyzer_environment(env: dict[str, str]) -> dict[str, str]:
         "OPENAI_BASE_URL": BASE_URL,
         "LOCAL_ANALYZER_PROVIDER": "vllm",
         "OPENAI_PROVIDER": "vllm",
-        "LOCAL_ANALYZER_MODEL_ID": SERVED_MODEL_NAME,
-        "INFERENCE_ANALYZER_MODEL": SERVED_MODEL_NAME,
+        "LOCAL_ANALYZER_MODEL_ID": LORA_ALIAS if lora_path() else SERVED_MODEL_NAME,
+        "INFERENCE_ANALYZER_MODEL": LORA_ALIAS if lora_path() else SERVED_MODEL_NAME,
         "OPENAI_API_KEY": "offline-kaggle-local-server",
         "LOCAL_ANALYZER_APP_NAME": "ARC3 Agent Harness",
         "LOCAL_ANALYZER_CONTEXT_WINDOW": str(ANALYZER_CONTEXT),
