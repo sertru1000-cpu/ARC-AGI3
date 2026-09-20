@@ -1,4 +1,4 @@
-"""Пустой адаптер LoRA к боевой модели -- проверка ПУТИ ДОСТАВКИ обученной модели (20.09).
+"""Адаптер LoRA к боевой модели -- проверка ПУТИ ДОСТАВКИ обученной модели (20.09).
 
 Зачем. Прежде чем платить за обучение ($535-1425, docs/artifacts/training_cost_20_09.html), надо убедиться,
 что обученную модель вообще можно довезти до боя. Ядро прибито к RadixArk/Qwen3.8-Flash-Next-NVFP4 тремя
@@ -27,6 +27,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rank", type=int, default=16)
     ap.add_argument("--out", default="data/empty_lora")
+    ap.add_argument("--mode", choices=["zero", "loud"], default="zero",
+                    help="zero -- B нулевая (ответ не меняется); loud -- B шумная (ответ ОБЯЗАН измениться)")
+    ap.add_argument("--b-std", type=float, default=0.05, help="разброс B в режиме loud")
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     full = [i for i in range(LAYERS) if (i + 1) % 4 == 0]      # 3, 7, ... 47 -- слои полного внимания
@@ -39,7 +42,13 @@ def main() -> None:
             base = "base_model.model.model.language_model.layers.%d.self_attn.%s" % (i, name)
             # A -- обычная инициализация Кайминга, B -- НУЛИ: произведение B@A = 0, ответ модели не меняется
             tensors[base + ".lora_A.weight"] = (torch.randn(a.rank, i_f, generator=g) * (1.0 / i_f ** 0.5)).to(torch.bfloat16)
-            tensors[base + ".lora_B.weight"] = torch.zeros(o_f, a.rank, dtype=torch.bfloat16)
+            if a.mode == "zero":
+                tensors[base + ".lora_B.weight"] = torch.zeros(o_f, a.rank, dtype=torch.bfloat16)
+            else:
+                # РЕЖИМ "СЛЫШНЫЙ": B шумная, поправка примерно 20% от величины проекции -- ответ при
+                # температуре 0 обязан отличаться от базового. Это и есть проверка: если ответы совпали,
+                # значит vLLM модули адаптера МОЛЧА ПРОПУСТИЛ (августовский риск студента 27B).
+                tensors[base + ".lora_B.weight"] = (torch.randn(o_f, a.rank, generator=g) * a.b_std).to(torch.bfloat16)
     save_file(tensors, str(out / "adapter_model.safetensors"))
     cfg = {"peft_type": "LORA", "task_type": "CAUSAL_LM", "base_model_name_or_path": REPO,
            "r": a.rank, "lora_alpha": 2 * a.rank, "lora_dropout": 0.0, "bias": "none",
@@ -49,7 +58,11 @@ def main() -> None:
     size = sum(t.numel() * t.element_size() for t in tensors.values())
     print("ok   слоёв полного внимания %d, тензоров %d, ранг %d, размер %.1f МБ -> %s"
           % (len(full), len(tensors), a.rank, size / 1e6, out))
-    print("     B нулевая => ответ модели не меняется; любое изменение балла -- шум или накладные расходы vLLM")
+    if a.mode == "zero":
+        print("     B нулевая => ответ модели не меняется; молчаливый пропуск модулей ТАКИМ адаптером не ловится")
+    else:
+        print("     B шумная (разброс %.3f) => ответ при температуре 0 обязан отличаться от базового;"
+              " совпадение ответов = модули пропущены" % a.b_std)
 
 
 if __name__ == "__main__":
