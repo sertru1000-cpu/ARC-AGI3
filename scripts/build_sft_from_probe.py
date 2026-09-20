@@ -109,6 +109,7 @@ def main() -> None:
     ap.add_argument("--out", default="data/sft_v3/train.jsonl")
     ap.add_argument("--min-efficiency", type=float, default=0.5,
                     help="нижняя граница базлайн/ходы у взятого уровня; 0 -- брать все взятые")
+    ap.add_argument("--holdout", default="", help="игры через запятую, которые уходят в ОТЛОЖЕННЫЙ файл рядом с train")
     ap.add_argument("--history-tokens", type=int, default=30000,
                     help="сколько токенов прошлых ходов подмешивать перед текущим (в бою обвязка режет историю "
                          "под окно 32768 минус резерв; 0 -- примеры без истории)")
@@ -146,9 +147,19 @@ def main() -> None:
                              "calls": step["calls"], "messages": msgs})
                 kept += 1
     out = Path(a.out); out.parent.mkdir(parents=True, exist_ok=True)
+    hold = {g.strip() for g in a.holdout.split(",") if g.strip()}
+    train_rows = [r for r in rows if r["game"] not in hold]
+    valid_rows = [r for r in rows if r["game"] in hold]
     with open(out, "w", encoding="utf-8") as f:
-        for r in rows:
+        for r in train_rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    if hold:
+        vp = out.with_name(out.stem.replace("train", "valid") + out.suffix)
+        with open(vp, "w", encoding="utf-8") as f:
+            for r in valid_rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        print("отложено игр %s: %d ходов -> %s" % (",".join(sorted(hold)), len(valid_rows), vp))
+    rows = train_rows
     chars = sum(len(m.get("content") or "") + len(json.dumps(m.get("tool_calls") or [])) for r in rows for m in r["messages"])
     print("годных ходов %d | выброшено: хвост непройденных уровней %d, медленные уровни %d"
           % (kept, dropped_tail, dropped_slow))

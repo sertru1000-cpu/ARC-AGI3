@@ -59,6 +59,9 @@ def main() -> int:
     ap.add_argument("--bundle", default="runs/peer_kernels/duck_smoke_live", help="бандл обвязки; harness/duck -- наш форк")
     ap.add_argument("--min-balance", type=float, default=1.0, help="минимальный остаток на счёте OpenRouter, $")
     ap.add_argument("--max-calls", type=int, default=0, help="жёсткий потолок числа вызовов модели (0 -- без потолка)")
+    ap.add_argument("--budget-usd", type=float, default=0.0,
+                    help="потолок трат в долларах: пересчитывается в потолок вызовов по ИЗМЕРЕННОЙ цене "
+                         "(20.09: $2.78 на 118 вызовов у gemini-3.6-flash при боевом окне = $0.0236 за вызов)")
     ap.add_argument("--price-in", type=float, default=0.0, help="$/млн входных токенов -- для оценки трат на ходу")
     ap.add_argument("--price-out", type=float, default=0.0, help="$/млн выходных токенов")
     ap.add_argument("--reasoning", choices=["default", "on", "off"], default="default",
@@ -116,6 +119,13 @@ def main() -> int:
     with open(BUNDLE / "benchmark_initial.pkl", "rb") as f:
         bm = pickle.load(f)
     bm.job_dir = out
+
+    if a.budget_usd > 0:
+        PRICE_PER_CALL = 0.0236        # измерено 20.09 по остатку на счёте, не по счётчику токенов
+        limit = max(1, int(a.budget_usd / PRICE_PER_CALL))
+        a.max_calls = limit if not a.max_calls else min(a.max_calls, limit)
+        print("БЮДЖЕТ $%.2f -> потолок %d вызовов (по измеренной цене $%.4f за вызов)"
+              % (a.budget_usd, a.max_calls, PRICE_PER_CALL), flush=True)
 
     # ОГРАНИЧИТЕЛЬ ТРАТ (20.09; пилот учителя ушёл в минус на $3.75 сверх внесённых $5 -- Google дал перерасход).
     # Считаем вызовы и токены сами, поверх сборщика запроса; по достижении потолка запросы прекращаются.
