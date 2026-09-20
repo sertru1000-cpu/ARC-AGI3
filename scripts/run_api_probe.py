@@ -54,6 +54,9 @@ def main() -> int:
     ap.add_argument("--out", default="")
     ap.add_argument("--bundle", default="runs/peer_kernels/duck_smoke_live", help="бандл обвязки; harness/duck -- наш форк")
     ap.add_argument("--min-balance", type=float, default=1.0, help="минимальный остаток на счёте OpenRouter, $")
+    ap.add_argument("--max-calls", type=int, default=0, help="жёсткий потолок числа вызовов модели (0 -- без потолка)")
+    ap.add_argument("--price-in", type=float, default=0.0, help="$/млн входных токенов -- для оценки трат на ходу")
+    ap.add_argument("--price-out", type=float, default=0.0, help="$/млн выходных токенов")
     ap.add_argument("--reasoning", choices=["default", "on", "off"], default="default",
                     help="рассуждение модели у провайдера: off -- дописать в запрос reasoning.enabled=false (OpenRouter)")
     a = ap.parse_args()
@@ -107,6 +110,33 @@ def main() -> int:
     with open(BUNDLE / "benchmark_initial.pkl", "rb") as f:
         bm = pickle.load(f)
     bm.job_dir = out
+
+    # ОГРАНИЧИТЕЛЬ ТРАТ (20.09; пилот учителя ушёл в минус на $3.75 сверх внесённых $5 -- Google дал перерасход).
+    # Считаем вызовы и токены сами, поверх сборщика запроса; по достижении потолка запросы прекращаются.
+    if a.max_calls > 0 or a.price_in or a.price_out:
+        import inference.agent.tool_agent as _ta
+        _state = {"calls": 0, "in": 0, "out": 0, "stopped": False}
+        _orig_post = _ta.requests.post
+        def _counted_post(url, **kw):
+            if a.max_calls and _state["calls"] >= a.max_calls:
+                if not _state["stopped"]:
+                    _state["stopped"] = True
+                    print("ОГРАНИЧИТЕЛЬ: достигнут потолок %d вызовов -- дальше запросы не шлём" % a.max_calls, flush=True)
+                raise RuntimeError("достигнут потолок вызовов (--max-calls)")
+            _state["calls"] += 1
+            r = _orig_post(url, **kw)
+            try:
+                u = r.json().get("usage") or {}
+                _state["in"] += int(u.get("prompt_tokens") or 0); _state["out"] += int(u.get("completion_tokens") or 0)
+            except Exception:
+                pass
+            if _state["calls"] % 50 == 0:
+                cost = _state["in"] / 1e6 * a.price_in + _state["out"] / 1e6 * a.price_out
+                print("ОГРАНИЧИТЕЛЬ: вызовов %d, входных токенов %d, выходных %d%s"
+                      % (_state["calls"], _state["in"], _state["out"],
+                         (", ориентировочно $%.2f" % cost) if (a.price_in or a.price_out) else ""), flush=True)
+            return r
+        _ta.requests.post = _counted_post
 
     # Рассуждение (19.09, слово владельца «thinking выключи»). В режиме "openrouter" обвязка шлёт голый запрос
     # без переключателя рассуждения, а DeepSeek на OpenRouter по умолчанию рассуждает. Проверено запросом:
