@@ -49,7 +49,11 @@ def main() -> int:
     ap.add_argument("--base-url", default="https://generativelanguage.googleapis.com/v1beta/openai")
     ap.add_argument("--api-key-env", default="LLM_API_KEY_AISTUDIO")
     ap.add_argument("--provider", default="openrouter")
-    ap.add_argument("--context", type=int, default=131072)
+    # ЛОВУШКА: в бою окно 32768 (serving_setup.ANALYZER_CONTEXT, видно в runs/flash_v1_phaseA/taaf_setup_env.json).
+    # Прежний умолчательный 131072 приехал из кернелов DeepSeek, где это ОБЩИЙ контекст llama-server на 4 слота
+    # (на разговор там выходило те же 131072/4). Обвязка режет историю под это число: большее окно = длиннее
+    # промпт, другая память агента и другая цена, то есть замер не про бой.
+    ap.add_argument("--context", type=int, default=32768)
     ap.add_argument("--max-output", type=int, default=2048)
     ap.add_argument("--out", default="")
     ap.add_argument("--bundle", default="runs/peer_kernels/duck_smoke_live", help="бандл обвязки; harness/duck -- наш форк")
@@ -94,6 +98,8 @@ def main() -> int:
     # и отвечает 400. Режим "openrouter" шлёт голый совместимый запрос, он подходит любому внешнему API.
     os.environ["LOCAL_ANALYZER_PROVIDER"] = a.provider
     os.environ["LOCAL_ANALYZER_CONTEXT_WINDOW"] = str(a.context)
+    if a.context != 32768:
+        print("ВНИМАНИЕ: окно контекста %d, в бою 32768 -- замер не сравним с боем" % a.context, flush=True)
     os.environ["LOCAL_ANALYZER_MAX_OUTPUT"] = str(a.max_output)
     os.environ.setdefault("RECORDINGS_DIR", str(ROOT / "runs/_api_recordings"))
 
