@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Ночная работа 20→21.09</title>
+<style>
+:root{--bg:#0f1115;--fg:#e8eaf0;--mut:#9aa3b2;--line:#252a35;--card:#161a22;--ok:#5ec27a;--warn:#e0a33e;--bad:#e2635a;--acc:#6aa9ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px 16px 80px}
+.wrap{max-width:1000px;margin:0 auto}h1{font-size:25px;margin:0 0 4px}h2{font-size:18px;margin:30px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.sub{color:var(--mut);margin:0 0 18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;margin:14px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.k{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.v{font-size:23px;font-weight:600;margin-top:3px}.v small{font-size:13px;font-weight:400;color:var(--mut)}
+table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:13px}td.n,th.n{text-align:right;white-space:nowrap}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid var(--line);color:var(--mut);margin-right:6px}
+ul{margin:6px 0 6px 18px;padding:0}li{margin:4px 0}small{color:var(--mut)}
+</style></head><body><div class="wrap">
+<h1>Ночная работа, 20→21.09</h1>
+<p class="sub">Без единого платного вызова. Квота Kaggle: одна проба, потолок игры срезан с 1800 до 300 с.</p>
+
+<div class="grid">
+<div class="card"><div class="k">Проба доставки</div><div class="v" id="canary">в очереди <small>час без старта</small></div></div>
+<div class="card"><div class="k">Цена данных</div><div class="v">$0.077 <small>за годный пример (было $0.024)</small></div></div>
+<div class="card"><div class="k">Обучение, сценарий C</div><div class="v">$600–1530 <small>на 2×B200</small></div></div>
+<div class="card"><div class="k">Потрачено за ночь</div><div class="v ok">$0</div></div>
+</div>
+
+<h2>1. Проба пути доставки (единственный расход квоты)</h2>
+<p>Замысел переделан после слов «квоту береги»: нулевой адаптер не отличает «модули подключены» от «молча пропущены»,
+потому что он не меняет ответ. В кернел уехал <b>слышный</b> адаптер (B со средним разбросом 0.05), и решает не балл,
+а прямое сравнение ответов базы и псевдонима <code>policy</code> на одном запросе при температуре 0.</p>
+<ul>
+<li>Датасет форка (4408 файлов) Kaggle не обработал за час — обошёл: кернел копирует чужой бандл и кладёт наш
+<code>serving_setup.py</code> целиком (gzip+base64 в ноутбуке), пересчитывая хеш в <code>SOURCE_IDENTITY.json</code>.
+Сверено синтетическим прогоном до пуша: копия побайтово равна проверенному файлу.</li>
+<li>Находка ещё до прогона: стоковая обвязка требует, чтобы <code>/v1/models</code> отдавал <b>ровно одно</b> имя —
+то есть любой адаптер ломает её проверку сам по себе, это правится только в форке.</li>
+<li>Потолок игры 300 с вместо 1800: при 28 местах все игры идут разом, так что прогон ≈ загрузка модели плюс 5 минут.</li>
+</ul>
+
+<h2>2. Цена данных пересчитана — и она вдвое выше</h2>
+<p>Ошибка была в единице: я считал «пример = вызов модели». На деле обучающая единица — <b>ход обвязки</b>,
+внутри которого модель вызывается 1.74 раза (измерено на расшифровках боевого окна).</p>
+<table>
+<tr><th>Набор</th><th class="n">годных примеров</th><th class="n">ходов</th><th class="n">игро-часов</th><th class="n">цена</th></tr>
+<tr><td>минимальный</td><td class="n">1 500</td><td class="n">2 875</td><td class="n">10.4</td><td class="n">$116</td></tr>
+<tr><td>рабочий</td><td class="n">2 500</td><td class="n">4 792</td><td class="n">17.4</td><td class="n">$193</td></tr>
+<tr><td>с запасом</td><td class="n">4 000</td><td class="n">7 670</td><td class="n">27.8</td><td class="n">$308</td></tr>
+</table>
+<p>Медиана длины примера с восстановленной историей — <b>25 тыс. токенов</b>, ровно то число, на котором стоял расчёт
+часов обучения, так что сама смета обучения не поехала. Итоги: A $155–180, B $215–405, C <b>$600–1530</b>.</p>
+
+<h2>3. Чем ход учителя отличается от хода базы</h2>
+<p>Те же четыре игры, счёт по расшифровкам, ноль вызовов и ноль квоты.</p>
+<table>
+<tr><th>Признак одного хода</th><th class="n">учитель</th><th class="n">база</th></tr>
+<tr><td>строк питоновского кода</td><td class="n">45</td><td class="n">14</td></tr>
+<tr><td>ходов движка за ход обвязки</td><td class="n">6.2</td><td class="n">2.1</td></tr>
+<tr><td>ходов, не сделавших ни одного хода движка</td><td class="n ok">10%</td><td class="n bad">50%</td></tr>
+<tr><td>смотрит разбор кадра</td><td class="n">0.48</td><td class="n">0.57</td></tr>
+</table>
+<p>Холостые ходы базы — не плата за вход в уровень: на шестом и дальше ходах доля держится 47%, у учителя 9%.
+<b>Но соблазн «убрать холостые ходы» наш же замер опровергает:</b> удвоение бюджета вызовов (56 → 112 на игру)
+дало 40 → 41 уровень. Свободные ходы — не узкое место; разница в том, сколько сделано за один взгляд.</p>
+
+<h2>4. Прочее за ночь</h2>
+<ul>
+<li><b>Сборщик обучающего набора</b> из записей любого прогона стенда: разбирает расшифровки в диалоги с вызовами
+инструмента, восстанавливает историю под боевое окно, отбирает по взятым уровням и эффективности.
+На трёх прогонах — 149 годных ходов.</li>
+<li><b>Статья</b>: добавлен раздел «потолок задаёт модель» (DeepSeek в 2–3 битах против базы, учитель против базы,
+три отрицательных проверки остатка структуры) и две методические ловушки — спрятанные токены размышления в счёте
+и перенесённый между стендами размер окна.</li>
+<li><b>Скан публичной линии</b> (по правилу на 20.09): новой базы нет, лидер Tufa 18.81, мы 2.53.</li>
+</ul>
+<p style="margin-top:26px"><small>Страница стоимости обучения: <a href="/page/training_cost_20_09.html" style="color:var(--acc)">/page/training_cost_20_09.html</a>.
+Источники чисел: runs/win32k_tu93, runs/teacher_gemini_pilot, runs/flash_v1_phaseA, docs/plan_top10_by_3009.md.</small></p>
+</div></body></html>
