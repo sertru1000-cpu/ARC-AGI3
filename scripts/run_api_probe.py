@@ -128,12 +128,15 @@ def main() -> int:
             try:
                 u = r.json().get("usage") or {}
                 _state["in"] += int(u.get("prompt_tokens") or 0); _state["out"] += int(u.get("completion_tokens") or 0)
+                # кэш: сколько входных токенов сервис засчитал как прочитанные из кэша (в 10 раз дешевле)
+                _state["cached"] = _state.get("cached", 0) + int((u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
             except Exception:
                 pass
-            if _state["calls"] % 50 == 0:
-                cost = _state["in"] / 1e6 * a.price_in + _state["out"] / 1e6 * a.price_out
-                print("ОГРАНИЧИТЕЛЬ: вызовов %d, входных токенов %d, выходных %d%s"
-                      % (_state["calls"], _state["in"], _state["out"],
+            if _state["calls"] % 10 == 0:
+                cached = _state.get("cached", 0); fresh = max(0, _state["in"] - cached)
+                cost = (fresh * a.price_in + cached * a.price_in * 0.1) / 1e6 + _state["out"] / 1e6 * a.price_out
+                print("ОГРАНИЧИТЕЛЬ: вызовов %d, вход %d (из кэша %d = %.0f%%), выход %d%s"
+                      % (_state["calls"], _state["in"], cached, 100.0 * cached / max(1, _state["in"]), _state["out"],
                          (", ориентировочно $%.2f" % cost) if (a.price_in or a.price_out) else ""), flush=True)
             return r
         _ta.requests.post = _counted_post
