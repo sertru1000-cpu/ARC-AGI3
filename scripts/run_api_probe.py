@@ -141,9 +141,13 @@ def main() -> int:
             if _state["calls"] % 10 == 0:
                 cached = _state.get("cached", 0); fresh = max(0, _state["in"] - cached)
                 cost = (fresh * a.price_in + cached * a.price_in * 0.1) / 1e6 + _state["out"] / 1e6 * a.price_out
+                # ЛОВУШКА (измерено 20.09 по остатку на счёте: $2.78 против $1.40 по токенам): счёт по токенам
+                # ЗАНИЖАЕТ ВДВОЕ. Два вероятных вклада -- скидка за кэш в счёт не попадает, а токены размышления
+                # биллятся как выход, но в completion_tokens не приходят (~1800 на вызов). Потолок вызовов
+                # считать от УДВОЕННОЙ оценки, ориентир по факту -- $0.024 за вызов у gemini-3.6-flash.
                 print("ОГРАНИЧИТЕЛЬ: вызовов %d, вход %d (из кэша %d = %.0f%%), выход %d%s"
                       % (_state["calls"], _state["in"], cached, 100.0 * cached / max(1, _state["in"]), _state["out"],
-                         (", ориентировочно $%.2f" % cost) if (a.price_in or a.price_out) else ""), flush=True)
+                         (", по токенам $%.2f, по факту ожидать ~$%.2f" % (cost, 2 * cost)) if (a.price_in or a.price_out) else ""), flush=True)
             return r
         _ta.requests.post = _counted_post
 
