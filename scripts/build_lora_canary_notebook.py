@@ -55,6 +55,48 @@ LORA_LOUD = "sergueimakarov/arc3-loud-lora"
 
 
 
+
+def _inline_adapter_block() -> str:
+    """Блок для ячейки 7: кернел сам строит СЛЫШНЫЙ адаптер (те же матрицы, зерно 0) в рабочей папке."""
+    return (
+        "\n# [[LORA]] Адаптер собирается здесь же: ни одного нового датасета на входе.\n"
+        "# Матрица A -- обычная инициализация, B -- шумная (разброс 0.05): ответ модели ОБЯЗАН измениться,\n"
+        "# иначе vLLM модули молча пропустил. Цели -- q/k/v/o в 12 слоях полного внимания (они в bf16,\n"
+        "# в NVFP4 ужаты только маршрутизируемые эксперты).\n"
+        "if not TRUE_SUBMISSION:\n"
+        "    import torch as _t\n"
+        "    _lora_dir = WORKING_DIR / 'loud_lora'\n"
+        "    _lora_dir.mkdir(parents=True, exist_ok=True)\n"
+        "    _g = _t.Generator().manual_seed(0)\n"
+        "    _H, _HD, _NH, _KV, _R = 2560, 256, 24, 2, 16\n"
+        "    _shapes = {'q_proj': (_NH * _HD, _H), 'k_proj': (_KV * _HD, _H), 'v_proj': (_KV * _HD, _H),\n"
+        "               'o_proj': (_H, _NH * _HD)}\n"
+        "    _tensors = {}\n"
+        "    for _i in range(3, 48, 4):\n"
+        "        for _nm, (_o, _in) in _shapes.items():\n"
+        "            _b = 'base_model.model.model.language_model.layers.%d.self_attn.%s' % (_i, _nm)\n"
+        "            _tensors[_b + '.lora_A.weight'] = (_t.randn(_R, _in, generator=_g) * (1.0 / _in ** 0.5)).to(_t.bfloat16)\n"
+        "            _tensors[_b + '.lora_B.weight'] = (_t.randn(_o, _R, generator=_g) * 0.05).to(_t.bfloat16)\n"
+        "    try:\n"
+        "        from safetensors.torch import save_file as _save\n"
+        "        _save(_tensors, str(_lora_dir / 'adapter_model.safetensors'))\n"
+        "        _fmt = 'safetensors'\n"
+        "    except Exception as _e:\n"
+        "        _t.save(_tensors, str(_lora_dir / 'adapter_model.bin'))\n"
+        "        _fmt = 'bin (%s)' % type(_e).__name__\n"
+        "    (_lora_dir / 'adapter_config.json').write_text(json.dumps({\n"
+        "        'peft_type': 'LORA', 'task_type': 'CAUSAL_LM',\n"
+        "        'base_model_name_or_path': 'RadixArk/Qwen3.8-Flash-Next-NVFP4',\n"
+        "        'r': _R, 'lora_alpha': 2 * _R, 'lora_dropout': 0.0, 'bias': 'none',\n"
+        "        'fan_in_fan_out': False, 'inference_mode': True,\n"
+        "        'target_modules': ['q_proj', 'k_proj', 'v_proj', 'o_proj']}, indent=1))\n"
+        "    setup_env['ARC3_LORA_PATH'] = str(_lora_dir)\n"
+        "    os.environ.update(setup_env)\n"
+        "    SETUP_ENV_PATH.write_text(json.dumps(setup_env, indent=2, sort_keys=True) + '\\n')\n"
+        "    print('[[LORA]] adapter built in kernel: %s, tensors %d, format %s' % (_lora_dir, len(_tensors), _fmt), flush=True)\n"
+    )
+
+
 def _runtime_patch_block() -> str:
     """Блок для ячейки 7: копирует чужой бандл в рабочую папку, кладёт НАШ serving_setup.py и чинит хеш.
 
@@ -90,7 +132,10 @@ def _runtime_patch_block() -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cap", type=float, default=300.0, help="потолок игры: проба короткая, квота дорога")
-    ap.add_argument("--adapter", choices=["loud", "zero"], default="loud")
+    ap.add_argument("--adapter", choices=["loud", "zero", "inline"], default="inline",
+                    help="inline -- кернел собирает адаптер сам в /kaggle/working, ни одного нового датасета "
+                         "на входе (21.09: три слага подряд простояли в очереди, и новый датасет -- "
+                         "единственное отличие входов от прогонов 19.09, которые стартовали нормально)")
     ap.add_argument("--bundle", choices=["fork", "runtime"], default="runtime",
                     help="fork -- наш датасет-форк (ждёт обработки Kaggle); "
                          "runtime -- взять чужой бандл и починить копию прямо в кернеле")
@@ -108,13 +153,15 @@ def main() -> None:
         anchor = 'print(f"taaf.kaggle: source bundle = {BUNDLE_DIR}")'
         assert anchor in c7, "ячейка 7: не найдено место для правки бандла на лету"
         c7 = c7.replace(anchor, anchor + "\n" + _runtime_patch_block(), 1)
-    lora = LORA_LOUD if a.adapter == "loud" else LORA_ZERO
-    c7 = c7.replace('"%s"]\nKERNEL_SOURCES' % "keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1",
-                    '"%s", "%s"]\nKERNEL_SOURCES' % ("keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1", lora))
-    assert lora in c7, "ячейка 7: не удалось дописать датасет адаптера в DATASET_SOURCES"
-    c7 += '''
+    lora = None if a.adapter == "inline" else (LORA_LOUD if a.adapter == "loud" else LORA_ZERO)
+    if lora:
+        c7 = c7.replace('"%s"]\nKERNEL_SOURCES' % "keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1",
+                        '"%s", "%s"]\nKERNEL_SOURCES' % ("keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1", lora))
+        assert lora in c7, "ячейка 7: не удалось дописать датасет адаптера в DATASET_SOURCES"
+    if lora:
+        c7 += '''
 
-# [[LORA]] Проба пути доставки (только вне боя): показываем обвязке папку пустого адаптера.
+# [[LORA]] Проба пути доставки (только вне боя): показываем обвязке папку адаптера из датасета.
 if not TRUE_SUBMISSION:
     _lora_dir = _first_existing(_dataset_mount_candidates("%s")) or _dataset_mount_candidates("%s")[0]
     _lora_files = sorted(p.name for p in Path(_lora_dir).glob("*")) if Path(_lora_dir).exists() else []
@@ -125,6 +172,8 @@ if not TRUE_SUBMISSION:
     SETUP_ENV_PATH.write_text(json.dumps(setup_env, indent=2, sort_keys=True) + "\\n")
     print("[[LORA]] adapter dir = %%s, files = %%s" %% (_lora_dir, _lora_files), flush=True)
 ''' % (lora, lora)
+    else:
+        c7 += _inline_adapter_block()
     nb["cells"][7]["source"] = c7.splitlines(keepends=True)
 
     # --- ячейка 13: решающее сравнение базы и псевдонима
@@ -147,7 +196,7 @@ if not TRUE_SUBMISSION:
     json.dump(nb, open(os.path.join(out, "submission.ipynb"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     meta = json.load(open("kernels/notebooks_stockflash/kernel-metadata.json"))
     assert meta["dataset_sources"][0] == UPSTREAM
-    meta["dataset_sources"] = ([FORK] if a.bundle == "fork" else [UPSTREAM]) + meta["dataset_sources"][1:] + [lora]
+    meta["dataset_sources"] = ([FORK] if a.bundle == "fork" else [UPSTREAM]) + meta["dataset_sources"][1:] + ([lora] if lora else [])
     meta["id"] = "sergueimakarov/" + a.slug
     meta["title"] = a.slug.replace("-", " ")
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)

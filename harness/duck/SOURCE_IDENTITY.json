@@ -250,7 +250,7 @@
   ],
   "tool_parser": "qwen3_coder"
  },
- "serving_setup_sha256": "b153eeb988bf2fa3c11451fafe84f0c22831257f626d3f3da6893b73977349ca",
+ "serving_setup_sha256": "136bc98d2e6cc99df83dfda68324235f6ee9b882c9ce071ce8f5aa515bbdba6b",
  "serving_teardown_sha256": "c48368e330abf2574b155b42041bd5d42ea556d53340ccbbc5c8788acaa0eb19",
  "setup_commands_sha256": "64857a575388b8fcbf177ae68da0b884e12816213d68cfcdd206032763febb6a",
  "teardown_commands_sha256": "c6f82500ebc8d2e6f1348f504f8613cbe44fa5674173886049606f5b95753376",

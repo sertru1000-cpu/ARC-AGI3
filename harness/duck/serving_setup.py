@@ -2335,8 +2335,12 @@ def server_command(
             ]
         )
     else:
+        # ЛОВУШКА (измерено 21.09 в прогоне arc3-lora-canary-d): при штатных 0.92 адаптер не влезает --
+        # vLLM падает на выделении 400 МБ под веса LoRA, свободно оставалось 147 МБ. Память под адаптер
+        # и рабочие буферы punica считается СВЕРХ доли gpu-memory-utilization, поэтому с адаптером долю
+        # приходится опускать. 0.87 освобождает около 5 ГБ -- на порядок больше, чем не хватило.
         command.extend(
-            ["--gpu-memory-utilization", GPU_MEMORY_UTILIZATION]
+            ["--gpu-memory-utilization", "0.87" if lora_path() else GPU_MEMORY_UTILIZATION]
         )
     command.extend(
         [
