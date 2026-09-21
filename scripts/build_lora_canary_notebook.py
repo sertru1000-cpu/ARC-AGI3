@@ -56,25 +56,42 @@ LORA_LOUD = "sergueimakarov/arc3-loud-lora"
 
 
 
-def _inline_adapter_block() -> str:
-    """Блок для ячейки 7: кернел сам строит СЛЫШНЫЙ адаптер (те же матрицы, зерно 0) в рабочей папке."""
+def _inline_adapter_block(targets: str = "attn") -> str:
+    """Блок для ячейки 7: кернел сам строит СЛЫШНЫЙ адаптер (зерно 0) в рабочей папке.
+
+    targets="attn"   -- q/k/v/o в 12 слоях полного внимания (слои 3, 7, ... 47).
+    targets="linear" -- in_proj_qkv / in_proj_z / out_proj в 36 слоях линейного внимания (все прочие).
+    Размеры взяты из заголовка файла весов модели (скачаны 47 КБ, не 70 ГБ):
+    in_proj_qkv [10240, 2560], in_proj_z [6144, 2560], out_proj [2560, 6144], q/k/v/o от hidden 2560,
+    24 головы по 256 и 2 головы ключей.
+    """
+    if targets == "attn":
+        shapes = "{'q_proj': (6144, 2560), 'k_proj': (512, 2560), 'v_proj': (512, 2560), 'o_proj': (2560, 6144)}"
+        layers = "range(3, 48, 4)"
+        prefix = "self_attn"
+        names = "['q_proj', 'k_proj', 'v_proj', 'o_proj']"
+        what = "12 слоёв полного внимания"
+    else:
+        shapes = "{'in_proj_qkv': (10240, 2560), 'in_proj_z': (6144, 2560), 'out_proj': (2560, 6144)}"
+        layers = "[_i for _i in range(48) if (_i + 1) % 4 != 0]"
+        prefix = "linear_attn"
+        names = "['in_proj_qkv', 'in_proj_z', 'out_proj']"
+        what = "36 слоёв линейного внимания"
     return (
-        "\n# [[LORA]] Адаптер собирается здесь же: ни одного нового датасета на входе.\n"
+        "\n# [[LORA]] Адаптер собирается здесь же: ни одного нового датасета на входе. Цели -- %s.\n"
         "# Матрица A -- обычная инициализация, B -- шумная (разброс 0.05): ответ модели ОБЯЗАН измениться,\n"
-        "# иначе vLLM модули молча пропустил. Цели -- q/k/v/o в 12 слоях полного внимания (они в bf16,\n"
-        "# в NVFP4 ужаты только маршрутизируемые эксперты).\n"
+        "# иначе vLLM модули молча пропустил. Все эти модули в bf16 (в NVFP4 ужаты только эксперты).\n"
         "if not TRUE_SUBMISSION:\n"
         "    import torch as _t\n"
         "    _lora_dir = WORKING_DIR / 'loud_lora'\n"
         "    _lora_dir.mkdir(parents=True, exist_ok=True)\n"
         "    _g = _t.Generator().manual_seed(0)\n"
-        "    _H, _HD, _NH, _KV, _R = 2560, 256, 24, 2, 16\n"
-        "    _shapes = {'q_proj': (_NH * _HD, _H), 'k_proj': (_KV * _HD, _H), 'v_proj': (_KV * _HD, _H),\n"
-        "               'o_proj': (_H, _NH * _HD)}\n"
+        "    _R = 16\n"
+        "    _shapes = %s\n"
         "    _tensors = {}\n"
-        "    for _i in range(3, 48, 4):\n"
+        "    for _i in %s:\n"
         "        for _nm, (_o, _in) in _shapes.items():\n"
-        "            _b = 'base_model.model.model.language_model.layers.%d.self_attn.%s' % (_i, _nm)\n"
+        "            _b = 'base_model.model.model.language_model.layers.%%d.%s.%%s' %% (_i, _nm)\n"
         "            _tensors[_b + '.lora_A.weight'] = (_t.randn(_R, _in, generator=_g) * (1.0 / _in ** 0.5)).to(_t.bfloat16)\n"
         "            _tensors[_b + '.lora_B.weight'] = (_t.randn(_o, _R, generator=_g) * 0.05).to(_t.bfloat16)\n"
         "    try:\n"
@@ -83,18 +100,18 @@ def _inline_adapter_block() -> str:
         "        _fmt = 'safetensors'\n"
         "    except Exception as _e:\n"
         "        _t.save(_tensors, str(_lora_dir / 'adapter_model.bin'))\n"
-        "        _fmt = 'bin (%s)' % type(_e).__name__\n"
+        "        _fmt = 'bin (%%s)' %% type(_e).__name__\n"
         "    (_lora_dir / 'adapter_config.json').write_text(json.dumps({\n"
         "        'peft_type': 'LORA', 'task_type': 'CAUSAL_LM',\n"
         "        'base_model_name_or_path': 'RadixArk/Qwen3.8-Flash-Next-NVFP4',\n"
         "        'r': _R, 'lora_alpha': 2 * _R, 'lora_dropout': 0.0, 'bias': 'none',\n"
         "        'fan_in_fan_out': False, 'inference_mode': True,\n"
-        "        'target_modules': ['q_proj', 'k_proj', 'v_proj', 'o_proj']}, indent=1))\n"
+        "        'target_modules': %s}, indent=1))\n"
         "    setup_env['ARC3_LORA_PATH'] = str(_lora_dir)\n"
         "    os.environ.update(setup_env)\n"
         "    SETUP_ENV_PATH.write_text(json.dumps(setup_env, indent=2, sort_keys=True) + '\\n')\n"
-        "    print('[[LORA]] adapter built in kernel: %s, tensors %d, format %s' % (_lora_dir, len(_tensors), _fmt), flush=True)\n"
-    )
+        "    print('[[LORA]] adapter built in kernel: %%s, tensors %%d, format %%s' %% (_lora_dir, len(_tensors), _fmt), flush=True)\n"
+    ) % (what, shapes, layers, prefix, names)
 
 
 def _runtime_patch_block() -> str:
@@ -136,6 +153,10 @@ def main() -> None:
                     help="inline -- кернел собирает адаптер сам в /kaggle/working, ни одного нового датасета "
                          "на входе (21.09: три слага подряд простояли в очереди, и новый датасет -- "
                          "единственное отличие входов от прогонов 19.09, которые стартовали нормально)")
+    ap.add_argument("--targets", choices=["attn", "linear"], default="attn",
+                    help="attn -- q/k/v/o в 12 слоях ПОЛНОГО внимания (самый надёжный случай); "
+                         "linear -- in_proj_qkv/in_proj_z/out_proj в 36 слоях ЛИНЕЙНОГО внимания "
+                         "(именно их vLLM мог молча пропустить у студента 27B в августе)")
     ap.add_argument("--bundle", choices=["fork", "runtime"], default="runtime",
                     help="fork -- наш датасет-форк (ждёт обработки Kaggle); "
                          "runtime -- взять чужой бандл и починить копию прямо в кернеле")
@@ -173,7 +194,7 @@ if not TRUE_SUBMISSION:
     print("[[LORA]] adapter dir = %%s, files = %%s" %% (_lora_dir, _lora_files), flush=True)
 ''' % (lora, lora)
     else:
-        c7 += _inline_adapter_block()
+        c7 += _inline_adapter_block(a.targets)
     nb["cells"][7]["source"] = c7.splitlines(keepends=True)
 
     # --- ячейка 13: решающее сравнение базы и псевдонима
