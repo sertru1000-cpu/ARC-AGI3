@@ -1,0 +1,163 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Как устроена модель и что мы обучаем</title>
+<style>
+:root{--bg:#0f1115;--fg:#e8eaf0;--mut:#9aa3b2;--line:#252a35;--card:#161a22;--ok:#5ec27a;--warn:#e0a33e;--bad:#e2635a;--acc:#6aa9ff;--frozen:#3a4150}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px 16px 80px}
+.wrap{max-width:1040px;margin:0 auto}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:34px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:16px;margin:22px 0 6px;color:var(--acc)}
+.sub{color:var(--mut);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:13px}td.n,th.n{text-align:right;white-space:nowrap}
+.legend{display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 4px;font-size:13px;color:var(--mut)}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+ul{margin:6px 0 6px 18px;padding:0}li{margin:5px 0}
+small{color:var(--mut)}
+code{background:#11151c;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:13px}
+svg{max-width:100%;height:auto;display:block;margin:6px auto}
+.okbox{border-left:3px solid var(--ok)}.warnbox{border-left:3px solid var(--warn)}.badbox{border-left:3px solid var(--bad)}
+</style></head><body><div class="wrap">
+
+<h1>Как устроена боевая модель и что именно мы обучаем</h1>
+<p class="sub">Qwen3.8-Flash-Next-NVFP4 — та модель, что играет в бою. Все числа ниже взяты из её собственных файлов
+(конфигурация, опись весов, заголовки файлов), а не из общих соображений.</p>
+
+<h2>1. Главная мысль в двух абзацах</h2>
+<p>Модель — это стопка из <b>48 одинаковых по замыслу слоёв</b>. Каждый слой делает две вещи подряд: сначала
+<b>смотрит на контекст</b> (внимание — решает, какие прошлые токены важны для текущего), потом <b>думает над
+результатом</b> (блок из экспертов — обычная нейросеть, которая преобразует полученное).</p>
+<p>Слово «эксперт» звучит загадочно, но означает простую вещь: вместо одной большой нейросети в слое стоят
+<b>512 маленьких</b>, и для каждого токена крошечный модуль-<b>маршрутизатор</b> выбирает <b>десять</b> из них.
+Остальные 502 на этом токене просто не работают. Поэтому модель весит как 125 миллиардов параметров, а считает
+как 2.4 миллиарда — отсюда и скорость. Это и есть «смесь экспертов» (MoE).</p>
+
+<h2>2. Схема: один слой и что в нём чем является</h2>
+<div class="legend">
+  <span><span class="sw" style="background:var(--ok)"></span>обучаем (bf16, к этому цепляется адаптер)</span>
+  <span><span class="sw" style="background:var(--frozen)"></span>заморожено (4 бита, не трогаем)</span>
+  <span><span class="sw" style="background:#2a3550"></span>вспомогательное</span>
+</div>
+<svg viewBox="0 0 980 430" role="img" aria-label="Схема слоя модели">
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#6aa9ff"/></marker>
+    <style>
+      .t{fill:#e8eaf0;font:13px -apple-system,sans-serif}.m{fill:#9aa3b2;font:11.5px -apple-system,sans-serif}
+      .h{fill:#e8eaf0;font:600 13.5px -apple-system,sans-serif}.ln{stroke:#6aa9ff;stroke-width:1.6;fill:none;marker-end:url(#a)}
+      .box{rx:8;stroke:#252a35}
+    </style>
+  </defs>
+
+  <text class="h" x="16" y="22">Токен входит</text>
+  <rect class="box" x="16" y="34" width="120" height="40" fill="#1b2330"/>
+  <text class="t" x="30" y="58">представление</text>
+  <path class="ln" d="M140 54 H190"/>
+
+  <!-- внимание -->
+  <rect class="box" x="196" y="16" width="250" height="150" fill="#16351f" stroke="#2e6b40"/>
+  <text class="h" x="212" y="38">1. Внимание — «на что смотреть»</text>
+  <text class="m" x="212" y="58">12 слоёв из 48: полное внимание</text>
+  <text class="m" x="212" y="74">q_proj · k_proj · v_proj · o_proj</text>
+  <text class="m" x="212" y="98">36 слоёв из 48: линейное внимание</text>
+  <text class="m" x="212" y="114">in_proj_qkv · in_proj_z · out_proj</text>
+  <text class="m" x="212" y="140" style="fill:#5ec27a">всё в bf16 · 16 ГБ · ОБУЧАЕМ</text>
+  <path class="ln" d="M450 90 H500"/>
+
+  <!-- MoE -->
+  <rect class="box" x="506" y="16" width="458" height="270" fill="#1a1e27"/>
+  <text class="h" x="522" y="38">2. Блок экспертов — «как это переработать»</text>
+
+  <rect class="box" x="522" y="52" width="150" height="44" fill="#16351f" stroke="#2e6b40"/>
+  <text class="t" x="536" y="72">маршрутизатор</text>
+  <text class="m" x="536" y="88">выбирает 10 из 512</text>
+
+  <rect class="box" x="522" y="106" width="150" height="44" fill="#16351f" stroke="#2e6b40"/>
+  <text class="t" x="536" y="126">общий эксперт</text>
+  <text class="m" x="536" y="142">работает всегда</text>
+  <text class="m" x="522" y="170" style="fill:#5ec27a">bf16 · ОБУЧАЕМ</text>
+
+  <g>
+    <text class="m" x="700" y="66">512 экспертов, работают 10</text>
+    <g fill="#3a4150" stroke="#252a35">
+      <rect class="box" x="700" y="76" width="54" height="26"/><rect class="box" x="760" y="76" width="54" height="26"/>
+      <rect class="box" x="820" y="76" width="54" height="26"/><rect class="box" x="880" y="76" width="54" height="26"/>
+      <rect class="box" x="700" y="108" width="54" height="26"/><rect class="box" x="760" y="108" width="54" height="26"/>
+      <rect class="box" x="820" y="108" width="54" height="26"/><rect class="box" x="880" y="108" width="54" height="26"/>
+      <rect class="box" x="700" y="140" width="54" height="26"/><rect class="box" x="760" y="140" width="54" height="26"/>
+      <rect class="box" x="820" y="140" width="54" height="26"/><rect class="box" x="880" y="140" width="54" height="26"/>
+    </g>
+    <text class="m" x="700" y="186">…и так 512 штук в каждом из 48 слоёв</text>
+    <text class="m" x="700" y="206" style="fill:#9aa3b2">120.8 млрд параметров = 99.4% модели</text>
+    <text class="m" x="700" y="224" style="fill:#e0a33e">сжаты в 4 бита · 68 ГБ · НЕ ТРОГАЕМ</text>
+  </g>
+  <path class="ln" d="M676 74 H696"/>
+  <path class="ln" d="M676 128 H696"/>
+
+  <path class="ln" d="M735 290 V246" transform="translate(0,0)"/>
+  <rect class="box" x="506" y="300" width="458" height="46" fill="#1b2330"/>
+  <text class="t" x="522" y="322">следующий слой → и так 48 раз → ответ модели</text>
+  <text class="m" x="522" y="338">послойные эмбеддинги (PLE) 51 ГБ живут в оперативной памяти машины, не на карте</text>
+
+  <rect class="box" x="16" y="196" width="430" height="150" fill="#1a1e27"/>
+  <text class="h" x="32" y="218">Что такое адаптер (LoRA)</text>
+  <text class="m" x="32" y="240">Исходную матрицу весов W не трогаем вовсе.</text>
+  <text class="m" x="32" y="258">Рядом ставим две узкие матрицы A и B (ранг 16)</text>
+  <text class="m" x="32" y="276">и считаем W·x + B·(A·x). Учатся только A и B.</text>
+  <text class="t" x="32" y="302">Поэтому обучаемых параметров 21.9 млн —</text>
+  <text class="t" x="32" y="320">это 0.018% модели, файл адаптера 44 МБ.</text>
+  <text class="m" x="32" y="338" style="fill:#5ec27a">B в начале нулевая: ответ модели не меняется, пока не учили</text>
+</svg>
+
+<h2>3. Из чего модель состоит по весу</h2>
+<table>
+<tr><th>Часть</th><th class="n">Параметров</th><th class="n">На диске</th><th>Формат и где лежит</th><th>Обучаем?</th></tr>
+<tr><td>Эксперты (512 на слой × 48 слоёв)</td><td class="n">120.8 млрд</td><td class="n">68 ГБ</td><td>4 бита (NVFP4), на карте</td><td>нет</td></tr>
+<tr><td>Внимание, линейное внимание, гейты, общий эксперт, эмбеддинги</td><td class="n">~2–4 млрд</td><td class="n">16 ГБ</td><td>bf16, на карте</td><td><b style="color:var(--ok)">да</b></td></tr>
+<tr><td>Послойные эмбеддинги (PLE)</td><td class="n">—</td><td class="n">51 ГБ</td><td>fp8, в оперативной памяти (180 ГБ)</td><td>нет</td></tr>
+</table>
+<p><small>На карте 96 ГБ лежит примерно 84 ГБ весов, остальное — кэш внимания и рабочие буферы. Отсюда вчерашняя
+нехватка 400 МБ под адаптер: пришлось опустить долю памяти с 0.92 до 0.87.</small></p>
+
+<h2>4. Что значит «обучать» и почему именно эти части</h2>
+<p>Обучение подражанием устроено так: берём записи ходов сильной модели-учителя, показываем нашей модели тот же
+вход и заставляем её выдавать тот же ответ, а разницу превращаем в поправку к весам. Поправку кладём не в сами
+веса, а в адаптер — две узкие матрицы рядом с каждой обучаемой (схема выше).</p>
+<h3>Почему не экспертов, хотя в них 99% модели</h3>
+<ul>
+<li><b>Они сжаты в 4 бита.</b> Учить сжатое нельзя: нужно разворачивать в bf16, а это 250 ГБ и другая карта.</li>
+<li><b>Они слиты в общие тензоры.</b> Измерено в августе: адаптер по слитым экспертам идёт <b>34 секунды на
+микропакет против 2.0–3.6</b> — в двенадцать раз дороже.</li>
+<li><b>Их пришлось бы пересжимать перед боем</b> — 119 ГБ заново и риск испортить базу чужим рецептом квантования.</li>
+</ul>
+<h3>Что даёт обучение только «зелёной» части</h3>
+<table>
+<tr><th>Цель адаптера</th><th class="n">Слоёв</th><th class="n">Обучаемых параметров</th><th>Что проверяет канарейка на Kaggle</th></tr>
+<tr><td>q/k/v/o — полное внимание</td><td class="n">12 из 48</td><td class="n">4.5 млн</td><td><code>arc3-lora-canary-e</code></td></tr>
+<tr><td>in_proj_qkv / in_proj_z / out_proj — линейное внимание</td><td class="n">36 из 48</td><td class="n">17.4 млн</td><td><code>arc3-lora-canary-lin</code></td></tr>
+<tr><td>вместе</td><td class="n">48 из 48</td><td class="n">21.9 млн (0.018%)</td><td>—</td></tr>
+</table>
+
+<h2>5. Весь путь от денег до боя</h2>
+<table>
+<tr><th>Шаг</th><th>Что происходит</th><th class="n">Цена</th></tr>
+<tr><td>1. Сбор данных</td><td>Gemini играет публичные игры на нашей боевой обвязке; берём ходы внутри взятых уровней</td><td class="n">$116 за 1500 примеров</td></tr>
+<tr><td>2. Обучение</td><td>Адаптер учится повторять ходы учителя; потеря считается только на ответах модели (28.7% токенов)</td><td class="n">$37–74 за эпоху</td></tr>
+<tr><td>3. Доставка</td><td>Адаптер 44 МБ грузится в vLLM рядом с моделью — либо, если vLLM его не примет, вливаем в 16 ГБ bf16-файлов и подменяем их в кернеле</td><td class="n">$0</td></tr>
+<tr><td>4. Замер</td><td>Прогон на Kaggle на публичных играх и отложенных</td><td class="n">$0 (квота)</td></tr>
+</table>
+
+<div class="card badbox">
+<h3 style="margin-top:0;color:var(--bad)">Главный риск, названный честно</h3>
+<p style="margin:0">Мы учим 0.018% модели и не трогаем те самые 99%, где лежит её способность рассуждать. В августе
+мы уже обучали студента с замороженными экспертами — он дал <b>0 уровней из 16</b>, диагноз в записях:
+недообучение. Разница сегодня в том, что тогда модель училась играть с нуля, а сейчас база уже играет, и учить
+её надо манере хода: писать длиннее код, делать больше ходов за один заход, не тратить половину ходов впустую.
+Это довод, а не доказательство. Поэтому сначала покупается одна эпоха за $37–74, а не весь путь.</p>
+</div>
+
+<p style="margin-top:26px"><small>Источники чисел: config.json и model.safetensors.index.json модели, заголовки
+файлов весов (скачаны 47 КБ), опись репозитория HuggingFace, замеры 21.08 на RunPod (34 с против 2.0–3.6 с),
+docs/plan_top10_by_3009.md. Смета целиком: <a href="/page/training_cost_20_09.html" style="color:var(--acc)">/page/training_cost_20_09.html</a>.</small></p>
+</div></body></html>
