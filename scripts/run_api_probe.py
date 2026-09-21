@@ -64,6 +64,9 @@ def main() -> int:
                          "(20.09: $2.78 на 118 вызовов у gemini-3.6-flash при боевом окне = $0.0236 за вызов)")
     ap.add_argument("--price-in", type=float, default=0.0, help="$/млн входных токенов -- для оценки трат на ходу")
     ap.add_argument("--price-out", type=float, default=0.0, help="$/млн выходных токенов")
+    ap.add_argument("--reasoning-effort", choices=["default", "none", "low", "medium", "high"], default="default",
+                    help="бюджет размышления у Gemini через совместимый API (измерено 21.09 на одном запросе: "
+                         "как есть 4216 токенов размышления, low 1111, none 0; платим за них как за выход)")
     ap.add_argument("--reasoning", choices=["default", "on", "off"], default="default",
                     help="рассуждение модели у провайдера: off -- дописать в запрос reasoning.enabled=false (OpenRouter)")
     a = ap.parse_args()
@@ -120,20 +123,25 @@ def main() -> int:
         bm = pickle.load(f)
     bm.job_dir = out
 
-    if a.budget_usd > 0:
-        PRICE_PER_CALL = 0.0236        # измерено 20.09 по остатку на счёте, не по счётчику токенов
-        limit = max(1, int(a.budget_usd / PRICE_PER_CALL))
-        a.max_calls = limit if not a.max_calls else min(a.max_calls, limit)
-        print("БЮДЖЕТ $%.2f -> потолок %d вызовов (по измеренной цене $%.4f за вызов)"
-              % (a.budget_usd, a.max_calls, PRICE_PER_CALL), flush=True)
+    if a.budget_usd > 0 and not (a.price_in and a.price_out):
+        raise SystemExit("--budget-usd требует --price-in и --price-out: потолок считается по живому счёту токенов")
 
     # ОГРАНИЧИТЕЛЬ ТРАТ (20.09; пилот учителя ушёл в минус на $3.75 сверх внесённых $5 -- Google дал перерасход).
     # Считаем вызовы и токены сами, поверх сборщика запроса; по достижении потолка запросы прекращаются.
-    if a.max_calls > 0 or a.price_in or a.price_out:
+    if a.max_calls > 0 or a.budget_usd > 0 or a.price_in or a.price_out:
         import inference.agent.tool_agent as _ta
         _state = {"calls": 0, "in": 0, "out": 0, "stopped": False}
         _orig_post = _ta.requests.post
+        def _cost():
+            cached = _state.get("cached", 0); fresh = max(0, _state["in"] - cached)
+            return (fresh * a.price_in + cached * a.price_in * 0.1) / 1e6 + _state["out"] / 1e6 * a.price_out
         def _counted_post(url, **kw):
+            if a.budget_usd and _cost() >= a.budget_usd:
+                if not _state["stopped"]:
+                    _state["stopped"] = True
+                    print("БЮДЖЕТ ИСЧЕРПАН: потрачено ~$%.2f из $%.2f -- запросы прекращены"
+                          % (_cost(), a.budget_usd), flush=True)
+                raise RuntimeError("budget exhausted")
             if a.max_calls and _state["calls"] >= a.max_calls:
                 if not _state["stopped"]:
                     _state["stopped"] = True
@@ -168,15 +176,20 @@ def main() -> int:
     # без переключателя рассуждения, а DeepSeek на OpenRouter по умолчанию рассуждает. Проверено запросом:
     # "reasoning": {"enabled": false} даёт 0 токенов рассуждения, вызов инструмента сохраняется.
     # Подменяем сборщик запроса только в стенде: боевой код обвязки не трогается.
-    if a.reasoning != "default":
+    if a.reasoning != "default" or a.reasoning_effort != "default":
         import inference.agent.tool_agent as _ta
         _orig = _ta.build_chat_payload
         def _with_reasoning(*args, **kwargs):
             payload = _orig(*args, **kwargs)
-            payload["reasoning"] = {"enabled": a.reasoning == "on"}
+            if a.reasoning != "default":
+                payload["reasoning"] = {"enabled": a.reasoning == "on"}
+            if a.reasoning_effort != "default":
+                # ключ совместимого API Google; измерено 21.09: как есть 4216 токенов размышления,
+                # low 1111, none 0 -- а платим мы за них по цене выхода ($3.75 за млн)
+                payload["reasoning_effort"] = a.reasoning_effort
             return payload
         _ta.build_chat_payload = _with_reasoning
-        print("рассуждение у провайдера: %s" % a.reasoning, flush=True)
+        print("рассуждение: переключатель %s, бюджет %s" % (a.reasoning, a.reasoning_effort), flush=True)
 
     env_dir = str(ROOT / "environment_files")
     spec = taaf.game_api.ArcadeSpec(operation_mode=arc_agi.OperationMode.OFFLINE, environments_dir=env_dir)
