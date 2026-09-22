@@ -37,10 +37,19 @@ RUNTIME_DATASET = "keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1"
 # ФОРК (20.09): проверка ПУТИ ДОСТАВКИ обученной модели. Всё ниже включается только переменной
 # окружения ARC3_LORA_PATH; без неё поведение ядра ровно стоковое. См. scripts/build_empty_lora.py.
 LORA_ALIAS = "policy"
+LORA_ALIAS2 = "policy2"
+LORA_KV_RESERVE_BYTES = 4 * 1024**3   # см. ниже: сколько отдать обратно из кэша внимания под адаптер
+# 22.09, прогон -f: при возврате 2 ГиБ падение сдвинулось с 382 МиБ на 3.12 ГиБ -- это уже не веса
+# адаптера, а поздние буферы подъёма (графы CUDA, состояния линейного внимания). Поэтому с адаптером
+# возвращаем 4 ГиБ и вдобавок выключаем графы CUDA: для канарейки скорость не нужна, нужен ответ.
 
 
 def lora_path() -> str:
     return (os.environ.get("ARC3_LORA_PATH") or "").strip()
+
+
+def lora_path2() -> str:
+    return (os.environ.get("ARC3_LORA_PATH2") or "").strip()
 
 
 MODEL_HF_REPO = "RadixArk/Qwen3.8-Flash-Next-NVFP4"
@@ -2313,6 +2322,18 @@ def server_command(
         "mp",
     ]
     if lora_path():
+        modules = [f"{LORA_ALIAS}={lora_path()}"]
+        if lora_path2():
+            modules.append(f"{LORA_ALIAS2}={lora_path2()}")
+        # ЛОВУШКА (22.09, прогоны -f и -g): падение «не хватило 3.12 ГиБ при 2.99 свободных» повторилось
+        # ДВАЖДЫ с точностью до байта, хотя кэш внимания резался с 5 до 3 и до 1 ГиБ, а графы CUDA выключались.
+        # Значит запрос идёт ДО выделения кэша и графов, и это словарные буферы машинерии адаптеров:
+        # 248320 x 2560 x 2 байта = 1.18 ГиБ на слот, три слота = 3.55 ГиБ -- сходится с 3.12.
+        # ПОПРАВКА 22.09 (прогон -h): флага --lora-extra-vocab-size в этой сборке vLLM НЕТ, сервер падает за
+        # четыре минуты с "unrecognized arguments". Пересчёт показал другое: 3.12 ГиБ = пакет ~6700 токенов x
+        # словарь 248320 x 2 байта -- это буфер ЛОГИТОВ. С адаптером vLLM считает логиты на весь пакет, а не
+        # на последний токен каждой последовательности. Поэтому режем размер пакета (ниже), а в пакете
+        # оставляем ОДИН адаптер -- псевдонимы при этом оба доступны, запросы к ним идут по очереди.
         command.extend(
             [
                 "--enable-lora",
@@ -2321,19 +2342,23 @@ def server_command(
                 "--max-lora-rank",
                 "16",
                 "--lora-modules",
-                f"{LORA_ALIAS}={lora_path()}",
+                *modules,
             ]
         )
-        print(f"[[LORA]] vLLM flags added, adapter={lora_path()}", flush=True)
+        print(f"[[LORA]] vLLM flags added, adapters={modules}", flush=True)
     if resolved_tuning["moe_backend"] is not None:
         command.extend(["--moe-backend", str(resolved_tuning["moe_backend"])])
     if int(resolved_tuning["kv_cache_memory_bytes"]) > 0:
-        command.extend(
-            [
-                "--kv-cache-memory-bytes",
-                str(resolved_tuning["kv_cache_memory_bytes"]),
-            ]
-        )
+        # ЛОВУШКА (измерено 22.09 в прогонах arc3-lora-canary-e и -lin): боевая сборка задаёт кэш внимания
+        # ЯВНО (5 ГиБ) и потому пропускает профилирование памяти -- доля gpu-memory-utilization в этой ветке
+        # не используется вовсе, и моя первая правка была мёртвым кодом. Веса ~88 ГБ + кэш 5 ГиБ забивают
+        # карту под завязку, и адаптеру не хватает 382 МиБ. Поэтому с адаптером возвращаем часть кэша.
+        _kv = int(resolved_tuning["kv_cache_memory_bytes"])
+        if lora_path():
+            _kv = max(1024**3, _kv - LORA_KV_RESERVE_BYTES)
+            print("[[LORA]] kv-cache %.1f -> %.1f ГиБ (место под адаптер)"
+                  % (int(resolved_tuning["kv_cache_memory_bytes"]) / 2**30, _kv / 2**30), flush=True)
+        command.extend(["--kv-cache-memory-bytes", str(_kv)])
     else:
         # ЛОВУШКА (измерено 21.09 в прогоне arc3-lora-canary-d): при штатных 0.92 адаптер не влезает --
         # vLLM падает на выделении 400 МБ под веса LoRA, свободно оставалось 147 МБ. Память под адаптер
@@ -2349,7 +2374,8 @@ def server_command(
             "--max-num-seqs",
             str(resolved_tuning["max_num_seqs"]),
             "--max-num-batched-tokens",
-            str(resolved_tuning["max_num_batched_tokens"]),
+            str(min(2048, int(resolved_tuning["max_num_batched_tokens"])) if lora_path()
+                else resolved_tuning["max_num_batched_tokens"]),
             "--async-scheduling",
             chunked_prefill_flag,
         ]
@@ -2358,7 +2384,10 @@ def server_command(
         command.extend(
             ["--kv-cache-dtype", str(resolved_tuning["kv_cache_dtype"])]
         )
-    if int(resolved_tuning["max_cudagraph_capture_size"]) > 0:
+    if lora_path():
+        command.append("--enforce-eager")
+        print("[[LORA]] графы CUDA выключены (--enforce-eager): экономим память под адаптер", flush=True)
+    if int(resolved_tuning["max_cudagraph_capture_size"]) > 0 and not lora_path():
         command.extend(
             [
                 "--max-cudagraph-capture-size",
@@ -2590,8 +2619,9 @@ def wait_for_server(identity: dict[str, Any], setup_deadline: float) -> dict[str
             ids = [row.get("id") for row in rows if isinstance(row, dict)]
             expected_ids = [SERVED_MODEL_NAME]
             if lora_path():
-                # с адаптером /v1/models отдаёт и базу, и псевдоним -- порядок не гарантирован
-                if sorted(ids) != sorted([SERVED_MODEL_NAME, LORA_ALIAS]):
+                # с адаптером /v1/models отдаёт и базу, и псевдонимы -- порядок не гарантирован
+                expect = [SERVED_MODEL_NAME, LORA_ALIAS] + ([LORA_ALIAS2] if lora_path2() else [])
+                if sorted(ids) != sorted(expect):
                     raise RuntimeError(f"vLLM served the wrong model identity: {ids}")
                 print(f"[[LORA]] /v1/models reports {ids}", flush=True)
             elif ids != expected_ids:

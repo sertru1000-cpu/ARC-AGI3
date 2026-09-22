@@ -41,11 +41,16 @@ if not TRUE_SUBMISSION and os.environ.get("ARC3_LORA_PATH"):
         return (out["choices"][0]["message"].get("content") or "").strip()
 
     _base_txt = _ask("Qwen/Qwen3.8-Flash-Next-NVFP4")
-    _lora_txt = _ask("policy")
-    print("[[LORA]] base  answer: %r" % _base_txt[:200], flush=True)
-    print("[[LORA]] policy answer: %r" % _lora_txt[:200], flush=True)
-    print("[[LORA]] VERDICT: %s" % ("МОДУЛИ ПРИМЕНЕНЫ (ответы различаются)" if _base_txt != _lora_txt
-                                    else "МОЛЧАЛИВЫЙ ПРОПУСК (ответы совпали)"), flush=True)
+    print("[[LORA]] base   answer: %r" % _base_txt[:160], flush=True)
+    for _alias, _what in (("policy", "ПОЛНОЕ внимание, 12 слоёв"), ("policy2", "ЛИНЕЙНОЕ внимание, 36 слоёв")):
+        try:
+            _txt = _ask(_alias)
+        except Exception as _e:
+            print("[[LORA]] %-8s ОШИБКА: %s" % (_alias, str(_e)[:120]), flush=True)
+            continue
+        print("[[LORA]] %-8s answer: %r" % (_alias, _txt[:160]), flush=True)
+        print("[[LORA]] VERDICT %s: %s" % (_what, "МОДУЛИ ПРИМЕНЕНЫ (ответ отличается от базы)"
+                                           if _txt != _base_txt else "МОЛЧАЛИВЫЙ ПРОПУСК (ответ совпал с базой)"), flush=True)
 """
 
 UPSTREAM = "keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1"
@@ -65,6 +70,10 @@ def _inline_adapter_block(targets: str = "attn") -> str:
     in_proj_qkv [10240, 2560], in_proj_z [6144, 2560], out_proj [2560, 6144], q/k/v/o от hidden 2560,
     24 головы по 256 и 2 головы ключей.
     """
+    if targets == "both":
+        return _inline_adapter_block("attn") + _inline_adapter_block("linear").replace(
+            "'loud_lora'", "'loud_lora_lin'").replace("ARC3_LORA_PATH'", "ARC3_LORA_PATH2'").replace(
+            "adapter built in kernel", "second adapter built in kernel")
     if targets == "attn":
         shapes = "{'q_proj': (6144, 2560), 'k_proj': (512, 2560), 'v_proj': (512, 2560), 'o_proj': (2560, 6144)}"
         layers = "range(3, 48, 4)"
@@ -153,10 +162,12 @@ def main() -> None:
                     help="inline -- кернел собирает адаптер сам в /kaggle/working, ни одного нового датасета "
                          "на входе (21.09: три слага подряд простояли в очереди, и новый датасет -- "
                          "единственное отличие входов от прогонов 19.09, которые стартовали нормально)")
-    ap.add_argument("--targets", choices=["attn", "linear"], default="attn",
+    ap.add_argument("--targets", choices=["attn", "linear", "both"], default="both",
                     help="attn -- q/k/v/o в 12 слоях ПОЛНОГО внимания (самый надёжный случай); "
                          "linear -- in_proj_qkv/in_proj_z/out_proj в 36 слоях ЛИНЕЙНОГО внимания "
-                         "(именно их vLLM мог молча пропустить у студента 27B в августе)")
+                         "(именно их vLLM мог молча пропустить у студента 27B в августе); "
+                         "both -- ОБА адаптера сразу под разными псевдонимами: один прогон отвечает на оба вопроса "
+                         "(очередь Kaggle 22.09 идёт по 12-15 часов, поэтому прогон должен быть один)")
     ap.add_argument("--bundle", choices=["fork", "runtime"], default="runtime",
                     help="fork -- наш датасет-форк (ждёт обработки Kaggle); "
                          "runtime -- взять чужой бандл и починить копию прямо в кернеле")
