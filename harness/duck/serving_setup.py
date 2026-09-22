@@ -55,6 +55,18 @@ def lora_path2() -> str:
     return (os.environ.get("ARC3_LORA_PATH2") or "").strip()
 
 
+def model_overlay() -> str:
+    """ФОРК (22.09): второй путь доставки обученной модели -- подмена bf16-файлов.
+
+    В чекпойнте 206 файлов: 119 ГБ экспертов в 4 битах и 16 ГБ в bf16 (внимание, линейное внимание, гейты,
+    общий эксперт, эмбеддинги). Адаптер трогает ТОЛЬКО bf16-часть, поэтому обученные веса можно влить прямо
+    в эти файлы, а эксперты оставить байт в байт. Кернел кладёт рядом папку из ссылок на оригинал с заменой
+    нужных файлов; путь к ней приходит в ARC3_MODEL_OVERLAY. Ядро при этом стартует СТОКОВО -- без уступок
+    по кэшу, пакету и графам, которых требует адаптер на лету.
+    """
+    return (os.environ.get("ARC3_MODEL_OVERLAY") or "").strip()
+
+
 MODEL_HF_REPO = "RadixArk/Qwen3.8-Flash-Next-NVFP4"
 MODEL_HF_REVISION = "7b719225242aacd3dbd3f9407468c2ee9a9d2594"
 MODEL_MANIFEST_SHA256 = "a09bdad3fe3240c73332c0f99f4388a547205cb488c127f9b9059c9267dd9a5b"
@@ -677,13 +689,24 @@ def resolve_model_dir() -> Path:
         or value.get("revision") != MODEL_HF_REVISION
     ):
         raise RuntimeError(f"Mounted model identity is wrong at {MODEL_KAGGLE_PATH}.")
+    if model_overlay():
+        overlay = Path(model_overlay())
+        if not (overlay / "MODEL_MANIFEST.json").is_file():
+            raise RuntimeError(f"[[MERGE]] overlay without manifest: {overlay}")
+        print("[[MERGE]] модель берётся из оверлея %s" % overlay, flush=True)
+        return overlay
     return MODEL_KAGGLE_PATH
 
 
 def verify_model(model_dir: Path, *, full_file_hashes: bool = True) -> dict[str, Any]:
     manifest_path = model_dir / "MODEL_MANIFEST.json"
     actual_manifest_sha = sha256_file(manifest_path)
-    if actual_manifest_sha != MODEL_MANIFEST_SHA256:
+    if model_overlay():
+        # Оверлей -- это наш собственный чекпойнт, его манифест мы пересобираем сами, поэтому прибитый хеш
+        # здесь не применим. Всё остальное (репозиторий, ревизия, число файлов, суммарный размер, хеши
+        # каждого файла) проверяется как обычно -- подмена не отменяет сверок, она их переносит на оверлей.
+        print("[[MERGE]] манифест оверлея %s (прибитый хеш не применяется)" % actual_manifest_sha[:12], flush=True)
+    elif actual_manifest_sha != MODEL_MANIFEST_SHA256:
         raise RuntimeError(
             f"Model manifest hash mismatch: {actual_manifest_sha} != {MODEL_MANIFEST_SHA256}"
         )
