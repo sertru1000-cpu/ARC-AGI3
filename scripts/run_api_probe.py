@@ -64,6 +64,10 @@ def main() -> int:
                          "(20.09: $2.78 на 118 вызовов у gemini-3.6-flash при боевом окне = $0.0236 за вызов)")
     ap.add_argument("--price-in", type=float, default=0.0, help="$/млн входных токенов -- для оценки трат на ходу")
     ap.add_argument("--price-out", type=float, default=0.0, help="$/млн выходных токенов")
+    ap.add_argument("--api", choices=["compat", "native"], default="compat",
+                    help="native -- ходить в РОДНОЙ эндпоинт Gemini через scripts/gemini_native_bridge.py: "
+                         "совместимый рассуждение не отдаёт (проверено 23.09), а родной отдаёт, и без него "
+                         "обучающие данные учат студента ходить без единой мысли (у базы это 2.91 против 9.43)")
     ap.add_argument("--reasoning-effort", choices=["default", "none", "low", "medium", "high"], default="default",
                     help="бюджет размышления у Gemini через совместимый API (измерено 21.09 на одном запросе: "
                          "как есть 4216 токенов размышления, low 1111, none 0; платим за них как за выход)")
@@ -126,6 +130,33 @@ def main() -> int:
     if a.budget_usd > 0 and not (a.price_in and a.price_out):
         raise SystemExit("--budget-usd требует --price-in и --price-out: потолок считается по живому счёту токенов")
 
+
+    # ПЕРЕХОДНИК К РОДНОМУ API (23.09). Совместимый эндпоинт Gemini не возвращает текст рассуждения, родной --
+    # возвращает. Подменяем только транспорт: обвязка по-прежнему думает, что говорит с сервером OpenAI.
+    if a.api == "native":
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import gemini_native_bridge as _bridge
+
+        class _Fake:
+            def __init__(self, data, status=200):
+                self._data, self.status_code, self.text = data, status, json.dumps(data)[:2000]
+            def json(self):
+                return self._data
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise _ta.requests.HTTPError("%d %s" % (self.status_code, self.text[:300]))
+
+        def _native_post(url, **kw):
+            payload = kw.get("json") or {}
+            body = _bridge.to_native(payload)
+            u = ("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s"
+                 % (a.model, key))
+            resp = _orig_post(u, json=body, headers={"Content-Type": "application/json"},
+                              timeout=kw.get("timeout"))
+            if resp.status_code >= 400:
+                return _Fake({"error": resp.text[:500]}, resp.status_code)
+            return _Fake(_bridge.to_openai(resp.json(), a.model))
+
     # ОГРАНИЧИТЕЛЬ ТРАТ (20.09; пилот учителя ушёл в минус на $3.75 сверх внесённых $5 -- Google дал перерасход).
     # Считаем вызовы и токены сами, поверх сборщика запроса; по достижении потолка запросы прекращаются.
     if a.max_calls > 0 or a.budget_usd > 0 or a.price_in or a.price_out:
@@ -148,7 +179,10 @@ def main() -> int:
                     print("ОГРАНИЧИТЕЛЬ: достигнут потолок %d вызовов -- дальше запросы не шлём" % a.max_calls, flush=True)
                 raise RuntimeError("достигнут потолок вызовов (--max-calls)")
             _state["calls"] += 1
-            r = _orig_post(url, **kw)
+            if a.api == "native":
+                r = _native_post(url, **kw)
+            else:
+                r = _orig_post(url, **kw)
             try:
                 u = r.json().get("usage") or {}
                 _state["in"] += int(u.get("prompt_tokens") or 0)
