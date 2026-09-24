@@ -28,11 +28,16 @@ TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="/workspace/base")
+    ap.add_argument("--devices", default="auto", help="auto -- разложить слои по всем картам (нужно при 2xH200)")
     ap.add_argument("--data", default="/workspace/data/train.jsonl")
     ap.add_argument("--valid", default="/workspace/data/valid.jsonl")
     ap.add_argument("--out", default="/workspace/out/lora_v1")
     ap.add_argument("--rank", type=int, default=16)
-    ap.add_argument("--max-len", type=int, default=26000)
+    ap.add_argument("--max-len", type=int, default=14000,
+                    help="ЛОВУШКА ПАМЯТИ: буфер логитов = длина x словарь 248320 x 2 байта, на 26 тыс. токенов\n"
+                         "это 13 ГБ (и вдвое больше при потере в fp32). На двух H200 свободно всего 24 ГБ,\n"
+                         "поэтому режем длину и считаем потерю кусками (см. chunked_loss ниже)")
+    ap.add_argument("--loss-chunk", type=int, default=2048, help="по сколько токенов считать потерю за раз")
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--accum", type=int, default=8)
     ap.add_argument("--epochs", type=float, default=1.0)
@@ -49,7 +54,8 @@ def main() -> None:
                             llm_int8_skip_modules=KEEP_BF16)
     print("загружаю модель (эксперты -> 4 бита, обучаемое остаётся bf16)", flush=True)
     model = AutoModelForCausalLM.from_pretrained(a.model, quantization_config=qc,
-                                                 dtype=torch.bfloat16, device_map={"": 0})
+                                                 dtype=torch.bfloat16,
+                                                 device_map=(a.devices if a.devices == "auto" else {"": 0}))
     print("ЗАГРУЖЕНА за %.1f мин | на карте %.1f ГБ" % ((time.time()-t0)/60, torch.cuda.memory_allocated()/1e9), flush=True)
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
@@ -90,8 +96,26 @@ def main() -> None:
                 ids, labels = ids[-a.max_len:], labels[-a.max_len:]
             if not any(x != -100 for x in labels):
                 continue
-            out = model(input_ids=torch.tensor([ids]).cuda(), labels=torch.tensor([labels]).cuda())
-            (out.loss / a.accum).backward()
+            # ПОТЕРЯ КУСКАМИ: просим модель отдать скрытые состояния и считаем логиты порциями, иначе
+            # на длинном примере логиты на всю длину не влезают в память (см. --max-len).
+            x = torch.tensor([ids]).cuda(); y = torch.tensor([labels]).cuda()
+            hs = model(input_ids=x, output_hidden_states=True, use_cache=False).hidden_states[-1]
+            head = model.get_output_embeddings()
+            loss_sum = torch.zeros((), device=hs.device, dtype=torch.float32); n_tok = 0
+            for c0 in range(0, hs.shape[1] - 1, a.loss_chunk):
+                c1 = min(c0 + a.loss_chunk, hs.shape[1] - 1)
+                lg = head(hs[:, c0:c1]).float()
+                tgt = y[:, c0 + 1:c1 + 1]
+                m = tgt != -100
+                if m.any():
+                    loss_sum = loss_sum + torch.nn.functional.cross_entropy(
+                        lg[m], tgt[m], reduction="sum")
+                    n_tok += int(m.sum())
+                del lg
+            out_loss = loss_sum / max(1, n_tok)
+            (out_loss / a.accum).backward()
+            class _O: pass
+            out = _O(); out.loss = out_loss
             losses.append(float(out.loss.detach())); seen += len(ids)
             if len(losses) % a.accum == 0:
                 opt.step(); opt.zero_grad(set_to_none=True); step += 1
