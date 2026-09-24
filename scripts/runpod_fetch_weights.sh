@@ -14,12 +14,14 @@ MODEL_DIR=$VOL/model
 VENV=$VOL/venv312
 REPO=RadixArk/Qwen3.8-Flash-Next-NVFP4
 REV=7b719225242aacd3dbd3f9407468c2ee9a9d2594
+export REPO REV MODEL_DIR   # нужны питоновским вставкам ниже
 
 echo "=== 1/4 диск и окружение"
 df -h $VOL | tail -1
 export UV_LINK_MODE=symlink          # см. навык runpod-deploy: иначе установка ползёт часами
 export HF_HUB_ENABLE_HF_TRANSFER=1
-pip -q install --upgrade "huggingface_hub[hf_transfer]" uv 2>&1 | tail -2
+# ЛОВУШКА (PEP 668): системный python помечен как externally-managed и обычный pip падает.
+pip -q install --break-system-packages --upgrade "huggingface_hub[hf_transfer]" uv 2>&1 | tail -2
 
 echo "=== 2/4 python-окружение на томе (переживёт смену пода)"
 if [ ! -d "$VENV" ]; then
