@@ -71,13 +71,27 @@ def parse_transcript(path: Path) -> list:
         lvl = LEVEL.search(usr_txt)
         msgs = [{"role": "system", "content": sys_txt}, {"role": "user", "content": usr_txt}]
         n_calls = 0
+        # ЛОВУШКА (24.09): рассуждение учителя лежит ОТДЕЛЬНЫМ разделом [THINKING] сразу после META, а не
+        # внутри него. Первая версия сборщика его не читала -- и набор, ради которого писался переходник к
+        # родному API, выходил БЕЗ мысли, то есть учил студента ходить не думая (у базы это 2.91 против 9.43).
+        # Порядок в ходе: META -> THINKING -> TOOL CALL -> TOOL RESULT, поэтому мысль прикладываем к
+        # ПОСЛЕДНЕМУ добавленному ответу модели, в поле reasoning_content -- именно его ждёт шаблон чата
+        # модели: '<|im_start|>assistant\n<think>\n' + reasoning_content + '\n</think>\n\n' + content.
         for tag, t in secs:
             if tag == "[MODEL RESPONSE META]":
                 calls = tool_calls(t)
                 if calls:
                     msgs.append({"role": "assistant", "content": "", "tool_calls": calls}); n_calls += 1
+            elif tag == "[THINKING]" and t:
+                if msgs and msgs[-1]["role"] == "assistant":
+                    msgs[-1]["reasoning_content"] = t
+                else:
+                    msgs.append({"role": "assistant", "content": "", "reasoning_content": t}); n_calls += 1
             elif tag == "[ASSISTANT]" and t:
-                msgs.append({"role": "assistant", "content": t}); n_calls += 1
+                if msgs and msgs[-1]["role"] == "assistant" and not (msgs[-1].get("content") or "").strip():
+                    msgs[-1]["content"] = t
+                else:
+                    msgs.append({"role": "assistant", "content": t}); n_calls += 1
             elif tag == "[TOOL RESULT: python]" and t:
                 msgs.append({"role": "tool", "name": "python", "content": t})
         if n_calls == 0:            # ход без ответа модели (сбой доступа) -- учить нечему

@@ -50,11 +50,17 @@ def tiny_config(tok_vocab: int = 512):
 
 def render(tok, messages: list) -> list:
     """текст примера по шаблону модели + границы ответов (для маски потерь)"""
+    # Рассуждение вставляем ровно так, как его рисует шаблон чата модели:
+    #   '<|im_start|>assistant\n<think>\n' + reasoning_content + '\n</think>\n\n' + content
+    # Без этого студент учится выдавать ход БЕЗ мысли -- измеренная катастрофа (2.91 против 9.43).
     flat = []
     for m in messages:
         txt = m.get("content") or ""
         if m.get("tool_calls"):
             txt = (txt + "\n" + json.dumps(m["tool_calls"], ensure_ascii=False)).strip()
+        if m["role"] == "assistant":
+            reasoning = (m.get("reasoning_content") or "").strip()
+            txt = "<think>\n%s\n</think>\n\n%s" % (reasoning, txt) if reasoning else "<think>\n\n</think>\n\n" + txt
         flat.append({"role": m["role"] if m["role"] != "tool" else "user", "content": txt})
     ids, labels = [], []
     for m in flat:
