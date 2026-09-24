@@ -21,10 +21,10 @@ try:
 except Exception: print('|')"
 }
 while true; do
-  B3=$(ask "NVIDIA B300" 1); H2=$(ask "NVIDIA H200" 2)
+  # слово владельца 24.09: «сканируй только B300» -- одна карта на 288 ГБ проще и быстрее пары H200
+  B3=$(ask "NVIDIA B300" 1)
   T=$(TZ=Europe/Moscow date +%H:%M)
   if [ -n "${B3#*|}" ]; then echo "$T НАШЛАСЬ B300: \$${B3%%|*}/час (${B3#*|}) -- можно обучать"; exit 0; fi
-  if [ -n "${H2#*|}" ]; then echo "$T НАШЛИСЬ 2xH200: \$${H2%%|*}/час (${H2#*|}) -- можно обучать"; exit 0; fi
-  echo "$T крупных карт нет (B300 нет, 2xH200 нет)"
+  echo "$T B300 нет"
   sleep $((GAP*60))
 done
