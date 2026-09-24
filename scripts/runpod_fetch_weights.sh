@@ -11,14 +11,17 @@ set -euo pipefail
 
 VOL=/workspace
 MODEL_DIR=$VOL/model
-VENV=$VOL/venv312
+# ЛОВУШКА (24.09): venv на СЕТЕВОМ томе рассыпается -- uv ставит пакеты ссылками, сетевая ФС их теряет
+# ("failed to read metadata for datasets==5.0.1"). Окружение держим на локальном диске пода: оно
+# восстанавливается за две минуты, а тяжёлое (модель) остаётся на томе.
+VENV=/root/venv312
 REPO=RadixArk/Qwen3.8-Flash-Next-NVFP4
 REV=7b719225242aacd3dbd3f9407468c2ee9a9d2594
 export REPO REV MODEL_DIR   # нужны питоновским вставкам ниже
 
 echo "=== 1/4 диск и окружение"
 df -h $VOL | tail -1
-export UV_LINK_MODE=symlink          # см. навык runpod-deploy: иначе установка ползёт часами
+export UV_LINK_MODE=copy             # локальный диск: копирование быстрое и надёжнее ссылок
 export HF_HUB_ENABLE_HF_TRANSFER=1
 # ЛОВУШКА (PEP 668): системный python помечен как externally-managed и обычный pip падает.
 pip -q install --break-system-packages --upgrade "huggingface_hub[hf_transfer]" uv 2>&1 | tail -2
@@ -28,7 +31,7 @@ if [ ! -d "$VENV" ]; then
   uv venv --python 3.12 "$VENV"
 fi
 UV_LINK_MODE=symlink uv pip install --python "$VENV/bin/python" -q \
-  "torch" "transformers>=5.8" "peft" "accelerate" "safetensors" "datasets" 2>&1 | tail -3
+  "torch" "transformers>=5.8" "peft" "accelerate" "safetensors" 2>&1 | tail -3
 "$VENV/bin/python" -c "import torch,transformers,peft;print('torch',torch.__version__,'| transformers',transformers.__version__,'| peft',peft.__version__)"
 
 echo "=== 3/4 веса модели (135 ГБ, только нужные файлы)"
