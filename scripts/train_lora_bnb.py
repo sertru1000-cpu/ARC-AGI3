@@ -16,7 +16,7 @@ usage:
   python3 train_lora_bnb.py --smoke            # загрузка + 2 шага, проверка памяти
   python3 train_lora_bnb.py --epochs 1 --out /workspace/out/lora_v1
 """
-import argparse, json, math, os, time
+import argparse, json, math, os, sys, time
 from pathlib import Path
 
 # Модули, которые НЕ сжимаем: их мы обучаем, и они же лежат в bf16 в боевом чекпойнте.
@@ -52,6 +52,10 @@ def main() -> None:
     ap.add_argument("--no-preflight", action="store_true", help="пропустить пробу компилятора")
     ap.add_argument("--valid-n", type=int, default=60,
                     help="сколько отложенных примеров считать после каждой эпохи (0 - не считать)")
+    ap.add_argument("--fp8-experts", action="store_true",
+                    help="читать чекпойнт по одному файлу и сжимать экспертов в fp8 на лету: модель\n"
+                         "занимает 243 ГБ вместо 360 и влезает на карту ЦЕЛИКОМ вместе с таблицей PLE.\n"
+                         "Проверено локально (scripts/test_load_sharded_fp8.py): потеря та же до 5-го знака")
     ap.add_argument("--ple-cpu", action="store_true",
                     help="таблицу PLE (102 ГБ) держать в оперативной памяти, всё остальное на карте")
     ap.add_argument("--smoke", action="store_true", help="загрузка + 2 шага: проверка памяти и скорости")
@@ -94,7 +98,13 @@ def main() -> None:
     # часть обычного чекпойнта и вдвое тяжелее. PLE - таблица поиска по n-граммам, матричных
     # умножений в ней нет, поэтому её место на CPU: через шину идёт срез на токены, а не веса.
     # Без этого accelerate выносит на CPU куски экспертов и шаг считается минутами.
-    if a.ple_cpu:
+    if a.fp8_experts:
+        # Пошардовая загрузка со сжатием: оперативная память пода (251 ГБ) меньше чекпойнта (360),
+        # поэтому "загрузить всё, потом сжать" не проходит - читаем по файлу и сразу кладём на карту.
+        sys.path.insert(0, str(Path(__file__).parent))
+        from load_sharded_fp8 import load_sharded
+        model, _info = load_sharded(a.model, device="cuda", fp8_experts=True, dtype=torch.bfloat16)
+    elif a.ple_cpu:
         # ЛОВУШКА ACCELERATE (измерено 24.09): пометить модуль "cpu" в device_map НЕДОСТАТОЧНО.
         # accelerate вешает на него AlignDevicesHook с execution_device=0 и при инициализации
         # хука тащит веса на карту - падение "Tried to allocate 95.37 GiB" в самом конце
