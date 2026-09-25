@@ -71,7 +71,7 @@ def main(by_class: bool = False) -> None:
         g = frame_of(fr)
         if g is None:
             continue
-        score = getattr(fr, "score", 0)
+        lv = getattr(fr, "levels_completed", 0) or 0   # ЛОВУШКА 25.09: у кадра НЕТ поля score
         level = 0
         # действие -> список (номер хода, сработало ли) в пределах уровня
         seq: dict[str, list[tuple[int, bool]]] = collections.defaultdict(list)
@@ -87,11 +87,11 @@ def main(by_class: bool = False) -> None:
             except Exception:
                 break
             g2 = frame_of(fr2)
-            sc2 = getattr(fr2, "score", score) if fr2 is not None else score
-            changed = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or sc2 != score
+            lv2 = (getattr(fr2, "levels_completed", lv) or lv) if fr2 is not None else lv
+            changed = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or lv2 != lv
             n += 1
             seq[act_key(act, by_class)].append((t, bool(changed)))
-            if sc2 != score:
+            if lv2 != lv:
                 # уровень закончился: разбираем накопленное
                 for key, hist in seq.items():
                     outs = [c for _, c in hist]
@@ -109,7 +109,7 @@ def main(by_class: bool = False) -> None:
                 level += 1
             if g2 is None:
                 break
-            g, score = g2, sc2
+            g, lv = g2, lv2
         # незавершённый уровень тоже разбираем
         for key, hist in seq.items():
             outs = [c for _, c in hist]

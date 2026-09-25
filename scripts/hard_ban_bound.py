@@ -64,7 +64,7 @@ def main() -> None:
         g = frame_of(fr)
         if g is None:
             continue
-        score = getattr(fr, "score", 0)
+        lv = getattr(fr, "levels_completed", 0) or 0   # ЛОВУШКА 25.09: у кадра НЕТ поля score
         level = 0
         dead: set[str] = set()          # ключи, уже давшие «ничего» на этом уровне
         n = c = w = 0
@@ -80,8 +80,8 @@ def main() -> None:
             except Exception:
                 break
             g2 = frame_of(fr2)
-            sc2 = getattr(fr2, "score", score) if fr2 is not None else score
-            changed = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or sc2 != score
+            lv2 = (getattr(fr2, "levels_completed", lv) or lv) if fr2 is not None else lv
+            changed = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or lv2 != lv
             n += 1
             if banned:
                 c += 1
@@ -92,12 +92,12 @@ def main() -> None:
                 dead.add(key)
             else:
                 dead.discard(key)       # сработало — больше не считаем мёртвым
-            if sc2 != score:
+            if lv2 != lv:
                 level += 1
                 dead.clear()
             if g2 is None:
                 break
-            g, score = g2, sc2
+            g, lv = g2, lv2
         rows.append((gid[:4], n, c, w, gr.get("levels_completed") or 0))
         tot += n; cand += c; wrong += w
 

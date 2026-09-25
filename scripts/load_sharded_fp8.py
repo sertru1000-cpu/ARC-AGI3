@@ -22,6 +22,7 @@ usage:
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -62,13 +63,23 @@ def _set(model, full_name: str, tensor: torch.Tensor, device) -> None:
 
 
 def load_sharded(path: str, device: str = "cuda", fp8_experts: bool = True,
-                 dtype=torch.bfloat16, verbose: bool = True):
+                 dtype=torch.bfloat16, verbose: bool = True, probe_layers: int = 0):
+    """probe_layers > 0 -- собрать модель ИЗ ЭТОГО ЖЕ чекпойнта, но только с таким числом слоёв.
+    Полная загрузка читает 336 ГБ и занимает 42 минуты; ошибки типов, устройств и битовых операций
+    ловятся на двух слоях за семь минут (24.09: три полные загрузки подряд ушли на такие ошибки)."""
     t0 = time.time()
     path = Path(path)
     cfg = AutoConfig.from_pretrained(path)
+    if probe_layers:
+        tc = cfg.get_text_config()
+        tc.num_hidden_layers = probe_layers
+        if isinstance(getattr(tc, "layer_types", None), list):
+            tc.layer_types = tc.layer_types[:probe_layers]
+        if verbose:
+            print("ПРОБА: собираю модель из %d слоёв вместо полного набора" % probe_layers, flush=True)
     with init_empty_weights():                      # буферы при этом создаются настоящие
         model = AutoModelForCausalLM.from_config(cfg)
-    model = model.to(dtype)
+    model = model.to(dtype)          # затрагивает только вещественные тензоры
 
     known_p = {n for n, _ in model.named_parameters()}
     known_b = {n for n, _ in model.named_buffers()}
@@ -82,16 +93,33 @@ def load_sharded(path: str, device: str = "cuda", fp8_experts: bool = True,
     gb_gpu = gb_saved = 0.0
     n_q = n_plain = n_skip = 0
     pending: dict[str, dict[str, torch.Tensor]] = {}
+    # ЛОВУШКА (24.09): таблица PLE лежит в чекпойнте 128 кусками ngram_embedding.shard_0.weight ...
+    # shard_127.weight, а в модели это ОДИН слой ngram_embedding.weight -- transformers их склеивает,
+    # и загрузчик обязан делать то же, иначе 102 ГБ молча пропадают.
+    shards: dict[str, dict[int, torch.Tensor]] = {}
+    SHARD_RE = re.compile(r"\.shard_(\d+)\.")
 
     for i, fname in enumerate(files, 1):
         with safe_open(path / fname, framework="pt") as f:
             for key in f.keys():
+                m = SHARD_RE.search(key)
+                if m is not None:
+                    base = SHARD_RE.sub(".", key)
+                    tgt = _resolve(base, known)
+                    if tgt is not None:
+                        _t = f.get_tensor(key)
+                        shards.setdefault(tgt, {})[int(m.group(1))] = (
+                            _t.to(dtype) if _t.is_floating_point() else _t)
+                        continue
                 target = _resolve(key, known)
                 if target is None:
                     n_skip += 1
                     continue
                 mod_name, _, attr = target.rpartition(".")
                 w = f.get_tensor(key)
+                # ЛОВУШКА ТИПОВ (24.09): приводить к bf16 ВСЁ подряд нельзя -- таблица PLE строит
+                # индексы n-грамм битовыми операциями, а они на bf16 не определены
+                # ("bitwise_xor_cuda not implemented for BFloat16"). Тип меняем только у вещественных.
                 if fp8_experts and mod_name in experts and attr in EXPERT_PARAMS:
                     q, s = _quantize(w.to(dtype))
                     gb_saved += w.numel() * w.element_size() / 1e9
@@ -105,16 +133,40 @@ def load_sharded(path: str, device: str = "cuda", fp8_experts: bool = True,
                     gb_gpu += (q.numel() * q.element_size() + s.numel() * s.element_size()) / 1e9
                     n_q += 1
                 else:
-                    _set(model, target, w.to(dtype), device)
+                    _set(model, target, w.to(dtype) if w.is_floating_point() else w, device)
                     gb_gpu += w.numel() * 2 / 1e9
                     n_plain += 1
         if verbose and (i % 10 == 0 or i == len(files)):
             print("  файл %d/%d | на карте %.1f ГБ | сжато тензоров %d"
                   % (i, len(files), gb_gpu, n_q), flush=True)
 
+    for tgt, parts in shards.items():          # склейка кусков в порядке номеров
+        whole = torch.cat([parts[i] for i in sorted(parts)], dim=0)
+        _set(model, tgt, whole, device)
+        gb_gpu += whole.numel() * whole.element_size() / 1e9
+        n_plain += 1
+        if verbose:
+            print("  склеено %d кусков -> %s %s" % (len(parts), tgt, tuple(whole.shape)), flush=True)
+        del whole, parts
+    shards.clear()
+
     for mod_name in pending:                         # патчим счёт только у сжатых модулей
         mod = model.get_submodule(mod_name)
         mod.forward = _forward_fp8.__get__(mod, type(mod))
+
+    # ЛОВУШКА (24.09): буферы, которых НЕТ в чекпойнте, модель создаёт сама при сборке — они
+    # остаются в оперативной памяти, и первый же прямой проход падает на «tensors on different
+    # devices» (rotary inv_freq). Переносим всё, что осталось не на карте.
+    dev = torch.device(device)
+    moved = 0
+    for name, buf in list(model.named_buffers()):
+        if buf is not None and not buf.is_meta and buf.device != dev:
+            _set(model, name, buf, device); moved += 1
+    for name, prm in list(model.named_parameters()):
+        if not prm.is_meta and prm.device != dev:
+            _set(model, name, prm.data, device); moved += 1
+    if verbose and moved:
+        print("  доперенесено на карту: %d буферов и параметров" % moved, flush=True)
 
     left = [n for n, p in model.named_parameters() if p.is_meta]
     if left:

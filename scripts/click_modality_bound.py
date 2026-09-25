@@ -61,7 +61,7 @@ def main() -> None:
             g = frame_of(fr)
             if g is None:
                 continue
-            score = getattr(fr, "score", 0)
+            lv = getattr(fr, "levels_completed", 0) or 0   # ЛОВУШКА 25.09: у кадра НЕТ поля score
             streak = 0
             banned_from = None
             n = clicks = save = lose = 0
@@ -75,8 +75,8 @@ def main() -> None:
                 except Exception:
                     break
                 g2 = frame_of(fr2)
-                sc2 = getattr(fr2, "score", score) if fr2 is not None else score
-                changed = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or sc2 != score
+                lv2 = (getattr(fr2, "levels_completed", lv) or lv) if fr2 is not None else lv
+                changed = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or lv2 != lv
                 n += 1
                 is_click = name == "ACTION6"
                 if is_click:
@@ -91,7 +91,7 @@ def main() -> None:
                             banned_from = i
                 if g2 is None:
                     break
-                g, score = g2, sc2
+                g, lv = g2, lv2
             rows.append((gid[:4], n, clicks, save, lose, gr.get("levels_completed") or 0))
             tot += n; saved += save; lost += lose
 

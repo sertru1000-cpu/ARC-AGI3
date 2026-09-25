@@ -65,7 +65,7 @@ def main() -> None:
         g = frame_of(fr)
         if g is None:
             continue
-        score = getattr(fr, "score", 0)
+        lv = getattr(fr, "levels_completed", 0) or 0   # ЛОВУШКА 25.09: у кадра НЕТ поля score
 
         keys, changed = [], []
         for rec in (gr.get("history") or []):
@@ -78,12 +78,12 @@ def main() -> None:
             except Exception:
                 break
             g2 = frame_of(fr2)
-            sc2 = getattr(fr2, "score", score) if fr2 is not None else score
-            ch = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or sc2 != score
+            lv2 = (getattr(fr2, "levels_completed", lv) or lv) if fr2 is not None else lv
+            ch = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or lv2 != lv
             keys.append(key_of(act)); changed.append(bool(ch))
             if g2 is None:
                 break
-            g, score = g2, sc2
+            g, lv = g2, lv2
 
         n = len(keys)
         seen: set[tuple] = set()

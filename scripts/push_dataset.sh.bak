@@ -31,7 +31,7 @@ if [ -z "$MSG" ]; then
   exit 1
 fi
 
-KAGGLE=.venv/bin/kaggle
+KAGGLE=.venv/Scripts/kaggle.exe
 SRC=atlas_src
 
 # --- 1. stage the testbed into the dataset directory ----------------------

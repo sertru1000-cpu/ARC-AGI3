@@ -64,7 +64,7 @@ def main() -> None:
         g = frame_of(fr)
         if g is None:
             continue
-        score = getattr(fr, "score", 0)
+        lv = getattr(fr, "levels_completed", 0) or 0   # ЛОВУШКА 25.09: у кадра НЕТ поля score
         hist = gr.get("history") or []
         seq = []          # (ключ, действие, изменилось ли)
         for rec in hist:
@@ -77,12 +77,12 @@ def main() -> None:
             except Exception:
                 break
             g2 = frame_of(fr2)
-            sc2 = getattr(fr2, "score", score) if fr2 is not None else score
-            changed = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or sc2 != score
+            lv2 = (getattr(fr2, "levels_completed", lv) or lv) if fr2 is not None else lv
+            changed = (g2 is None) or (g2.shape != g.shape) or bool(np.any(g2 != g)) or lv2 != lv
             seq.append((key_of(act), act.get("id"), bool(changed)))
             if g2 is None:
                 break
-            g, score = g2, sc2
+            g, lv = g2, lv2
 
         for i, (key, name, changed) in enumerate(seq):
             if changed or i + 1 >= len(seq):

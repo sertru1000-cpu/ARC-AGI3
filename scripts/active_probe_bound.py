@@ -72,15 +72,15 @@ def effect_role(before: np.ndarray, after: np.ndarray, score_changed: bool) -> s
     return "кадр"
 
 
-def probe_all(env, base_frame, base_score):
+def probe_all(env, base_frame, base_lv):
     """Развернуть каждое из пяти действий из текущего состояния -- роль каждого. Бесплатно: локальный движок."""
     out = {}
     for name in SIMPLE:
         e = copy.deepcopy(env)
         fr = e.step(GameAction[name], data=None)
         g = frame_of(fr)
-        sc = getattr(fr, "score", base_score) if fr is not None else base_score
-        out[name] = effect_role(base_frame, g, sc != base_score)
+        sc = getattr(fr, "score", base_lv) if fr is not None else base_lv
+        out[name] = effect_role(base_frame, g, sc != base_lv)
     return out
 
 
@@ -96,7 +96,7 @@ def run_history(arc, gid: str, history: list, max_steps: int) -> dict | None:
     g = frame_of(fr)
     if g is None:
         return None
-    score = getattr(fr, "score", 0)
+    lv = getattr(fr, "levels_completed", 0) or 0   # ЛОВУШКА 25.09: у кадра НЕТ поля score
 
     first_try = {}        # действие -> номер хода первой пробы
     roles = {}            # действие -> наблюдённая роль
@@ -114,8 +114,8 @@ def run_history(arc, gid: str, history: list, max_steps: int) -> dict | None:
         except Exception:
             break
         g2 = frame_of(fr2)
-        sc2 = getattr(fr2, "score", score) if fr2 is not None else score
-        role = effect_role(g, g2, sc2 != score)
+        lv2 = (getattr(fr2, "levels_completed", lv) or lv) if fr2 is not None else lv
+        role = effect_role(g, g2, lv2 != lv)
         n += 1
         if role == "ничего":
             idle += 1
@@ -126,7 +126,7 @@ def run_history(arc, gid: str, history: list, max_steps: int) -> dict | None:
             roles[name] = role
         if g2 is None:
             break
-        g, score = g2, sc2
+        g, lv = g2, lv2
 
     learned = max(first_try.values()) if len(first_try) == len(SIMPLE) else None
     return {"game": gid[:4], "ходов": n,

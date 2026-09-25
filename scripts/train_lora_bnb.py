@@ -52,6 +52,10 @@ def main() -> None:
     ap.add_argument("--no-preflight", action="store_true", help="пропустить пробу компилятора")
     ap.add_argument("--valid-n", type=int, default=60,
                     help="сколько отложенных примеров считать после каждой эпохи (0 - не считать)")
+    ap.add_argument("--probe-layers", type=int, default=0,
+                    help="ПРОБА: собрать модель из N слоёв (обычно 2) из того же чекпойнта, прогнать\n"
+                         "один настоящий пример с обратным проходом и выйти. Семь минут вместо сорока\n"
+                         "двух: 24.09 три полные загрузки подряд ушли на ошибки типов и устройств")
     ap.add_argument("--fp8-experts", action="store_true",
                     help="читать чекпойнт по одному файлу и сжимать экспертов в fp8 на лету: модель\n"
                          "занимает 243 ГБ вместо 360 и влезает на карту ЦЕЛИКОМ вместе с таблицей PLE.\n"
@@ -103,7 +107,8 @@ def main() -> None:
         # поэтому "загрузить всё, потом сжать" не проходит - читаем по файлу и сразу кладём на карту.
         sys.path.insert(0, str(Path(__file__).parent))
         from load_sharded_fp8 import load_sharded
-        model, _info = load_sharded(a.model, device="cuda", fp8_experts=True, dtype=torch.bfloat16)
+        model, _info = load_sharded(a.model, device="cuda", fp8_experts=True, dtype=torch.bfloat16,
+                                    probe_layers=a.probe_layers)
     elif a.ple_cpu:
         # ЛОВУШКА ACCELERATE (измерено 24.09): пометить модуль "cpu" в device_map НЕДОСТАТОЧНО.
         # accelerate вешает на него AlignDevicesHook с execution_device=0 и при инициализации
@@ -184,10 +189,43 @@ def main() -> None:
     print("свободно на карте перед счётом %.1f ГБ"
           % ((torch.cuda.get_device_properties(0).total_memory
               - torch.cuda.memory_reserved()) / 1e9), flush=True)
+    def valid_loss() -> float:
+        """Потеря на ОТЛОЖЕННЫХ играх: они в обучении не участвуют, поэтому только это число
+        отличает обобщение от заучивания 495 примеров."""
+        if not (a.valid_n and Path(a.valid).exists()):
+            return float("nan")
+        vrows = [json.loads(l) for l in open(a.valid, encoding="utf-8")][:a.valid_n]
+        model.eval(); vs = 0.0; vn = 0
+        with torch.no_grad():
+            for vr in vrows:
+                vi, vl = render(vr["messages"])
+                if len(vi) > a.max_len:
+                    vi, vl = vi[-a.max_len:], vl[-a.max_len:]
+                if not any(t != -100 for t in vl):
+                    continue
+                vx = torch.tensor([vi]).cuda(); vy = torch.tensor([vl]).cuda()
+                vh = dec(input_ids=vx, use_cache=False).last_hidden_state
+                hd = model.get_output_embeddings()
+                for c0 in range(0, vh.shape[1] - 1, a.loss_chunk):
+                    c1 = min(c0 + a.loss_chunk, vh.shape[1] - 1)
+                    tg = vy[:, c0 + 1:c1 + 1]; mk = tg != -100
+                    if mk.any():
+                        lgv = hd(vh[:, c0:c1]).float()
+                        vs += float(torch.nn.functional.cross_entropy(
+                            lgv[mk], tg[mk], reduction="sum")); vn += int(mk.sum())
+                        del lgv
+        model.train()
+        return vs / max(1, vn)
+
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=a.lr)
     model.train()
+    base_valid = float("nan") if a.probe_layers else valid_loss()   # НУЛЕВАЯ ТОЧКА
+    if not a.probe_layers:
+        print("ДО ОБУЧЕНИЯ: потеря на отложенных играх %.3f" % base_valid, flush=True)
     step = seen = 0; losses = []; t1 = time.time()
     max_steps = 2 if a.smoke else 0
+    if a.probe_layers:                      # проба: один пример, один шаг, и выходим
+        a.accum = 1; max_steps = 1
     for epoch in range(math.ceil(a.epochs)):
         print("=== ЭПОХА %d из %d ===" % (epoch + 1, math.ceil(a.epochs)), flush=True)
         for i, r in enumerate(rows):
@@ -198,6 +236,7 @@ def main() -> None:
                 continue
             # ПОТЕРЯ КУСКАМИ: просим модель отдать скрытые состояния и считаем логиты порциями, иначе
             # на длинном примере логиты на всю длину не влезают в память (см. --max-len).
+            t_ex = time.time()
             x = torch.tensor([ids]).cuda(); y = torch.tensor([labels]).cuda()
             # ЛОВУШКА ПАМЯТИ (OOM 24.09): output_hidden_states=True хранит ВСЕ 49 слоёв - при 14 тыс.
             # токенов это 3.4 ГБ впустую, нам нужен только последний. Зовём декодер напрямую; PLE
@@ -221,6 +260,14 @@ def main() -> None:
             class _O: pass
             out = _O(); out.loss = out_loss
             losses.append(float(out.loss.detach())); seen += len(ids)
+            # ПЕЧАТЬ ПОСЛЕ КАЖДОГО ПРИМЕРА (24.09). Без неё прогон слеп: между шагами проходит
+            # восемь примеров по 32 тыс. токенов, то есть полчаса молчания, и понять, считает он
+            # или встал, невозможно -- на этом мы потеряли вечер.
+            _dt = time.time() - t_ex
+            print("  пример %d/%d | %d токенов | потеря %.3f | %.0f ток/с (этот) | %.1f мин на пример"
+                  " | память %.0f ГБ"
+                  % (len(losses), len(rows), len(ids), losses[-1], len(ids) / max(_dt, 1e-9),
+                     _dt / 60, torch.cuda.max_memory_allocated() / 1e9), flush=True)
             if len(losses) % a.accum == 0:
                 opt.step(); opt.zero_grad(set_to_none=True); step += 1
                 dt = time.time()-t1
@@ -228,30 +275,9 @@ def main() -> None:
                       % (step, sum(losses[-a.accum:])/a.accum, seen/dt, torch.cuda.max_memory_allocated()/1e9, dt/60), flush=True)
                 if max_steps and step >= max_steps:
                     print("ДЫМОВОЙ ПРОГОН ПРОЙДЕН"); return
-        if a.valid_n and Path(a.valid).exists():          # потеря на ОТЛОЖЕННЫХ играх
-            vrows = [json.loads(l) for l in open(a.valid, encoding="utf-8")][:a.valid_n]
-            model.eval(); vs = 0.0; vn = 0
-            with torch.no_grad():
-                for vr in vrows:
-                    vi, vl = render(vr["messages"])
-                    if len(vi) > a.max_len:
-                        vi, vl = vi[-a.max_len:], vl[-a.max_len:]
-                    if not any(t != -100 for t in vl):
-                        continue
-                    vx = torch.tensor([vi]).cuda(); vy = torch.tensor([vl]).cuda()
-                    vh = dec(input_ids=vx, use_cache=False).last_hidden_state
-                    hd = model.get_output_embeddings()
-                    for c0 in range(0, vh.shape[1] - 1, a.loss_chunk):
-                        c1 = min(c0 + a.loss_chunk, vh.shape[1] - 1)
-                        tg = vy[:, c0 + 1:c1 + 1]; mk = tg != -100
-                        if mk.any():
-                            lgv = hd(vh[:, c0:c1]).float()
-                            vs += float(torch.nn.functional.cross_entropy(
-                                lgv[mk], tg[mk], reduction="sum")); vn += int(mk.sum())
-                            del lgv
-            model.train()
-            print("ПРОВЕРКА после эпохи %d: потеря на отложенных играх %.3f (%d примеров)"
-                  % (epoch + 1, vs / max(1, vn), len(vrows)), flush=True)
+        if a.valid_n and Path(a.valid).exists():
+            print("ПРОВЕРКА после эпохи %d: потеря на отложенных играх %.3f (было до обучения %.3f)"
+                  % (epoch + 1, valid_loss(), base_valid if base_valid else float("nan")), flush=True)
         ep_dir = "%s_epoch%d" % (a.out, epoch + 1)      # адаптер после каждой эпохи отдельно
         Path(ep_dir).mkdir(parents=True, exist_ok=True); model.save_pretrained(ep_dir)
         print("ЭПОХА %d СОХРАНЕНА в %s | средняя потеря %.3f"

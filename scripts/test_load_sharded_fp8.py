@@ -43,6 +43,21 @@ def main() -> None:
         renamed = {("model.language_model." + k[len("model."):]) if k.startswith("model.") else k: v
                    for k, v in state.items()}
         cfg.save_pretrained(tmp)
+        # ЛОВУШКА PLE (24.09): в настоящем чекпойнте таблица разрезана на 128 кусков
+        # ngram_embedding.shard_N.weight, а в модели это один слой. Проверяем склейку: режем
+        # эмбеддинги на четыре куска ровно в том же виде.
+        cut_key = next(k for k in renamed if k.endswith("embed_tokens.weight"))
+        whole = renamed.pop(cut_key)
+        parts = torch.chunk(whole, 4, dim=0)
+        for i, part in enumerate(parts):
+            renamed[cut_key.replace(".weight", ".shard_%d.weight" % i)] = part.contiguous()
+        print("эмбеддинги %s разрезаны на %d кусков" % (tuple(whole.shape), len(parts)))
+
+        # ЛОВУШКА ТИПОВ (24.09): в чекпойнте есть ЦЕЛОЧИСЛЕННЫЕ тензоры (в настоящей модели это
+        # словарные размеры и смещения голов n-грамм). Если загрузчик приведёт их к bf16, модель
+        # падает на битовых операциях. Кладём такой тензор в чекпойнт и проверяем тип после загрузки.
+        int_keys = [k for k, v in renamed.items() if not v.is_floating_point()]
+
         keys = sorted(renamed)
         per = max(1, len(keys) // 4)                       # четыре файла: нужен многофайловый случай
         weight_map = {}
@@ -68,6 +83,14 @@ def main() -> None:
         model.eval()
         print("загрузчик: файлов %d, сжато тензоров %d, как есть %d, пропущено %d"
               % (info["файлов"], info["сжато"], info["как есть"], info["пропущено"]))
+
+        bufs = dict(model.named_buffers())
+        bad = [k for k in int_keys
+               for kk in [k.replace("model.language_model.", "model.")]
+               if kk in bufs and bufs[kk].is_floating_point()]
+        print("целочисленных тензоров в чекпойнте: %d, испорчено приведением к bf16: %d"
+              % (len(int_keys), len(bad)))
+        assert not bad, "целочисленные тензоры приведены к bf16: %s" % bad[:2]
 
         exp_left = [n for m in model.modules() if type(m).__name__ == "Qwen4ExpTextExperts"
                     for n, _ in m.named_parameters()]
