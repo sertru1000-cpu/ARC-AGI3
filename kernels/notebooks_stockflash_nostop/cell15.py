@@ -17,12 +17,12 @@ _NS_NEW = ("Once the important state variables are understood, prefer searching 
            "twice. Keep such actions on the list of things to retest after the board changes.")
 _NS_DONE = {"ok": False}
 
-_ns_orig_system = _nsta.ToolAgent._build_system_prompt
+_ns_orig_system = _nsta._build_system_prompt
 
 
-def _ns_build_system_prompt(*args, **kw):
+def _ns_build_system_prompt(**kw):
     try:
-        text = _ns_orig_system(*args, **kw)
+        text = _ns_orig_system(**kw)
         if _NS_OLD in text:
             if not _NS_DONE["ok"]:
                 print("NOSTOP: строка найдена и заменена", flush=True)
@@ -34,10 +34,10 @@ def _ns_build_system_prompt(*args, **kw):
         return text
     except Exception as exc:                        # слой не имеет права ронять прогон
         print("NOSTOP: сбой слоя, отдаю стоковый промпт: %r" % (exc,), flush=True)
-        return _ns_orig_system(*args, **kw)
+        return _ns_orig_system(**kw)
 
 
-_nsta.ToolAgent._build_system_prompt = _ns_build_system_prompt
+_nsta._build_system_prompt = _ns_build_system_prompt
 
 if not TRUE_SUBMISSION:
     bm.solver.max_runtime_s_per_game = 7920.0       # ПОЛНЫЙ прогон 132 мин; сравнение с flash_v1_phaseA = 9.43

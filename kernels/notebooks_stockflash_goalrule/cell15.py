@@ -23,21 +23,21 @@ _GR_BLOCK = (
     "RULE before planning any move.\n"
 )
 
-_gr_orig_system = _grta.ToolAgent._build_system_prompt
+_gr_orig_system = _grta._build_system_prompt
 
 
-def _gr_build_system_prompt(*args, **kw):
+def _gr_build_system_prompt(**kw):
     try:
-        text = _gr_orig_system(*args, **kw)
+        text = _gr_orig_system(**kw)
         if "Level goal as a rule" in text:
             return text
         return text + _GR_BLOCK
     except Exception as exc:                        # слой не имеет права ронять прогон
         print("GOALRULE: сбой слоя, отдаю стоковый промпт: %r" % (exc,), flush=True)
-        return _gr_orig_system(*args, **kw)
+        return _gr_orig_system(**kw)
 
 
-_grta.ToolAgent._build_system_prompt = _gr_build_system_prompt
+_grta._build_system_prompt = _gr_build_system_prompt
 
 if not TRUE_SUBMISSION:
     bm.solver.max_runtime_s_per_game = 7920.0       # полный прогон 132 мин; сравнение flash_v1_phaseA = 9.43

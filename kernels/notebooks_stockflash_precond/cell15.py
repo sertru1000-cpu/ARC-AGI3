@@ -25,21 +25,21 @@ _PC_BLOCK = (
     "observed effect anywhere is still unknown, not known-useless.\n"
 )
 
-_pc_orig_system = _pcta.ToolAgent._build_system_prompt
+_pc_orig_system = _pcta._build_system_prompt
 
 
-def _pc_build_system_prompt(*args, **kw):
+def _pc_build_system_prompt(**kw):
     try:
-        text = _pc_orig_system(*args, **kw)
+        text = _pc_orig_system(**kw)
         if "Conditional effects (important)" in text:
             return text
         return text + _PC_BLOCK
     except Exception as exc:                       # слой не имеет права ронять прогон
         print("PRECOND: сбой слоя, отдаю стоковый промпт: %r" % (exc,), flush=True)
-        return _pc_orig_system(*args, **kw)
+        return _pc_orig_system(**kw)
 
 
-_pcta.ToolAgent._build_system_prompt = _pc_build_system_prompt
+_pcta._build_system_prompt = _pc_build_system_prompt
 
 if not TRUE_SUBMISSION:
     bm.solver.max_runtime_s_per_game = 7920.0     # ПОЛНЫЙ прогон 132 мин: точка сравнения

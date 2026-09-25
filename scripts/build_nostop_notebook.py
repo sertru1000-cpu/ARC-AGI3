@@ -45,12 +45,12 @@ _NS_NEW = ("Once the important state variables are understood, prefer searching 
            "twice. Keep such actions on the list of things to retest after the board changes.")
 _NS_DONE = {"ok": False}
 
-_ns_orig_system = _nsta.ToolAgent._build_system_prompt
+_ns_orig_system = _nsta._build_system_prompt
 
 
-def _ns_build_system_prompt(*args, **kw):
+def _ns_build_system_prompt(**kw):
     try:
-        text = _ns_orig_system(*args, **kw)
+        text = _ns_orig_system(**kw)
         if _NS_OLD in text:
             if not _NS_DONE["ok"]:
                 print("NOSTOP: строка найдена и заменена", flush=True)
@@ -62,10 +62,10 @@ def _ns_build_system_prompt(*args, **kw):
         return text
     except Exception as exc:                        # слой не имеет права ронять прогон
         print("NOSTOP: сбой слоя, отдаю стоковый промпт: %r" % (exc,), flush=True)
-        return _ns_orig_system(*args, **kw)
+        return _ns_orig_system(**kw)
 
 
-_nsta.ToolAgent._build_system_prompt = _ns_build_system_prompt
+_nsta._build_system_prompt = _ns_build_system_prompt
 
 if not TRUE_SUBMISSION:
     bm.solver.max_runtime_s_per_game = 7920.0       # ПОЛНЫЙ прогон 132 мин; сравнение с flash_v1_phaseA = 9.43
@@ -110,6 +110,15 @@ def main() -> None:
     meta["id"] = "sergueimakarov/arc3-stock-flash-nostop"
     meta["title"] = "arc3 stock flash nostop"
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
+
+    # ЛОВУШКА 25.09: _build_system_prompt -- МОДУЛЬНАЯ ФУНКЦИЯ, а не метод ToolAgent.
+    # Патч по ToolAgent._build_system_prompt уронил два прогона через 17 минут каждый.
+    _ta = open("atlas_src/src/ARC3-Inference/inference/agent/tool_agent.py", encoding="utf-8").read()
+    _is_module_fn = "\ndef _build_system_prompt(" in _ta
+    print("ok   _build_system_prompt — функция модуля:", _is_module_fn)
+    if not _is_module_fn:
+        raise SystemExit("в исходнике это не модульная функция — проверьте, как патчить")
+    print("ok   патчим функцию модуля, не метод класса:", ".ToolAgent._build_system_prompt" not in CELL)
 
     compile(code, "c15", "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
     diff = [i for i in range(len(nb["cells"])) if "".join(nb["cells"][i]["source"]) != "".join(src["cells"][i]["source"])]
