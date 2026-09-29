@@ -397,6 +397,77 @@
     Эту аварию он не объясняет, но означает, что старые версии кернела могут быть невоспроизводимы.</p>
   </div>
 
+  <!-- ОТЛОЖЕНО 26.09: квота под прививку 30.09 -->
+  <section class="phase" style="--phase-color:var(--status-todo-ink)">
+    <div class="phase-head">
+      <span class="phase-num">26.09</span>
+      <span class="phase-title">Отложено до сброса квоты 03.10 (резерв ~8.5 ч под прививку 30.09)</span>
+      <span class="phase-gate">всё собрано и проверено, запуск — одной командой по слову владельца</span>
+    </div>
+    <div class="items">
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip todo">отложено, возможно сегодня</span>
+        <span class="item-title">a6 v2 — наблюдение в сообщении, исправленное</span>
+        <span class="item-desc">a6 v1 (под 27.09): осмотров 132 против ~140 у контроля, ходов на запрос столько же — механизм не сработал; модель реже считает объекты сама (34% против 52%), но куски доски буквами печатает чаще (65% против 56%). v2: вынимать копии наблюдения из прошлых сообщений (~7 на запрос), вырезка вокруг объектов/игрока, прямо «действуй в этом же вызове». Третья попытка сократить осмотры обвязкой — запускать, только если механизм ясен.</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-progress-ink)">
+        <span class="chip done">в коде, в бою с v4-lite</span>
+        <span class="item-title">a4 — функции модели живут между вызовами (поверх Скотта) — повторено: a4b 2.66, повтор кода 14%</span>
+        <span class="item-desc">Под 27.09, 30 мин: балл 2.37 (контроли 2.60 / 1.45 — шум), но механика сдвинулась: запросов 368 против 305–331 (+13–16%), код на вызов 373 знака против ~550, повтор кода 17% против 24–27%, ответ −15%, очередь 98 с против ~111. Минус — падений 7% против 3–5%: до повтора проверить, не ломают ли вызовы сохранённые функции. Сборка: pod_arms/a4_persist.ipynb (scripts/build_pod_arms.py).</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip progress">проба 30 мин идёт</span>
+        <span class="item-title">scott-result — модель видит итог каждого хода (F2 Скотта, AGENTFIX_RESULT=1)</span>
+        <span class="item-desc">Аудит песочницы 27.09: в 75–80% вызовов с ходом модель не видит board_changed / level_completed / known_noop — stdout вытесняет результат (код Tufa). Проверка: сборка Скотта + AGENTFIX_RESULT=1, 1 ч; сравнить со средним его трёх прогонов 6.10. Мелочи туда же: разрешить difflib и time (~0.5% упавших вызовов).</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip progress">проба идёт</span>
+        <span class="item-title">scott-v3-battle — вторая боевая сборка для чередования (Скотт + наш v3)</span>
+        <span class="item-desc">Отличается от arc3-pub-scott-battle ровно одной строкой: DATASET_SOURCES → sergueimakarov/arc3-nextfork (v3). Проба 30 мин (~0.8 ч квоты), затем отправка в бой. Не публиковать nextfork v4, пока идёт отправка кернела на nextfork. <code>kaggle kernels push -p kernels/pub_scott-v3-battle</code></span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip todo">готово к пушу</span>
+        <span class="item-title">scott-fresh — сброс гипотезы при застревании, поверх обвязки Скотта</span>
+        <span class="item-desc">После 30 ходов на уровне без взятия: цель, план и вопросы стираются, история очищается, модель получает отброшенную гипотезу и список испробованного; механика сохраняется; ≤2 сбросов на уровень. Порог — scripts/stall_signal.py (охват 60% невзятых, ложные тревоги 40% взятых). <code>kaggle kernels push -p kernels/pub_scott_fresh_cap3600</code></span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip todo">готово к пушу</span>
+        <span class="item-title">scott-open — 2–3 гипотезы разных классов в первые 2 вызова уровня</span>
+        <span class="item-desc">Противоположность cons (подавление разброса вредит). Первый запуск 22:31 удалён через 14 мин по выбору «только seq8». <code>kaggle kernels push -p kernels/pub_scott_open_cap3600</code> (новый id не нужен: кернел удалён).</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip todo">готово к пушу</span>
+        <span class="item-title">scott-short — прошлые сообщения пользователя сжаты до строк состояния</span>
+        <span class="item-desc">Сообщение короче в 21 раз. Минус: у Скотта похожая правка (F11 dedup) выключена — видимо, не помогла. <code>kaggle kernels push -p kernels/pub_scott_short_cap3600</code></span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip todo">собрать флагом</span>
+        <span class="item-title">ctx16 / kv8 — из аудита трубопровода</span>
+        <span class="item-desc">У Скотта окно 16k не применялось (serving_setup возвращает 32768, tool_agent читает при импорте) и вытеснений было 10–213 на ~580 запросов. Сборка: <code>build_nextfork_notebook.py --seqs 16 --ctx 16384</code> или <code>--seqs 16 --kv-gib 8</code> (после публикации nextfork v4).</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-todo-ink)">
+        <span class="chip done">бой 28.09: 4.30 — лучший наш</span>
+        <span class="item-title">nextfork v4-lite — Скотт + память функций, без v3 (боевая)</span>
+        <span class="item-desc">28.09: датасет arc3-nextfork опубликован (03:10 UTC, 4415 файлов, штамп сверен: AGENTFIX, persist_defs, выключатели v3). Кернел arc3-nextfork-v4lite v1: фаза A 30 мин, фаза B 7920 с. v3 выключен (NEXTFORK_NOOPGUARD=0, NEXTFORK_V3PROMPTS=0): на базе Скотта запрету почти нечего делать (0–0.4% ходов), правки промпта удлиняют ответ на 8–25%. Под 27.09: полный v4 (132 мин) 7.32 / 37 уровней. Фаза A 2.63 (25/25). Отправлен в бой владельцем 28.09. Датасет nextfork не трогать, пока идёт сабмит. Запас: kernels/notebooks_nextfork_v4 (с v3).</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-progress-ink)">
+        <span class="chip todo">на Kaggle OOM (8 и 7 ГиБ) — утром: процесс 712 МиБ</span>
+        <span class="item-title">v4-lite-kv8 — кэш vLLM 8 ГиБ вместо 5 (главная находка 28.09)</span>
+        <span class="item-desc">Кэш 5 ГиБ держал 3 запроса из 16 («Running 3, Waiting 22», очередь 99 с из 117). Под: 8 ГиБ -> запросов 456 против 331–376, ходов/игру 30 против 21, очередь 70 с; повтор 488 запросов. Отличие от v4-lite — одна строка ноутбука, датасет не менялся. Кернел arc3-nextfork-v4lite-kv8 v1, фаза A 30 мин; в бой — по слову владельца. Отвергнуты: 10 ГиБ (нехватка памяти), fp8-кэш (не поддержан), medium (уровней меньше), окно 16 тыс. (0.28 хода/запрос).</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-progress-ink)">
+        <span class="chip progress">фаза A идёт (28.09)</span>
+        <span class="item-title">v4-lite-swift — v4-lite на модели Swift 1.5 (зеркало lordhansolo)</span>
+        <span class="item-desc">Swift 1.5 — RL-дообучение той же Flash-Next, рассуждение −63%. Датасет arc3-nextfork с выключателем NEXTFORK_MODEL=swift (опубл. 28.09), кернел arc3-nextfork-v4lite-swift v1, фаза A 30 мин. Мерить: поднялся ли сервер, длина ответа, ходы на игру против v4-lite. Главный риск — память/время загрузки (186.5 ГБ, пределы подняты до 3000/3300 с).</span>
+      </div>
+      <div class="item" style="--item-color:var(--status-done-ink)">
+        <span class="chip done">снято</span>
+        <span class="item-title">lean1h, vision1h, cons</span>
+        <span class="item-desc">cons 5.45 и 3.83 (1 ч) — пользы нет; lean 5.57, vision 5.82 — ниже v3; крупная картинка уже есть у Скотта (×12 с очисткой истории).</span>
+      </div>
+    </div>
+  </section>
+
   <!-- БОЕВЫЕ ВЕРСИИ -->
   <section class="phase" style="--phase-color:var(--status-progress-ink)">
     <div class="phase-head">

@@ -1,0 +1,476 @@
+diff -ruN --exclude=*.pyc --exclude=__pycache__ --exclude=*.pkl --exclude=NEXTFORK_VERSION.txt --exclude=dataset-metadata.json --exclude=git_status.txt a/src/ARC3-Inference/inference/agent/noop_guard.py b/src/ARC3-Inference/inference/agent/noop_guard.py
+--- a/src/ARC3-Inference/inference/agent/noop_guard.py	1970-01-01 03:00:00
++++ b/src/ARC3-Inference/inference/agent/noop_guard.py	2026-09-26 18:13:56
+@@ -0,0 +1,133 @@
++"""Запрет повторного пустого хода при побитово той же доске, с предохранителем.
++
++Правило владельца (25.09): ход, который уже дал «ничего» в ЭТОМ состоянии доски,
++второй раз в движок не уходит.
++
++ЧЕГО ЭТОТ ЗАПРЕТ НЕ ГАРАНТИРУЕТ. Сначала было записано, что ошибиться он не может: движок
++детерминирован (561 повтор из 561), значит та же доска плюс тот же ход дают тот же исход.
++Довод неверен. Проверка детерминизма показывает лишь, что та же ПОСЛЕДОВАТЕЛЬНОСТЬ ходов даёт
++ту же траекторию; из неё не следует, что доска есть полное состояние игры. Замер на 25 играх:
++из 200 срезов 37 (18%) отняли бы работающий ход. Анимация объясняет лишь 4 из них.
++
++ОТКУДА ОШИБКИ. Не из загадочной скрытой переменной, а из конкретной механики: часть действий
++срабатывает ЧЕРЕЗ РАЗ — первое нажатие взводит что-то невидимое, второе действует. Пример из
++записи: g50t, ход 10 — ACTION2 не меняет доску, ход 11 — тот же ACTION2 при той же доске меняет.
++Запрет со второго нажатия такую механику ломает начисто.
++
++СКОЛЬКО ПУСТЫХ ИСХОДОВ ЖДЁМ. Отсюда min_repeats: сколько раз подряд пара (доска, действие)
++должна дать пусто, прежде чем следующий такой ход будет срезан. Замер на записи 4380 ходов
++(25 игр, детерминированный движок, поэтому это точный контрфакт, а не сравнение прогонов):
++
++    N=1   200 срезов, 37 ошибочных (18%)   — ломает механику «через раз»
++    N=2   154 среза,   6 ошибочных (4%)
++    N=3   143 среза,   0 ошибочных         <- взято
++    N=4   138 срезов,  0 ошибочных
++
++N=3 сохраняет 72% пользы и убирает все ошибки. Оговорка: это колено кривой на НАШИХ играх;
++тумблер, которому нужно четыре нажатия, положит и N=3.
++
++Порог другого рода — «включать запрет только после N пустых ходов на уровне» — пробовался
++(scripts/noop_guard_fuse.py) и решением владельца отклонён.
++"""
++from __future__ import annotations
++
++import hashlib
++from collections import OrderedDict
++from typing import Any
++
++
++def board_signature(grid: Any) -> str:
++    """Stable, compact signature for a 2D integer grid."""
++    rows = tuple(tuple(int(cell) for cell in row) for row in grid or ())
++    digest = hashlib.blake2b(repr(rows).encode("utf-8"), digest_size=8)
++    return digest.hexdigest()
++
++
++def normalize_action_signature(value: Any) -> str:
++    return " ".join(str(value or "").split())
++
++
++class NoopGuard:
++    """Tracks ``(level, board_before_sig, action_sig)`` combos known to be no-ops.
++
++    Bounded per level (oldest states/actions evicted first) so long runs can't
++    grow this without limit.
++    """
++
++    def __init__(
++        self,
++        *,
++        max_states_per_level: int = 512,
++        max_actions_per_state: int = 16,
++        min_repeats: int = 3,
++    ) -> None:
++        self._max_states_per_level = max(1, int(max_states_per_level))
++        self._max_actions_per_state = max(1, int(max_actions_per_state))
++        # Сколько пустых исходов подряд у пары (доска, действие) нужно накопить,
++        # прежде чем резать. См. заголовок модуля: на N=3 ошибок ноль.
++        self._min_repeats = max(1, int(min_repeats))
++        # Значения словаря действий — счётчик пустых исходов, а не None.
++        self._levels: "OrderedDict[int, OrderedDict[str, OrderedDict[str, int]]]" = OrderedDict()
++
++    def observe(
++        self,
++        *,
++        level: Any,
++        board_before_sig: str,
++        action_sig: str,
++        board_changed: bool,
++        animated: bool = False,
++    ) -> None:
++        """Record one executed action and whether it had any effect.
++
++        ``animated`` means the environment returned more than one frame for
++        this action. Such an action is never a no-op, even when the visible
++        board ends up identical to before: in a type-1 animation (ft09, sb26)
++        the first and last frame match by design and the entire signal -- a
++        rejected click, a consumed attempt -- lives in the frames in between.
++        Recording those as no-ops made the guard hard-block actions that had
++        clearly worked, on exactly the games with the most animations.
++        """
++        try:
++            level_num = int(level)
++        except (TypeError, ValueError):
++            return
++        action_sig = normalize_action_signature(action_sig)
++        if not action_sig:
++            return
++        states = self._levels.setdefault(level_num, OrderedDict())
++
++        if board_changed or animated:
++            # Evidence now contradicts a previously recorded no-op for this
++            # exact state+action: drop the stale entry so we never block a
++            # combo that turned out to have an effect after all.
++            entry = states.get(board_before_sig)
++            if entry is not None and action_sig in entry:
++                del entry[action_sig]
++                if not entry:
++                    del states[board_before_sig]
++            return
++
++        entry = states.get(board_before_sig)
++        if entry is None:
++            entry = OrderedDict()
++            states[board_before_sig] = entry
++            while len(states) > self._max_states_per_level:
++                states.popitem(last=False)
++        entry[action_sig] = entry.get(action_sig, 0) + 1
++        while len(entry) > self._max_actions_per_state:
++            entry.popitem(last=False)
++
++    def is_known_noop(self, level: Any, board_sig: str, action_sig: str) -> bool:
++        """Известен ли этот ход как пустой в этом самом состоянии доски."""
++        try:
++            level_num = int(level)
++        except (TypeError, ValueError):
++            return False
++        states = self._levels.get(level_num)
++        if not states:
++            return False
++        entry = states.get(board_sig)
++        if not entry:
++            return False
++        return entry.get(normalize_action_signature(action_sig), 0) >= self._min_repeats
+diff -ruN --exclude=*.pyc --exclude=__pycache__ --exclude=*.pkl --exclude=NEXTFORK_VERSION.txt --exclude=dataset-metadata.json --exclude=git_status.txt a/src/ARC3-Inference/inference/agent/prompts.py b/src/ARC3-Inference/inference/agent/prompts.py
+--- a/src/ARC3-Inference/inference/agent/prompts.py	2026-09-26 18:13:54
++++ b/src/ARC3-Inference/inference/agent/prompts.py	2026-09-26 18:13:56
+@@ -85,7 +85,18 @@
+     "- Maintain a compact working world model: what entities or regions exist, what actions seem to do, what the goal likely is, what remains uncertain, and what plan best fits the evidence so far.\n"
+     "- IMPORTANT: Especially when the game is about making an agent navigate to a target, it is usually safer to write an explicit search algorithm such as BFS. More generally, when the objective is understood but the best action order is unclear, pathfinding, flood fill, BFS, DFS, beam search, shortest-path search, limited action-sequence search, or custom heuristics are all valid.\n"
+     "- Optimize for the shortest reliable sequence that advances the current goal as described by your world model. If confidence is low, program a discriminating probe and revise the world model from the result.\n"
+-    "- Once the important state variables and action effects are sufficiently understood, stop probing and search in the inferred state space.\n"
++    # Правка 25.09 (слой nostop). Стоковая фраза звучала «перестань зондировать, когда
++    # состояние и эффекты достаточно поняты» — и модель записывала в «понятые» действия,
++    # которые просто ни разу не сработали. Замер на записях 25 игр: 40% мёртвых действий
++    # оживают после одного хода; застревание — это хождение по кругу (64% повторяющихся
++    # троек кликов у застрявших против 21% у здоровых).
++    #
++    # Прогон 25.09 (arc3-stock-flash-nostop): балл 6.39 против базы 9.43, парный тест
++    # «неразличимо». Общий минус целиком сидит в трёх сильнейших играх (ft09 -42.9,
++    # re86 -33.3, ar25 -18.7) — там, где неизменный код теряет столько же сам по себе
++    # (-19.8 и -20.0 по четырём сильнейшим, scripts/regression_to_mean.py). Выигрыши же
++    # там, где рычаг: g50t с нуля до 2 уровней, lp85 1 -> 3, sc25 2 -> 3, ka59 1 -> 2.
++    "- Once the important state variables are understood, prefer searching in the inferred state space over further probing -- but only stop probing an ACTION whose effect you have actually OBSERVED at least once. An action that has produced no visible change anywhere is still UNKNOWN, not known-useless: it may have an unmet precondition, or it may need to be pressed twice. Keep such actions on the list of things to retest after the board changes.\n"
+     "- Inspect current and history frames from Python instead of describing frames freehand.\n"
+     "- Never print or echo full board frames. Return only compact derived summaries such as object lists, diffs, coordinates, counts, or tiny local crops.\n"
+     "- Keep tool-output context size minimal and decision-oriented so you can quickly compare before/after state. It's fine to write a lot of python code, just make the output short and interpretable\n"
+@@ -99,6 +110,78 @@
+     "- You can also call `action(...)` multiple times in one Python snippet, including inside loops. Each call updates the preloaded variables before execution continues.\n"
+     "- If an action result reports `game_over`, `run_complete`, `level_completed`, or `done`, stop acting immediately and re-ground on the next turn.\n"
+ )
++
++# Условные эффекты: правило вида (ПРЕДУСЛОВИЕ, ДЕЙСТВИЕ) -> ЭФФЕКТ вместо ДЕЙСТВИЕ -> ЭФФЕКТ.
++#
++# Основание. Перебор на локальном движке (scripts/precondition_search.py): 40% мёртвых действий
++# оживают после одного хода — sk48 ACTION2 после ACTION1, g50t три действия после ACTION1.
++# Модель же, увидев пустой ход, записывает действие в бесполезные и больше к нему не возвращается.
++#
++# Текст приводится ДОСЛОВНО в том виде, в каком измерялся 25.09 (arc3-stock-flash-precond и
++# arc3-stock-flash-combined). Улучшать его по дороге нельзя: непроверенный вариант — это уже
++# другой слой, и все сегодняшние числа к нему не относятся.
++#
++# Последний пункт блока дублирует по смыслу правку nostop выше: там стоковая фраза про
++# «stop probing» переписана в самом тексте, здесь она оговаривается ещё раз. Дубль оставлен
++# намеренно — ровно так измерялся combined (Δ без шумных игр +1.88 при разбросе неизменного
++# кода ±1.74; игр со вторым уровнем 10 против 9 у базы).
++#
++# Сам по себе, без правки nostop, этот блок противоречив: он отменяет стоковую фразу словами,
++# оставляя её на месте. Так мерился precond (+2.09), и именно это вызвало возражение владельца.
++PRECONDITION_ADDENDUM = (
++    "\n"
++    "Conditional effects (important):\n"
++    "- An action that produces NO visible change is NOT proven useless. It may have an unmet "
++    "PRECONDITION: the same action can become effective after the state changes.\n"
++    "- Model rules as (PRECONDITION P, ACTION A) -> EFFECT E, not as A -> E. When A yields nothing, "
++    "record the condition C under which it did nothing, and keep the hypothesis that some P makes A work.\n"
++    "- Before writing an action off, retest it at least once after the board has changed in a way you "
++    "caused deliberately -- in particular after pressing each of the other simple actions once.\n"
++    "- Some actions toggle: the first press arms something invisible and the second press acts. "
++    "If an action seems dead, try it twice in a row before discarding it.\n"
++    "- 'Stop probing' applies only to actions whose effect you have OBSERVED. An action with no "
++    "observed effect anywhere is still unknown, not known-useless.\n"
++)
++
++
++# Цель уровня как ПРАВИЛО о доске: назвать вслух и перепроверить при смене уровня.
++#
++# Почему именно правилом, а не картинкой. Цель-кадр закрыта 19.09 (scripts/goal_progress_test.py):
++# по перенесённому кадру победы выигрышный ход угадывается в 19% случаев против 18% случайного.
++# Правило словами работает не на выбор хода, а на ОПОЗНАНИЕ цели — то самое место, которое
++# сентябрьские замеры назвали узким.
++#
++# Почему без переноса пути. Перенос последовательности ходов между уровнями (carry) закрыт 17.09:
++# RHAE 4.27 против баз 6.11 / 5.40 / 3.91.
++#
++# Основание, что перенос знания вообще работает: эффективность по номерам уровней 1.10 / 1.00 /
++# 1.47 / 1.17 / 2.17 — поздние уровни проходятся быстрее, значит между уровнями знание переносится
++# и усиливать надо точность формулировки, а не сам перенос.
++#
++# В стоке цель упомянута вскользь, одним пунктом внутри «рабочей модели мира», без требования
++# назвать её отдельной строкой и без перепроверки на новом уровне.
++#
++# Прогон 25.09 (arc3-stock-flash-goalrule): балл 7.10 против базы 9.43, парный тест
++# «неразличимо» (средняя дельта -2.33, интервал [-6.62, +2.34] при разбросе неизменного кода
++# той же ширины). Крупнейший единичный выигрыш дня — lp85 с 2.8 до 40.5, пять уровней вместо
++# одного. Взят решением владельца: свидетельств вреда нет, а бьёт слой в число уровней —
++# единственную величину, которая вообще двигает балл.
++GOAL_RULE_ADDENDUM = (
++    "\n"
++    "Level goal as a rule (state it, then re-check it):\n"
++    "- Keep ONE short sentence in your world model called GOAL RULE: what has to become true for the "
++    "level to be cleared, phrased as a rule about the board, not as a list of moves. "
++    "Examples of the right shape: 'bring every coloured shape onto the matching coloured tile', "
++    "'remove all blocks of the same colour', 'move the agent to the exit after opening it'.\n"
++    "- The GOAL RULE is about the board, never about which buttons you pressed. Do not carry move "
++    "sequences between levels -- layouts change, rules usually do not.\n"
++    "- When the level number changes, do NOT assume the rule still holds and do NOT relearn it from "
++    "scratch either. State it as a hypothesis first: 'previous GOAL RULE was X; does the new board fit "
++    "X?'. Confirm or correct it from the first frames, then continue.\n"
++    "- If the new board clearly cannot fit the previous rule, say so explicitly and write a new GOAL "
++    "RULE before planning any move.\n"
++)
++
+ 
+ COMPACT_TOOL_SESSION_ADDENDUM = (
+     "\n\nTool session rules:\n"
+diff -ruN --exclude=*.pyc --exclude=__pycache__ --exclude=*.pkl --exclude=NEXTFORK_VERSION.txt --exclude=dataset-metadata.json --exclude=git_status.txt a/src/ARC3-Inference/inference/agent/tool_agent.py b/src/ARC3-Inference/inference/agent/tool_agent.py
+--- a/src/ARC3-Inference/inference/agent/tool_agent.py	2026-09-26 18:13:54
++++ b/src/ARC3-Inference/inference/agent/tool_agent.py	2026-09-26 18:13:56
+@@ -5,6 +5,7 @@
+ import logging
+ import os
+ import re
++import sys
+ import time
+ from dataclasses import dataclass
+ from pathlib import Path
+@@ -14,9 +15,12 @@
+ import requests
+ 
+ from inference.agent.action_names import to_engine_action, to_model_action
++from inference.agent.noop_guard import NoopGuard, board_signature, normalize_action_signature
+ from inference.agent.prompts import (
+     COMPACT_TOOL_SESSION_ADDENDUM,
+     GAME_OVERVIEW_ADDENDUM,
++    GOAL_RULE_ADDENDUM,
++    PRECONDITION_ADDENDUM,
+     PYTHON_ADDENDUM,
+     STRUCTURED_RUNTIME_STATE_ADDENDUM,
+     MULTIMODAL_CONTEXT_ADDENDUM,
+@@ -174,6 +178,33 @@
+     return names
+ 
+ 
++def _pending_action_signature(action: dict[str, Any]) -> str:
++    """Подпись ещё НЕ выполненного хода в том же виде, в каком движок потом
++    вернёт его в action_display, — чтобы сверить ход с запретом до отправки.
++
++    Пустая строка, если у MOUSE нет годных row/col: проверять это — дело
++    движка, запрет на таком ходе просто не срабатывает.
++    """
++    engine_name = to_engine_action(action.get("action"))
++    display_name = to_model_action(engine_name) if engine_name else str(action.get("action") or "")
++    if display_name == "MOUSE":
++        try:
++            row = max(0, min(63, int(action.get("row"))))
++            col = max(0, min(63, int(action.get("col"))))
++        except (TypeError, ValueError):
++            return ""
++        return normalize_action_signature(f"MOUSE(row={row}, col={col})")
++    return normalize_action_signature(display_name)
++
++
++def _action_animated(payload: dict[str, Any]) -> bool:
++    """Ход вернул больше одного кадра. Такой ход пустым не считается никогда."""
++    try:
++        return int(payload.get("frame_count") or 1) > 1
++    except (TypeError, ValueError):
++        return False
++
++
+ def _format_valid_action_line(valid_actions: list[str] | None) -> str:
+     names = _normalize_valid_actions(valid_actions)
+     if not names:
+@@ -356,6 +387,13 @@
+     prompt += VISUAL_GAME_ADDENDUM
+     prompt += PYTHON_ADDENDUM
+     prompt += COMPACT_TOOL_SESSION_ADDENDUM.format(tool_output_tokens=tool_output_tokens)
++    prompt += PRECONDITION_ADDENDUM
++    # Решение владельца 25.09: берём все три слоя вместе, а не измеренный combined
++    # (nostop + предусловия). Это четвёртая конфигурация, отдельного прогона у неё нет:
++    # combined дал +1.88 на тихих играх, goalrule сам по себе +0.71 при разбросе
++    # неизменного кода ±1.74. Сложение слоёв по отдельным замерам не предсказуемо,
++    # поэтому эту сборку надо мерить как новую, а не как combined.
++    prompt += GOAL_RULE_ADDENDUM
+     return prompt
+ 
+ 
+@@ -955,6 +993,15 @@
+         self._last_step_summary: dict[str, Any] | None = None
+         self._last_action_result: dict[str, Any] | None = None
+         self._summarized_knowledge = _empty_world_model()
++        # Запрет повторного пустого хода при побитово той же доске. Включён
++        # всегда и отключению не подлежит: движок детерминирован (561 повтор
++        # из 561), поэтому то же состояние плюс то же действие обязаны дать
++        # тот же пустой исход — ошибочных запретов тут быть не может.
++        self._noop_guard = NoopGuard()
++        # Сколько ходов запрет срезал за игру. Нужен не для красоты: без следа
++        # в логе прогон не отвечает на первый вопрос разбора — «слой вообще
++        # работал?», и любой балл нечитаем.
++        self._noop_guard_blocked = 0
+ 
+     def _headers(self) -> dict[str, str]:
+         api_key = (
+@@ -982,6 +1029,8 @@
+             self._last_step_summary = None
+             self._last_action_result = None
+             self._summarized_knowledge = _empty_world_model()
++            self._noop_guard = NoopGuard()   # новая игра — прежние выводы о доске недействительны
++            self._noop_guard_blocked = 0
+ 
+     @property
+     def total_tokens(self) -> int:
+@@ -1423,6 +1472,7 @@
+             "state": payload.get("state"),
+             "valid_actions": payload.get("valid_actions", []),
+             "board_changed": bool(payload.get("board_changed")),
++            "frame_count": payload.get("frame_count"),
+             "done": bool(payload.get("done")),
+             "level_completed": bool(payload.get("level_completed")),
+             "game_over": bool(payload.get("game_over")),
+@@ -1491,9 +1541,14 @@
+             }
+ 
+         terminal_action_result: dict[str, Any] | None = None
++        # Подпись доски и уровень ПЕРЕД очередным ходом: по ним запрет узнаёт
++        # состояние, в котором ход уже оказался пустым. Стартуют с кадра до
++        # вызова и обновляются после каждого выполненного хода.
++        noop_guard_board_sig = board_signature(current_frame.grid) if current_frame is not None else board_signature(())
++        noop_guard_level = current_frame.level if current_frame is not None else 1
+ 
+         def _handle_action(actions: list[dict[str, Any]]) -> dict[str, Any]:
+-            nonlocal terminal_action_result
++            nonlocal terminal_action_result, noop_guard_board_sig, noop_guard_level
+             if self._step_env_callback is None:
+                 raise RuntimeError("action(actions) is not available in this session.")
+             normalized_actions = self._normalize_python_actions(actions)
+@@ -1526,6 +1581,53 @@
+                         last_action_result=compact_payload,
+                     ),
+                 }
++            pending_action_sig = (
++                _pending_action_signature(normalized_actions[0]) if len(normalized_actions) == 1 else ""
++            )
++            if pending_action_sig and self._noop_guard.is_known_noop(
++                noop_guard_level, noop_guard_board_sig, pending_action_sig
++            ):
++                last_result = self._last_action_result or {}
++                compact_payload = {
++                    "executed": False,
++                    "action_num": last_result.get("action_num"),
++                    "level": noop_guard_level,
++                    "score": last_result.get("score"),
++                    "reward": 0.0,
++                    "state": last_result.get("state"),
++                    "valid_actions": list(self._current_valid_actions),
++                    "board_changed": False,
++                    "done": False,
++                    "level_completed": False,
++                    "game_over": False,
++                    "run_complete": False,
++                    "requested_count": 1,
++                    "executed_count": 0,
++                    "stopped_early": True,
++                    "stop_reason": "known_noop",
++                    "stop_detail": (
++                        f"{pending_action_sig} already had no effect in this exact board state; "
++                        "blocked before execution, no action budget spent."
++                    ),
++                }
++                self._last_action_result = dict(compact_payload)
++                self._noop_guard_blocked += 1
++                # В sys.__stderr__, а НЕ обычным print: песочница инструмента
++                # python перехватывает stdout (redirect_stdout), и печать
++                # уехала бы в ответ модели вместо лога кернела.
++                print(
++                    "NOOPGUARD: срезан %s (уровень %s, всего за игру %d)"
++                    % (pending_action_sig, noop_guard_level, self._noop_guard_blocked),
++                    file=sys.__stderr__,
++                    flush=True,
++                )
++                return {
++                    "action_result": compact_payload,
++                    "state": _serialized_runtime_state(
++                        next_valid_actions=list(self._current_valid_actions),
++                        last_action_result=compact_payload,
++                    ),
++                }
+             raw_payload = self._step_env_callback({"actions": normalized_actions})
+             if not isinstance(raw_payload, dict):
+                 raise RuntimeError("action(actions) did not return a JSON-like payload.")
+@@ -1536,6 +1638,18 @@
+             if compact_payload.get("executed") and _terminal_action_reason(compact_payload):
+                 terminal_action_result = compact_payload
+             self._last_action_result = dict(compact_payload)
++            if pending_action_sig and compact_payload.get("executed"):
++                self._noop_guard.observe(
++                    level=noop_guard_level,
++                    board_before_sig=noop_guard_board_sig,
++                    action_sig=pending_action_sig,
++                    board_changed=bool(compact_payload.get("board_changed")),
++                    animated=_action_animated(compact_payload),
++                )
++            refreshed_frame, _ = load_runtime_state(state_path)
++            if refreshed_frame is not None:
++                noop_guard_board_sig = board_signature(refreshed_frame.grid)
++                noop_guard_level = refreshed_frame.level
+             return {
+                 "action_result": compact_payload,
+                 "state": _serialized_runtime_state(
+diff -ruN --exclude=*.pyc --exclude=__pycache__ --exclude=*.pkl --exclude=NEXTFORK_VERSION.txt --exclude=dataset-metadata.json --exclude=git_status.txt a/src/ARC3-Inference/inference/framework/solver.py b/src/ARC3-Inference/inference/framework/solver.py
+--- a/src/ARC3-Inference/inference/framework/solver.py	2026-09-26 18:13:54
++++ b/src/ARC3-Inference/inference/framework/solver.py	2026-09-26 18:13:56
+@@ -98,6 +98,21 @@
+     return tuple(tuple(int(cell) for cell in row) for row in rows)
+ 
+ 
++def _frame_count(state: taaf.game.GameState | None) -> int:
++    """Сколько кадров движок вернул на один ход.
++
++    Признак независим от board_changed: в анимации «отказ» первый и последний
++    кадр совпадают по построению, доска не меняется, но ход НЕ пустой — весь
++    сигнал в промежуточных кадрах. Запрет обязан такие ходы пропускать.
++    """
++    if state is None:
++        return 1
++    try:
++        return max(1, len(getattr(state.raw, "frame", None) or ()))
++    except TypeError:
++        return 1
++
++
+ def _level_number(game: taaf.game.Game) -> int:
+     state = game.current_state
+     completed = int(state.levels_completed)
+@@ -654,6 +669,9 @@
+         final_payload["board_changed"] = any(
+             bool(item.get("board_changed")) for item in executed_payloads
+         )
++        final_payload["frame_count"] = max(
++            (int(item.get("frame_count") or 1) for item in executed_payloads), default=1
++        )
+         final_payload["stopped_early"] = len(executed_payloads) < batch_size
+         if stop_reason is not None:
+             final_payload["stop_reason"] = stop_reason
+@@ -713,6 +731,7 @@
+             "state": raw_state.name,
+             "valid_actions": to_model_actions(_engine_action_names(self.game)),
+             "board_changed": board_changed,
++            "frame_count": _frame_count(new_state),
+             "done": raw_state == arcengine.GameState.WIN,
+             "level_completed": level_completed,
+             "game_over": raw_state == arcengine.GameState.GAME_OVER,

@@ -412,6 +412,41 @@ _ATLAS_INVARIANT_MAX_BBOX_SHARE = 0.8
 _ATLAS_MOUSE_ACTION_RE = re.compile(r"^MOUSE\(row=(-?\d+), col=(-?\d+)\)$")
 
 
+# atlas 25.09: НЕВЕРНАЯ МОДАЛЬНОСТЬ. Измерено на sk48 (runs/flash_v1_phaseA): 284 хода, 0 уровней,
+# из них 165 (58%) -- клики, которые в этой игре не делают НИЧЕГО; первый уровень при этом берётся
+# 14 ходами одними простыми действиями (runs/bfs_originals.json). Модель тычет мышью там, где надо
+# нажимать стрелки, и видит "отклик", которого нет.
+# Проверено по всем 25 партиям (scripts/click_modality_bound.py): правило срабатывает ТОЛЬКО в sk48
+# и НИ В ОДНОЙ игре не запрещает ни одного полезного клика -- там, где мышь работает, порог не
+# достигается никогда. Поэтому подсказка, а не запрет: решение оставляем модели.
+_ATLAS_DEAD_MOUSE_AFTER = 12          # столько кликов подряд без единого изменения кадра
+_ATLAS_DEAD_MOUSE_HINT = (
+    "MOUSE has produced NO board change in the last {n} clicks of this game. In some games the mouse "
+    "does nothing at all and the level is solved with ACTION1..ACTION5 only. Stop probing with MOUSE "
+    "and work the simple actions (including combinations and ordering -- an action may only work "
+    "AFTER another one has been done)."
+)
+
+
+def _atlas_dead_mouse_hint(history_entries: list[HistoryEntry]) -> list[str]:
+    """Подсказка, если мышь в этой игре ничего не меняет: считаем ПОДРЯД идущие пустые клики."""
+    streak = 0
+    for prev, cur in zip(history_entries, history_entries[1:]):
+        action = (cur.action or "").strip()
+        if not action or not _ATLAS_MOUSE_ACTION_RE.match(action):
+            continue
+        before, after = prev.frame, cur.frame
+        if before is None or after is None:
+            continue
+        if before.grid != after.grid:
+            streak = 0
+        else:
+            streak += 1
+    if streak >= _ATLAS_DEAD_MOUSE_AFTER:
+        return [_ATLAS_DEAD_MOUSE_HINT.format(n=streak)]
+    return []
+
+
 def _atlas_action_effect_summary(history_entries: list[HistoryEntry]) -> list[str]:
     window = history_entries[-(_ATLAS_ACTION_EFFECT_HISTORY_WINDOW + 1):]
     per_action: dict[str, list[tuple[tuple[int, int] | None, list[tuple[int, int]]]]] = {}
@@ -2552,6 +2587,10 @@ class ToolAgent:
             print(f"atlas: mechanic-handoff note injected (action_num={action_num})", flush=True)
             self._atlas_mechanic_handoff_note = None
         action_effect_lines = _atlas_action_effect_summary(history_entries)
+        dead_mouse_lines = _atlas_dead_mouse_hint(history_entries)
+        if dead_mouse_lines:
+            action_effect_lines = list(action_effect_lines) + dead_mouse_lines
+            print(f"atlas: dead-mouse hint injected (action_num={action_num})", flush=True)
         if action_effect_lines:
             print(
                 f"atlas: action-effect summary injected (action_num={action_num}, "

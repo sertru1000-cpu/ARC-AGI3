@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прогоны 25.09</title>
+<style>
+:root{--bg:#0f1115;--surface:#171a21;--surface2:#1e222b;--border:#2a2f3a;--ink:#e6e9ef;--dim:#98a1b3;
+--good:#4ade80;--bad:#f87171;--warn:#fbbf24;--noise:#64748b;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:2.5rem 1rem 4rem}
+h1{font-size:1.9rem;margin:0 0 .3rem}
+.sub{color:var(--dim);margin:0 0 2rem}
+h2{font-size:1.15rem;margin:2.5rem 0 .8rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:.93rem;margin:.5rem 0 1rem}
+th{text-align:left;color:var(--dim);font-weight:600;font-size:.8rem;text-transform:uppercase;
+letter-spacing:.04em;padding:.5rem .6rem;border-bottom:1px solid var(--border)}
+td{padding:.55rem .6rem;border-bottom:1px solid var(--surface2)}
+tr:hover td{background:var(--surface)}
+.num{font-family:var(--mono);text-align:right;white-space:nowrap}
+.tag{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.75rem;font-weight:600}
+.t-noise{background:#334155;color:#cbd5e1}
+.t-base{background:#1e3a5f;color:#93c5fd}
+.t-run{background:#3f2d1a;color:#fbbf24}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.1rem 1.2rem;margin:1rem 0}
+.card h3{margin:0 0 .5rem;font-size:1rem}
+.big{font-family:var(--mono);font-size:1.6rem;color:var(--warn)}
+code{font-family:var(--mono);background:var(--surface2);padding:.1em .4em;border-radius:4px;font-size:.88em}
+.note{color:var(--dim);font-size:.9rem}
+ul{padding-left:1.2rem}li{margin:.35rem 0}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f7f8fa;--surface:#fff;--surface2:#eef1f5;
+--border:#d8dde5;--ink:#1a1d23;--dim:#5b6472}}
+</style></head><body><div class="wrap">
+
+<h1>Прогоны 25 сентября</h1>
+<p class="sub">Шесть завершённых, два идут. Точка сравнения для полных прогонов — <code>flash_v1_phaseA</code>, балл 9.43.</p>
+
+<h2>Завершённые</h2>
+<table>
+<tr><th>прогон</th><th class="num">балл</th><th class="num">уровней</th><th class="num">средняя Δ</th><th class="num">95% интервал</th><th>вердикт</th></tr>
+<tr><td><b>база flash_v1_phaseA</b></td><td class="num">9.43</td><td class="num">40</td><td class="num">—</td><td class="num">—</td><td><span class="tag t-base">точка отсчёта</span></td></tr>
+<tr><td>precond</td><td class="num">8.26</td><td class="num">36</td><td class="num">−1.17</td><td class="num">[−5.51, +3.53]</td><td><span class="tag t-noise">неразличимо</span></td></tr>
+<tr><td>goalrule</td><td class="num">7.10</td><td class="num">33</td><td class="num">−2.33</td><td class="num">[−6.62, +2.34]</td><td><span class="tag t-noise">неразличимо</span></td></tr>
+<tr><td>combined</td><td class="num">6.64</td><td class="num">35</td><td class="num">−2.79</td><td class="num">[−9.39, +3.11]</td><td><span class="tag t-noise">неразличимо</span></td></tr>
+<tr><td>nostop</td><td class="num">6.39</td><td class="num">36</td><td class="num">−3.04</td><td class="num">[−8.25, +1.49]</td><td><span class="tag t-noise">неразличимо</span></td></tr>
+<tr><td>deadmouse <span class="note">(проба 30 мин)</span></td><td class="num">2.62</td><td class="num">15</td><td class="num">—</td><td class="num">—</td><td><span class="tag t-noise">в разбросе базы-30</span></td></tr>
+</table>
+<p class="note">deadmouse считался с потолком 30 минут на игру, его нельзя ставить рядом с полными: обрезки той же базы дают 3.32 / 2.73 / 1.67.</p>
+
+<h2>Идут сейчас</h2>
+<table>
+<tr><th>прогон</th><th>что проверяет</th><th>статус</th></tr>
+<tr><td>nextfork-smoke</td><td>цепочка на нашем форке: датасет, проверка бандла, сервер, строки NOOPGUARD</td><td><span class="tag t-run">идёт</span></td></tr>
+<tr><td>nextfork-adaptive</td><td>адаптивная подсказка поверх запрета, полный прогон</td><td><span class="tag t-run">идёт</span></td></tr>
+</table>
+<p class="note">adaptive2 собран, уйдёт по таймеру, когда смоук освободит слот. Очереди на Kaggle нет: два слота, оба заняты.</p>
+
+<h2>Главное за день — измеренный порог различимости</h2>
+<div class="card">
+<h3>Ни один из четырёх слоёв не отличим от неизменного кода</h3>
+<p>Парный тест на трёх прогонах <b>одной и той же сборки</b> (9.43 / 9.00 / 6.76) даёт среднюю Δ
+<b>−0.43, −2.24, −2.67</b> при интервалах шириной около ±4.5. Все четыре сегодняшних слоя лежат
+ровно в этом коридоре.</p>
+<p class="note">То есть одна пара прогонов (4.4 часа квоты) не видит эффект меньше примерно пяти баллов
+при нашем итоге 9.43.</p>
+</div>
+
+<div class="card">
+<h3>«Надстройка платит на сильных играх» — это регрессия к среднему</h3>
+<p>От <code>flash_v1_phaseA</code> та же неизменная сборка теряет по четырём сильнейшим играм
+<b>−19.8</b> и <b>−20.0</b>; goalrule теряет <b>−18.1</b>, то есть меньше собственного неизменного кода.
+Адаптивные сборки проектировались против этого рисунка.</p>
+<p class="note">Три игры — re86, ft09, r11l — дают 40% всего разброса балла; их собственный размах
+между одинаковыми прогонами 24–37 очков.</p>
+</div>
+
+<div class="card">
+<h3>Экономия ходов почти исчерпана</h3>
+<p>Реконструкция формулы RHAE по данным прогона (даёт 9.20 против официальных 9.43):</p>
+<table>
+<tr><th>экономия ходов</th><th class="num">прибавка к баллу</th></tr>
+<tr><td>4.8% — наш запрет</td><td class="num">+0.18</td></tr>
+<tr><td>10%</td><td class="num">+0.34</td></tr>
+<tr><td>30%</td><td class="num">+0.77</td></tr>
+</table>
+<p>38% взятых уровней идут ниже потолка эффективности; довести их все до потолка стоит
+<b>+1.4 балла максимум</b>. Единственный настоящий рычаг — число взятых уровней.</p>
+<p class="note">Шестнадцать игр из 25 берут ноль или один уровень; в них доступно 116 уровней.</p>
+</div>
+
+<div class="card">
+<h3>Поправка: запрет пустых ходов ошибается в 18% срезов</h3>
+<p>Записанное утром «ошибок по построению не бывает» неверно. Довод опирался на детерминизм
+движка (561 повтор из 561), но тот показывает лишь, что та же <i>последовательность</i> ходов даёт
+ту же траекторию — а не что доска есть полное состояние игры.</p>
+<p>Пересчёт: из 200 срезов <b>37 (18%)</b> отняли бы работающий ход. Анимация объясняет 4 из них.
+Распределены неравномерно: 160 срезов из 200 — это sk48, где промахов 4 (2%) и где взято ноль
+уровней при 183 пустых ходах из 284.</p>
+<p class="note">Вариант с порогом включения посчитан и решением владельца отклонён: запрет действует
+с первого повтора.</p>
+</div>
+
+</div></body></html>

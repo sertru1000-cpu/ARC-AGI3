@@ -1,0 +1,123 @@
+"""Подготовка (без пуша) датасета nextfork — нашего форка боевой базы.
+
+nextfork — это распакованный `keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1`,
+та самая сборка, которую мы ставим в бой, плюс наши правки поверх. С 25.09
+все изменения обвязки идут только сюда; к чужому датасету мы не возвращаемся.
+
+Скрипт делает три вещи и ни одной сетевой: сверяет, что каталог по-прежнему
+похож на боевой бандл, пишет штамп версии со списком наших правок, пишет
+dataset-metadata.json. Публикация — отдельный шаг с разрешения владельца
+(scripts/push_nextfork_dataset.sh).
+
+usage: .venv/bin/python scripts/build_nextfork_dataset.py
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+BUNDLE = ROOT / "nextfork"
+MARKER = "taaf-kaggle-bundle.json"
+OWNER = "sergueimakarov"
+SLUG = "arc3-nextfork"
+TITLE = "arc3 nextfork (Flash-Next base + our harness)"
+UPSTREAM = "keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1"
+
+# Файлы, без которых кернел не поднимется. Проверяем поимённо: пустой или
+# обрезанный бандл Kaggle примет молча, а прогон упадёт через сорок минут.
+REQUIRED = [
+    MARKER,
+    "deploy_target.pkl",
+    "benchmark_initial.pkl",
+    "setup_commands.json",
+    "teardown_commands.json",
+    "serving_setup.py",
+    "serving_teardown.py",
+    "src/ARC3-Inference/inference/agent/tool_agent.py",
+    "src/ARC3-Inference/inference/agent/noop_guard.py",
+    "src/ARC3-Inference/inference/framework/solver.py",
+    "src/tufa-arc-agi-framework",
+    "src/ARC3-Inference/inference/agent/agentfix_scott.py",
+    "src/ARC3-Inference/inference/agent/AGENTFIX_ATTRIBUTION.md",
+    "src/ARC3-Inference/inference/agent/persist_defs.py",
+    "src/ARC3-Inference/inference/agent/buildwm.py",
+    "src/ARC3-Inference/inference/agent/compaction.py",
+    "src/ARC3-Inference/inference/agent/buildwm_sandbox/tycho.py",
+    "src/ARC3-Inference/inference/agent/observe_v2.py",
+    "src/ARC3-Inference/inference/agent/zoom_player.py",
+]
+
+# Наши правки поверх боевой базы. Строка попадает в штамп версии, чтобы по
+# самому датасету было видно, чем он отличается от чужого.
+OUR_CHANGES = [
+    "25.09 запрет повторного пустого хода при той же доске (noop_guard), режет с третьего пустого исхода: на N=3 ошибок ноль против 18% при N=1, механика «через раз» выживает",
+    "25.09 nostop: не считать бесполезным действие, эффект которого ни разу не наблюдали",
+    "25.09 цель уровня как ПРАВИЛО о доске (GOAL_RULE_ADDENDUM)",
+    "25.09 предусловия: правило (условие, действие) -> эффект, перепроверять мёртвые действия",
+    "26.09 протокол разведки на старте игры — в коде, ВЫКЛЮЧЕН по умолчанию: офлайн-реплей показал ноль информации (все стрелки срабатывают с первого нажатия); вкл. NEXTFORK_START_PROBE=1",
+    "26.09 согласование двух ответов на первых 4 ходах игры — в коде, ВЫКЛЮЧЕНО по умолчанию: cons 5.45 и 3.83 (1 ч) против v3 7.63 / 5.00, пользы нет; вкл. NEXTFORK_CONSENSUS=1",
+    "26.09 AGENTFIX Scott Le Grand (scottlegrand) дословно модулем inference/agent/agentfix_scott.py (авторство — AGENTFIX_ATTRIBUTION.md): картинка только у текущего запроса (x12), оценщик токенов картинки 120, терпимый разбор блоков модели мира, проигрыш не стирает память; ставится при импорте solver.py, выкл. NEXTFORK_AGENTFIX=0; окно обвязки — NEXTFORK_CONTEXT_WINDOW; его обвязка на 1 ч: 8.01 против 5.00 у v3",
+    "27.09 функции модели живут между вызовами песочницы в пределах игры (persist_defs.py, ставится после AGENTFIX): функции, импорты из белого списка, константы-литералы; под 27.09 два прогона: повтор кода 14–17% против 24–27%, ответ −10–15%, баллы 2.37/2.66 при контролях 2.60/1.45; выкл. NEXTFORK_PERSIST=0",
+    "27.09 кандидаты, ВЫКЛЮЧЕНЫ по умолчанию: наблюдение в сообщении v2 (observe_v2.py, NEXTFORK_OBSERVE=1) и вторая картинка — окрестность игрока x32 (zoom_player.py, NEXTFORK_ZOOM=1); решение после повторов на поде",
+    "27.09 выключатели частей v3: NEXTFORK_NOOPGUARD=0 снимает запрет пустого хода, NEXTFORK_V3PROMPTS=0 возвращает стоковый промпт Tufa побайтно (без nostop, предусловий, goalrule); v4-lite = оба в 0, сборщик ноутбука --no-v3",
+    "28.09 выключатель модели NEXTFORK_MODEL=swift в serving_setup.py: Swift 1.5 (ukisai/Swift-1.5-Qwen3.8-Flash-Next-NVFP4 @3ff0520, зеркало lordhansolo на Kaggle), своя проверка модели вместо хэшей keithtyser, PLE BF16 без fp8-заплатки, ожидание сервера 3000/3300 с; по умолчанию keith — без изменений",
+    "28.09 достройка симулятора по ходу игры в коде (inference/agent/buildwm.py + buildwm_sandbox/): заготовки base_step/tpl_step, check_step с разбором ошибки, plan(step, goal), run_plan со сверкой кадра, check_goal; numpy/hashlib/time/классы в песочнице; ВЫКЛЮЧЕНО по умолчанию, вкл. NEXTFORK_BUILDWM=1 (варианты пода a8/a8b/a8c)",
+    "29.09 NEXTFORK_MODEL=reap448: REAP-обрезка экспертов 512->448 (lee-chang-93/...-REAP-k448, зеркало boristown), своя проверка (448 экспертов, NVFP4/MIXED_PRECISION), ожидание 3000/3300 с; освобождает ~8 ГиБ видеопамяти под кэш. Заодно в tool_agent выключатель NEXTFORK_REASONING_EFFORT (по умолчанию не задан)",
+    "29.09 NEXTFORK_RUNTIME=v030 / NEXTFORK_RUNTIME=nightly в serving_setup.py: сборка vLLM 0.30.0 (рантайм foysalemonshanto) или ночной образ vllm-openai:nightly-36768d1b (наш датасет, fp8-кэш QSA); без PLE-заплатки RadixArk и без --quantization, VLLM_USE_FLASHINFER_SAMPLER=0; REAP — VLLM_MTP_NUM_EXPERTS=512 через sitecustomize.py модели и VLLM_USE_DEEP_GEMM=0. На поде 29.09: 0.30 — веса 79.43 ГиБ против 81.8, REAP — 69.21 ГиБ; по умолчанию keith — без изменений",
+    "29.09 NEXTFORK_COMPACT: сжатие истории вместо обрезки по статье OpenAI (inference/agent/compaction.py): при оценке истории > NEXTFORK_COMPACT_TOKENS модель пишет пересказ по шаблону разделов, факты из журнала игры дописывает обвязка, последние 2 хода остаются дословно; ВЫКЛЮЧЕНО по умолчанию",
+]
+
+
+def _iter_files(root: Path):
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name == "dataset-metadata.json":
+            continue
+        if "__pycache__" in path.parts or path.suffix in (".pyc", ".pyo"):
+            continue
+        if path.name.endswith(".egg-info") or any(p.endswith(".egg-info") for p in path.parts):
+            continue
+        yield path
+
+
+def build() -> None:
+    missing = [name for name in REQUIRED if not (BUNDLE / name).exists()]
+    if missing:
+        raise SystemExit("в бандле не хватает: " + ", ".join(missing))
+
+    files = sorted(_iter_files(BUNDLE))
+    total = sum(f.stat().st_size for f in files)
+    if len(files) < 1000:
+        raise SystemExit(f"файлов всего {len(files)} — боевой бандл заметно больше, проверьте каталог")
+
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                            capture_output=True, text=True).stdout.strip() or "?"
+    stamp = BUNDLE / "NEXTFORK_VERSION.txt"
+    stamp.write_text(
+        "форк боевой базы: %s\n" % UPSTREAM
+        + "commit: %s\n" % commit
+        + "built:  %s\n" % datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        + "наши правки:\n"
+        + "".join("  - %s\n" % line for line in OUR_CHANGES),
+        encoding="utf-8",
+    )
+
+    (BUNDLE / "dataset-metadata.json").write_text(
+        json.dumps({"title": TITLE, "id": f"{OWNER}/{SLUG}",
+                    "licenses": [{"name": "CC0-1.0"}]}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    print("каталог:     %s" % BUNDLE)
+    print("файлов:      %d" % len(files))
+    print("объём:       %.1f МиБ" % (total / 1024 / 1024))
+    print("штамп:\n%s" % stamp.read_text(encoding="utf-8").rstrip())
+    print()
+    print("НЕ опубликовано. Публикация — отдельный шаг с разрешения владельца:")
+    print("  bash scripts/push_nextfork_dataset.sh \"что изменилось\"")
+
+
+if __name__ == "__main__":
+    build()

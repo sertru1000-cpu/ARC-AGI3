@@ -1,0 +1,27 @@
+{
+  "id": "sergueimakarov/arc3-pub-scott-v3-battle",
+  "title": "arc3 pub scott v3 battle",
+  "code_file": "taaf-flashnext-sheetu12b-0922.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "keywords": [
+    "gpu"
+  ],
+  "dataset_sources": [
+    "sergueimakarov/arc3-nextfork",
+    "keithtyser/qwen38-flash-next-vllm-nvfp4-runtime-v1"
+  ],
+  "kernel_sources": [],
+  "competition_sources": [
+    "arc-prize-2026-arc-agi-3"
+  ],
+  "model_sources": [
+    "keithtyser/qwen3-8-flash-next-nvfp4/PyTorch/radixark-modelopt-fp4/1"
+  ],
+  "docker_image": "gcr.io/kaggle-private-byod/python@sha256:37c64f7dd9c54116ecd1bcc88817c5469b88387388fade02bfa8bf3fc647d461",
+  "machine_shape": "NvidiaRtxPro6000"
+}

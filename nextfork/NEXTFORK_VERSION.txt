@@ -1,0 +1,19 @@
+форк боевой базы: keithtyser/duck-qwen38-nvfp4-mtp-vllm-smoke-v1
+commit: 6f24fc74557bd67ac95fc54638a430f2595f7cee
+built:  2026-09-29T20:05:30Z
+наши правки:
+  - 25.09 запрет повторного пустого хода при той же доске (noop_guard), режет с третьего пустого исхода: на N=3 ошибок ноль против 18% при N=1, механика «через раз» выживает
+  - 25.09 nostop: не считать бесполезным действие, эффект которого ни разу не наблюдали
+  - 25.09 цель уровня как ПРАВИЛО о доске (GOAL_RULE_ADDENDUM)
+  - 25.09 предусловия: правило (условие, действие) -> эффект, перепроверять мёртвые действия
+  - 26.09 протокол разведки на старте игры — в коде, ВЫКЛЮЧЕН по умолчанию: офлайн-реплей показал ноль информации (все стрелки срабатывают с первого нажатия); вкл. NEXTFORK_START_PROBE=1
+  - 26.09 согласование двух ответов на первых 4 ходах игры — в коде, ВЫКЛЮЧЕНО по умолчанию: cons 5.45 и 3.83 (1 ч) против v3 7.63 / 5.00, пользы нет; вкл. NEXTFORK_CONSENSUS=1
+  - 26.09 AGENTFIX Scott Le Grand (scottlegrand) дословно модулем inference/agent/agentfix_scott.py (авторство — AGENTFIX_ATTRIBUTION.md): картинка только у текущего запроса (x12), оценщик токенов картинки 120, терпимый разбор блоков модели мира, проигрыш не стирает память; ставится при импорте solver.py, выкл. NEXTFORK_AGENTFIX=0; окно обвязки — NEXTFORK_CONTEXT_WINDOW; его обвязка на 1 ч: 8.01 против 5.00 у v3
+  - 27.09 функции модели живут между вызовами песочницы в пределах игры (persist_defs.py, ставится после AGENTFIX): функции, импорты из белого списка, константы-литералы; под 27.09 два прогона: повтор кода 14–17% против 24–27%, ответ −10–15%, баллы 2.37/2.66 при контролях 2.60/1.45; выкл. NEXTFORK_PERSIST=0
+  - 27.09 кандидаты, ВЫКЛЮЧЕНЫ по умолчанию: наблюдение в сообщении v2 (observe_v2.py, NEXTFORK_OBSERVE=1) и вторая картинка — окрестность игрока x32 (zoom_player.py, NEXTFORK_ZOOM=1); решение после повторов на поде
+  - 27.09 выключатели частей v3: NEXTFORK_NOOPGUARD=0 снимает запрет пустого хода, NEXTFORK_V3PROMPTS=0 возвращает стоковый промпт Tufa побайтно (без nostop, предусловий, goalrule); v4-lite = оба в 0, сборщик ноутбука --no-v3
+  - 28.09 выключатель модели NEXTFORK_MODEL=swift в serving_setup.py: Swift 1.5 (ukisai/Swift-1.5-Qwen3.8-Flash-Next-NVFP4 @3ff0520, зеркало lordhansolo на Kaggle), своя проверка модели вместо хэшей keithtyser, PLE BF16 без fp8-заплатки, ожидание сервера 3000/3300 с; по умолчанию keith — без изменений
+  - 28.09 достройка симулятора по ходу игры в коде (inference/agent/buildwm.py + buildwm_sandbox/): заготовки base_step/tpl_step, check_step с разбором ошибки, plan(step, goal), run_plan со сверкой кадра, check_goal; numpy/hashlib/time/классы в песочнице; ВЫКЛЮЧЕНО по умолчанию, вкл. NEXTFORK_BUILDWM=1 (варианты пода a8/a8b/a8c)
+  - 29.09 NEXTFORK_MODEL=reap448: REAP-обрезка экспертов 512->448 (lee-chang-93/...-REAP-k448, зеркало boristown), своя проверка (448 экспертов, NVFP4/MIXED_PRECISION), ожидание 3000/3300 с; освобождает ~8 ГиБ видеопамяти под кэш. Заодно в tool_agent выключатель NEXTFORK_REASONING_EFFORT (по умолчанию не задан)
+  - 29.09 NEXTFORK_RUNTIME=v030 / NEXTFORK_RUNTIME=nightly в serving_setup.py: сборка vLLM 0.30.0 (рантайм foysalemonshanto) или ночной образ vllm-openai:nightly-36768d1b (наш датасет, fp8-кэш QSA); без PLE-заплатки RadixArk и без --quantization, VLLM_USE_FLASHINFER_SAMPLER=0; REAP — VLLM_MTP_NUM_EXPERTS=512 через sitecustomize.py модели и VLLM_USE_DEEP_GEMM=0. На поде 29.09: 0.30 — веса 79.43 ГиБ против 81.8, REAP — 69.21 ГиБ; по умолчанию keith — без изменений
+  - 29.09 NEXTFORK_COMPACT: сжатие истории вместо обрезки по статье OpenAI (inference/agent/compaction.py): при оценке истории > NEXTFORK_COMPACT_TOKENS модель пишет пересказ по шаблону разделов, факты из журнала игры дописывает обвязка, последние 2 хода остаются дословно; ВЫКЛЮЧЕНО по умолчанию

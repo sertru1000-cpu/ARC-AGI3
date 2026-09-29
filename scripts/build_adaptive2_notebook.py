@@ -127,7 +127,10 @@ print("ADAPTIVE2: два слоя включены (%s). Порог %d ходо�
 
 
 def main() -> None:
-    src = json.load(open("kernels/notebooks_stockflash/submission.ipynb", encoding="utf-8"))
+    # С 25.09 слои накатываются поверх НАШЕГО форка (kernels/notebooks_nextfork),
+    # а не поверх чужой стоковой сборки: в форке живёт запрет повторного
+    # пустого хода, и мерить надстройку надо относительно него.
+    src = json.load(open("kernels/notebooks_nextfork/submission.ipynb", encoding="utf-8"))
     nb = json.loads(json.dumps(src))
     cell = nb["cells"][15]
     body = "".join(cell["source"])
@@ -139,14 +142,14 @@ def main() -> None:
     code = body[:at] + "\n" + CELL + body[at:]
     cell["source"] = code.splitlines(keepends=True)
 
-    out = "kernels/notebooks_stockflash_adaptive2"
+    out = "kernels/notebooks_nextfork_adaptive2"
     os.makedirs(out, exist_ok=True)
     open(os.path.join(out, "cell15.py"), "w", encoding="utf-8").write(CELL)
     json.dump(nb, open(os.path.join(out, "submission.ipynb"), "w", encoding="utf-8"),
               ensure_ascii=False, indent=1)
-    meta = json.load(open("kernels/notebooks_stockflash/kernel-metadata.json"))
-    meta["id"] = "sergueimakarov/arc3-stock-flash-adaptive2"
-    meta["title"] = "arc3 stock flash adaptive2"
+    meta = json.load(open("kernels/notebooks_nextfork/kernel-metadata.json"))
+    meta["id"] = "sergueimakarov/arc3-nextfork-adaptive2"
+    meta["title"] = "arc3 nextfork adaptive2"
     json.dump(meta, open(os.path.join(out, "kernel-metadata.json"), "w"), indent=2)
 
     compile(code, "c15", "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
