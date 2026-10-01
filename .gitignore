@@ -46,3 +46,7 @@ own_games_dataset/
 docs/artifacts/transcripts_*.html
 docs/dashscope_*.json
 dashscope.env
+docs/graft/dfranzen/pennyroyal/
+docs/graft/face-of-agi/rt/
+docs/graft/dfranzen/bundle/
+docs/graft/lordhansolo/bundle/

@@ -477,11 +477,11 @@ ARMS = {
 }
 
 
-def build_v4(names=("v4_a", "v4_b"), extra=(), tag="v4pod", cap=1800):
+def build_v4(names=("v4_a", "v4_b"), extra=(), tag="v4pod", cap=1800, seqs=16):
     """Боевой кандидат: наш стоковый ноутбук (build_nextfork_notebook --seqs 16 --cap 1800), датасет nextfork из локальной папки.
     extra — флаги сборщика: ("--no-v3",) даёт v4-lite (Скотт + память функций, без запрета пустого хода и правок промпта v3)."""
     import subprocess
-    subprocess.run([sys.executable, os.path.join(ROOT, "scripts/build_nextfork_notebook.py"), "--seqs", "16", "--cap", str(cap),
+    subprocess.run([sys.executable, os.path.join(ROOT, "scripts/build_nextfork_notebook.py"), "--seqs", str(seqs), "--cap", str(cap),
                     "--name", tag, *extra], check=True, capture_output=True)
     src = os.path.join(ROOT, "kernels/notebooks_nextfork_%s/submission.ipynb" % tag)
     for name in names:
@@ -494,7 +494,7 @@ def build_v4(names=("v4_a", "v4_b"), extra=(), tag="v4pod", cap=1800):
             c["source"] = t.splitlines(keepends=True)
         assert all(v == 1 for v in hits.values()), (name, hits)
         full = "".join("".join(c["source"]) for c in nb["cells"])
-        assert '"TAAF_VLLM_MAX_NUM_SEQS": "16"' in full and "max_runtime_s_per_game = %.1f" % cap in full, name
+        assert '"TAAF_VLLM_MAX_NUM_SEQS": "%d"' % seqs in full and "max_runtime_s_per_game = %.1f" % cap in full, name
         for c in nb["cells"]:
             if c["cell_type"] == "code":
                 compile("".join(c["source"]), name, "exec", ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)

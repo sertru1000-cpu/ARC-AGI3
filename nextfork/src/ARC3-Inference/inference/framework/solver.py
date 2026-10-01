@@ -1419,10 +1419,12 @@ if os.environ.get("NEXTFORK_PERSIST", "1").strip().lower() in {"1", "true", "on"
 #   NEXTFORK_ZOOM=1    — вторая картинка: окрестность игрока x32 (inference/agent/zoom_player.py).
 #   NEXTFORK_BUILDWM=1 — достройка симулятора по ходу игры (inference/agent/buildwm.py, варианты a8/a8b/a8c).
 #   NEXTFORK_COMPACT=1 — сжатие истории вместо обрезки (inference/agent/compaction.py, по статье OpenAI 29.09).
+#   NEXTFORK_PREDICT=1 — предсказание перед каждым ходом + страница заметок (inference/agent/predict.py, идея arc-skill 30.09).
 # ----------------------------------------------------------------------
 for _nf_flag, _nf_mod in (("NEXTFORK_OBSERVE", "inference.agent.observe_v2"), ("NEXTFORK_ZOOM", "inference.agent.zoom_player"),
                          ("NEXTFORK_BUILDWM", "inference.agent.buildwm"),
-                         ("NEXTFORK_COMPACT", "inference.agent.compaction")):
+                         ("NEXTFORK_COMPACT", "inference.agent.compaction"),
+                         ("NEXTFORK_PREDICT", "inference.agent.predict")):
     if os.environ.get(_nf_flag, "0").strip().lower() in {"1", "true", "on"}:
         try:
             __import__(_nf_mod)

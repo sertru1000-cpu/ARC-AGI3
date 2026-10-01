@@ -115,7 +115,7 @@ RUNTIME_DATASETS = {"keith": KEITH_RUNTIME, "v030": "foysalemonshanto/vllm-0-30-
 
 def build(smoke: bool = False, noprobe: bool = False, nocons: bool = False, agentfix: bool = False,
           seqs: int = 0, ctx: int = 0, kv_gib: int = 0, cap: float = 0.0, name: str = "", persist: bool = True,
-          observe: bool = False, zoom: bool = False, noopguard: bool = True, v3prompts: bool = True, model: str = "keith", buildwm: bool = False, kv_fp8: bool = False, effort: str = "", compact: int = 0, runtime: str = "keith", phase_a_cap: float = 0.0) -> None:
+          observe: bool = False, zoom: bool = False, noopguard: bool = True, v3prompts: bool = True, model: str = "keith", buildwm: bool = False, kv_fp8: bool = False, effort: str = "", compact: int = 0, runtime: str = "keith", phase_a_cap: float = 0.0, predict: bool = False) -> None:
     suffix = "_smoke" if smoke else "_noprobe" if noprobe else "_nocons" if nocons else ""
     if name:
         suffix = "_" + name
@@ -156,7 +156,8 @@ def build(smoke: bool = False, noprobe: bool = False, nocons: bool = False, agen
                    ([f"NEXTFORK_MODEL={model}"] if model != "keith" else []) + \
                    (["NEXTFORK_BUILDWM"] if buildwm else []) + \
                    (["NEXTFORK_COMPACT"] if compact else []) + \
-                   ([f"NEXTFORK_RUNTIME={runtime}"] if runtime != "keith" else [])
+                   ([f"NEXTFORK_RUNTIME={runtime}"] if runtime != "keith" else []) + \
+                   (["NEXTFORK_PREDICT"] if predict else [])
             src = src.replace(ANCHOR, CHECK.replace("__NEED__", repr(need)), 1)
             replaced_check += 1
         if smoke and FULL_CAP_LINE in src:
@@ -186,6 +187,7 @@ def build(smoke: bool = False, noprobe: bool = False, nocons: bool = False, agen
                 (['os.environ["NEXTFORK_ZOOM"] = "1"   # крупная картинка вокруг игрока'] if zoom else []) + \
                 (['os.environ["NEXTFORK_BUILDWM"] = "1"   # достройка симулятора по ходу игры (a8c)'] if buildwm else []) + \
                 ([f'os.environ["NEXTFORK_REASONING_EFFORT"] = "{effort}"   # уровень рассуждения шаблона'] if effort else []) + \
+                (['os.environ["NEXTFORK_PREDICT"] = "1"   # предсказание перед каждым ходом + заметки (идея arc-skill)'] if predict else []) + \
                 (['os.environ["NEXTFORK_COMPACT"] = "1"   # сжатие истории вместо обрезки (OpenAI)',
                   f'os.environ["NEXTFORK_COMPACT_TOKENS"] = "{compact}"'] if compact else []) + \
                 ([] if noopguard else ['os.environ["NEXTFORK_NOOPGUARD"] = "0"   # без запрета пустого хода (v3)']) + \
@@ -253,10 +255,11 @@ if __name__ == "__main__":
     ap.add_argument("--ctx", type=int, default=0, help="настоящее окно контекста обвязки, например 16384")
     ap.add_argument("--kv-gib", type=int, default=0, help="кэш внимания vLLM, ГиБ (боевой 5)")
     ap.add_argument("--cap", type=float, default=0.0, help="потолок на игру, с (проба)")
+    ap.add_argument("--predict", action="store_true", help="предсказание перед каждым ходом + страница заметок (NEXTFORK_PREDICT=1)")
     ap.add_argument("--phase-a-cap", type=float, default=0.0, help="с --smoke: потолок игры в фазе A, с (по умолчанию 1800); фаза B — 7920")
     ap.add_argument("--name", default="", help="суффикс папки и id кернела")
     a = ap.parse_args()
     if a.no_v3:
         a.noopguard = a.v3prompts = False
     build(a.smoke, a.noprobe, a.nocons, a.agentfix, a.seqs, a.ctx, a.kv_gib, a.cap, a.name, a.persist, a.observe, a.zoom,
-          a.noopguard, a.v3prompts, a.model, a.buildwm, a.kv_fp8, a.effort, a.compact, a.runtime, a.phase_a_cap)
+          a.noopguard, a.v3prompts, a.model, a.buildwm, a.kv_fp8, a.effort, a.compact, a.runtime, a.phase_a_cap, a.predict)

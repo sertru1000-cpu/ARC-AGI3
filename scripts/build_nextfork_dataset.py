@@ -68,6 +68,7 @@ OUR_CHANGES = [
     "29.09 NEXTFORK_MODEL=reap448: REAP-обрезка экспертов 512->448 (lee-chang-93/...-REAP-k448, зеркало boristown), своя проверка (448 экспертов, NVFP4/MIXED_PRECISION), ожидание 3000/3300 с; освобождает ~8 ГиБ видеопамяти под кэш. Заодно в tool_agent выключатель NEXTFORK_REASONING_EFFORT (по умолчанию не задан)",
     "29.09 NEXTFORK_RUNTIME=v030 / NEXTFORK_RUNTIME=nightly в serving_setup.py: сборка vLLM 0.30.0 (рантайм foysalemonshanto) или ночной образ vllm-openai:nightly-36768d1b (наш датасет, fp8-кэш QSA); без PLE-заплатки RadixArk и без --quantization, VLLM_USE_FLASHINFER_SAMPLER=0; REAP — VLLM_MTP_NUM_EXPERTS=512 через sitecustomize.py модели и VLLM_USE_DEEP_GEMM=0. На поде 29.09: 0.30 — веса 79.43 ГиБ против 81.8, REAP — 69.21 ГиБ; по умолчанию keith — без изменений",
     "29.09 NEXTFORK_COMPACT: сжатие истории вместо обрезки по статье OpenAI (inference/agent/compaction.py): при оценке истории > NEXTFORK_COMPACT_TOKENS модель пишет пересказ по шаблону разделов, факты из журнала игры дописывает обвязка, последние 2 хода остаются дословно; ВЫКЛЮЧЕНО по умолчанию",
+    "30.09 NEXTFORK_PREDICT (inference/agent/predict.py + predict_sandbox.py): каждый action(...) требует predict= — утверждение о доске (noop/change/cell/move/vanish/region/level+1/win/gameover, строка,столбец); обвязка печатает ✓/✗ с разбором и рассказ о переходе, пачка останавливается на первом промахе; notes(text) — страница заметок, показывается в каждом сообщении. Идея навыка arc-skill (Opus 5: 25/25, RHAE 100), код свой; ВЫКЛЮЧЕНО по умолчанию",
 ]
 
 

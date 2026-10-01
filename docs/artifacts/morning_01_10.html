@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Утро 01.10</title>
+<style>
+:root{--bg:#0f1115;--surface:#171a21;--surface2:#1e222b;--border:#2a2f3a;--ink:#e6e9ef;--dim:#98a1b3;--good:#4ade80;--warn:#fbbf24;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:2.5rem 1rem 4rem}h1{font-size:1.9rem;margin:0 0 .3rem}.sub{color:var(--dim);margin:0 0 1.5rem}
+h2{font-size:1.15rem;margin:2.2rem 0 .8rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:.92rem;margin:.5rem 0 1rem}th{text-align:left;color:var(--dim);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;padding:.5rem .6rem;border-bottom:1px solid var(--border)}
+td{padding:.55rem .6rem;border-bottom:1px solid var(--surface2);vertical-align:top}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem 1.2rem;margin:1rem 0}.go{border-left:4px solid var(--good)}
+code{font-family:var(--mono);background:var(--surface2);padding:.1em .4em;border-radius:4px;font-size:.86em}ul{padding-left:1.2rem}li{margin:.3rem 0}.note{color:var(--dim);font-size:.88rem}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f7f8fa;--surface:#fff;--surface2:#eef1f5;--border:#d8dde5;--ink:#1a1d23;--dim:#5b6472}}
+</style></head><body><div class="wrap">
+<h1>Утро 01.10: раскрытия и что ставим в бой</h1>
+<p class="sub">Ночь 30.09→01.10, автономный режим. Квота: одна фаза A (~40 мин) — на решение Франзена.</p>
+
+<div class="card go"><b>Рекомендация на бой сегодня:</b> копия решения Франзена — кернел <code>sergueimakarov/arc3-graft-dfranzen-m2</code> v1.
+Фаза A пройдена (COMPLETE): 10 игр × 4 мин — 9 уровней, 1-й уровень в 8/10, 3.32, генерация 522 т/с, ошибок нет. От его ноутбука отличается одной строкой (длительность фазы A); боевая ветка не тронута. Сабмит — по твоему слову.</div>
+
+<h2>Итог этапа 2 (таблица в 03:11)</h2>
+<table><tr><th>место</th><th>команда</th><th>балл</th><th>раскрыто</th></tr>
+<tr><td>1</td><td>Tufa Labs</td><td>50.65</td><td>нет</td></tr>
+<tr><td>2</td><td>Yi-Chia Chen</td><td>40.80</td><td>нет</td></tr>
+<tr><td>3</td><td><b>Daniel Franzen</b></td><td>27.89</td><td>целиком: ноутбук, GitHub da-fr/arc-agi-3-solution, WRITEUP</td></tr>
+<tr><td>4</td><td>the last dance</td><td>24.54</td><td>нет</td></tr>
+<tr><td>5</td><td>Lord Han Solo</td><td>23.84</td><td>целиком: бандл, vLLM e975732 (+GDN RecoverSSM), модель NVFP4+FP8 смешанная</td></tr>
+<tr><td>6</td><td>rellik13</td><td>22.53</td><td>Kaggle + GitHub LohitSiriki/arc-agi-3-milestone2-solution; SGLang Pennyroyal + Intel W4A16</td></tr>
+<tr><td>7</td><td>Tong Hui Kang</td><td>20.53</td><td>частично: дообученная Flash-Next (84 ГБ, формат RadixArk)</td></tr>
+<tr><td>8</td><td>face-of-agi</td><td>20.00</td><td>целиком: агент pi + планировщик arena, эксперты GPTQ на ARC (64 ГБ), кэш INT4</td></tr>
+</table>
+<p class="note">Мы: 4.30. Сабмит REAP 30.09 — 4.00.</p>
+
+<h2>Решение Франзена в одном абзаце (по его WRITEUP)</h2>
+<ul>
+<li><b>Без обучения.</b> Модель Intel W4A16 AutoRound + черновик albucino; сервер Pennyroyal (форк SGLang) со своими патчами.</li>
+<li><b>Контекст 128 тыс. с кэшем префикса 93%:</b> одновременно 10 игр (их история не вытесняется), обрезка истории крупными блоками, патч состояний Mamba.</li>
+<li><b>Планировщик:</b> все игры стартуют сразу, активны 10; приоритет P=(A+B)·C от уровня, ходов и токенов (откалиброван на 725 попытках).</li>
+<li><b>Восприятие:</b> анимации в REPL (сильнейшее), картинка ×10 (сильнейшее из картинок), картинка разницы, кадр смерти, <code>frame_diff</code>.</li>
+<li><b>Действия:</b> UNDO, подсказки при проигрыше и новом уровне, стражи пустых ходов, функции модели между вызовами; модель мира выключена.</li>
+</ul>
+
+<h2>Сравнение трёх открытых решений (huikang, форум 744792, 01.10 00:36 UTC)</h2>
+<table><tr><th></th><th>Франзен 27.89</th><th>Lord Han Solo 23.84</th><th>rellik13 22.53</th><th><b>мы 4.30</b></th></tr>
+<tr><td>сервер</td><td>SGLang Pennyroyal 2.5.3</td><td>vLLM ночной</td><td>SGLang Pennyroyal 2.5.0</td><td>vLLM keith (26.08)</td></tr>
+<tr><td>окно обвязки</td><td><b>131 тыс.</b></td><td><b>127 тыс.</b></td><td><b>70 тыс.</b></td><td><b>32 тыс.</b></td></tr>
+<tr><td>кэш KV</td><td>fp8</td><td>fp8</td><td>fp8</td><td>BF16, 5 ГиБ</td></tr>
+<tr><td>одновременно</td><td>10 из 110 (с приоритетом)</td><td>14</td><td>28 на 16 местах</td><td>28 на 16 местах</td></tr>
+<tr><td>черновик</td><td>NEXTN 3 + урезанный словарь 64k</td><td>MTP 3 + словарь 32k</td><td>NEXTN 3, NVFP4</td><td>MTP 3</td></tr>
+<tr><td>обрезка истории</td><td>крупными блоками до 58k</td><td>мягкая цель 81k</td><td>пороги 57k → 45k</td><td>до 32k по оценке</td></tr>
+</table>
+<p class="note"><b>Общее у всех трёх (ВЫВЕДЕНО):</b> окно в 2–4 раза больше нашего, fp8-кэш, кэш префикса и черновик с урезанным словарём. Наш fp8-эксперимент на 32k окне прибавки не дал — у них fp8 нужен, чтобы держать длинное окно.</p>
+
+<h2>Что дальше (по плану на октябрь)</h2>
+<ul>
+<li>Бой сегодня — копия Франзена (цель — воспроизвести ~27).</li>
+<li>Разбор стеков Lord Han Solo, face-of-agi и rellik13: что у них есть сверх Франзена (бесплатно).</li>
+<li>Модель huikang — кандидат на подмену модели, когда будет база.</li>
+</ul>
+<p class="note">Файлы: docs/graft/{dfranzen,lordhansolo,face-of-agi,rellik13,...}, reference/da-fr, runs/kaggle_graft_dfranzen_v1.</p>
+</div></body></html>

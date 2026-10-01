@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Аудит стека 30.09</title>
+<style>
+:root{--bg:#0f1115;--surface:#171a21;--surface2:#1e222b;--border:#2a2f3a;--ink:#e6e9ef;--dim:#98a1b3;
+--good:#4ade80;--bad:#f87171;--warn:#fbbf24;--noise:#64748b;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:2.5rem 1rem 4rem}
+h1{font-size:1.9rem;margin:0 0 .3rem}
+.sub{color:var(--dim);margin:0 0 1.5rem}
+h2{font-size:1.15rem;margin:2.2rem 0 .8rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:.9rem;margin:.5rem 0 1rem}
+th{text-align:left;color:var(--dim);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;padding:.5rem .6rem;border-bottom:1px solid var(--border);vertical-align:bottom}
+td{padding:.55rem .6rem;border-bottom:1px solid var(--surface2);vertical-align:top}
+.tag{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.74rem;font-weight:600;white-space:nowrap}
+.t-ok{background:#14372a;color:#86efac}.t-no{background:#3f1d1d;color:#fca5a5}.t-part{background:#3f2d1a;color:#fbbf24}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem 1.2rem;margin:1rem 0}
+code{font-family:var(--mono);background:var(--surface2);padding:.1em .4em;border-radius:4px;font-size:.86em}
+.note{color:var(--dim);font-size:.88rem}
+ul{padding-left:1.2rem;margin:.3rem 0}li{margin:.25rem 0}
+@media(max-width:700px){table{font-size:.82rem}td,th{padding:.4rem .35rem}}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f7f8fa;--surface:#fff;--surface2:#eef1f5;--border:#d8dde5;--ink:#1a1d23;--dim:#5b6472}}
+</style></head><body><div class="wrap">
+
+<h1>Аудит стека: от карты до обвязки</h1>
+<p class="sub">30.09, по правилу <code>feedback-full-stack-audit-first</code>. Каждая строка — замер с источником или честное «не проверено».
+Бой: v4-lite (старая сборка vLLM, кэш 5 ГиБ) — 4.30; REAP + vLLM 0.30, 15 ГиБ — 4.00. Лидеры: 45.33 / 40.80 / 27.89.</p>
+
+<div class="card"><b>Главное.</b> Из семи слоёв полностью измерены только три нижних по памяти и кэшу. Не измерены:
+загрузка карты в бою, скорость сервера в долгой игре на Kaggle, SGLang и TensorRT-LLM, распределение времени между играми
+на скрытом наборе. Именно там, вероятнее всего, и лежит разница с лидерами — по описанию Franzen: «инструменты агента,
+распределение вычислений, сервер SGLang».</div>
+
+<h2>1. Карта</h2>
+<table><tr><th>что</th><th>Kaggle</th><th>наши поды</th><th>статус</th></tr>
+<tr><td>модель</td><td>RTX PRO 6000 Blackwell Server Edition, 96 ГБ</td><td>то же</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>предел мощности</td><td><b>600 Вт</b> (кернел arc3-cpu-probe)</td><td>450 Вт на поде US-MO-2; на других не снимали</td><td><span class="tag t-part">частично</span></td></tr>
+<tr><td>загрузка во время игры</td><td><b>не снимали</b></td><td>37% на медленном поде (упор в процессор)</td><td><span class="tag t-no">не проверено</span></td></tr>
+<tr><td>свободная видеопамять</td><td>REAP 15 ГиБ: запас ~4.7 ГБ (выведено: под 5.4 ГБ минус процесс ноутбука 712 МиБ)</td><td>5.4 ГБ</td><td><span class="tag t-part">выведено</span></td></tr>
+</table>
+
+<h2>2. Процессор</h2>
+<table><tr><th>что</th><th>Kaggle</th><th>наши поды</th><th>статус</th></tr>
+<tr><td>модель</td><td><b>AMD EPYC 9B45</b> (Zen 5), 24 ядра / 48 потоков, 176 ГБ ОЗУ</td><td>Xeon 6952P (US-MO-2); остальные не записаны</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>одно ядро (цикл Python 3 млн)</td><td><b>0.162 с</b></td><td>не сняли ни на одном поде</td><td><span class="tag t-part">частично</span></td></tr>
+<tr><td>упор главного цикла vLLM</td><td>не снимали</td><td>US-MO-2: EngineCore 100% одного ядра, генерация ~260 т/с</td><td><span class="tag t-no">не проверено на Kaggle</span></td></tr>
+</table>
+
+<h2>3. Сервер</h2>
+<table><tr><th>движок</th><th>что знаем</th><th>для Flash-Next</th><th>статус</th></tr>
+<tr><td>vLLM keith (дев-сборка 26.08)</td><td>боевой до 30.09; fp8-кэш не умеет; веса 81.8 ГиБ</td><td>да</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>vLLM 0.30.0 (22.09)</td><td>веса 79.43 ГиБ; со 9 ГиБ = старая с 8 ГиБ (450 против 456 запросов); свой скорости не дал</td><td>да, REAP тоже</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>vLLM ночная (0.30.1rc1)</td><td>fp8-кэш работает: ×1.32 токенов; уровней не прибавил</td><td>да</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td><b>SGLang</b></td><td>исходники с <code>qwen4_exp</code> лежат в нашем бандле с 26.09, без ядер; планировщик с меньшей нагрузкой на процессор, RadixAttention. У Franzen (3-е место) — в описании решения</td><td>да, по исходникам</td><td><span class="tag t-no">не запускали</span></td></tr>
+<tr><td><b>TensorRT-LLM</b></td><td>ветка main 1.4.0rc0: <code>modeling_qwen4_exp.py</code>, MTP, NVFP4, выгрузка PLE в хост (<code>TRTLLM_QWEN4_EXP_PLE_HOST_OFFLOAD</code>), 1509 строк тестов</td><td>да, по исходникам</td><td><span class="tag t-no">не запускали</span></td></tr>
+</table>
+
+<h2>4. Память сервера и очередь</h2>
+<table><tr><th>что</th><th>бой v4-lite</th><th>бой REAP</th><th>статус</th></tr>
+<tr><td>кэш</td><td>5 ГиБ = 105 тыс. токенов, 3.21 запроса</td><td>15 ГиБ = 315.6 тыс., 9.63 (фаза A Kaggle)</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>Running / Waiting</td><td>3 / 22 (весь сентябрь)</td><td>до 14 одновременно (фаза A, 120 с)</td><td><span class="tag t-part">коротко</span></td></tr>
+<tr><td>в долгой игре (2-й час) на Kaggle</td><td colspan="2">логов фазы B нет; дольше 1 ч REAP не мерили нигде</td><td><span class="tag t-no">не проверено</span></td></tr>
+<tr><td>кэш префикса</td><td colspan="2">выключен; при включении 08.09 — 8% попаданий (обвязка пересобирает сообщения)</td><td><span class="tag t-part">старый замер</span></td></tr>
+</table>
+
+<h2>5. Модель</h2>
+<table><tr><th>вариант</th><th>что знаем</th><th>статус</th></tr>
+<tr><td>Flash-Next NVFP4 (RadixArk / keith)</td><td>база всего сентября</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>REAP-448 (64 эксперта срезаны)</td><td>на поде 1 ч: 47 уровней, 12.70; бой 4.00</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>Swift 1.5 (RL-дообучение)</td><td>2.11 против 2.63 (шум), на кэше 5 ГиБ</td><td><span class="tag t-part">на старом кэше</span></td></tr>
+<tr><td>REAP p384 (michaeltgao)</td><td>384 эксперта? описания нет</td><td><span class="tag t-no">не проверено</span></td></tr>
+<tr><td>MTP (спекулятивное декодирование)</td><td>MTP 3, принятие 55–65%; MTP 0/2 на большом кэше не сравнивали; отдельных драфтеров нет</td><td><span class="tag t-part">частично</span></td></tr>
+<tr><td>другие модели в 96 ГБ</td><td>gpt-oss-120b 0/25, Qwen3.8-27B, DeepSeek 2–3 бит — хуже; сильнее Flash-Next не нашли</td><td><span class="tag t-ok">проверено</span></td></tr>
+</table>
+
+<h2>6. Время и игры</h2>
+<table><tr><th>что</th><th>как сейчас</th><th>статус</th></tr>
+<tr><td>бюджет</td><td>9 ч на ноутбук (32 400 с), 7920 с на игру, 28 игр одновременно, 16 мест сервера → ~4 волны на ~110 скрытых игр</td><td><span class="tag t-ok">из кода</span></td></tr>
+<tr><td>сколько времени реально получают игры на скрытом наборе</td><td>не видно: логов фазы B нет</td><td><span class="tag t-no">не проверено</span></td></tr>
+<tr><td>кривая «уровни от минуты»</td><td>на публичных: REAP 9/25/32/38/47 к 10/20/30/45/60 мин; старая сборка 37–40 к 132 мин</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>распределение времени между играми («compute scheduling» у Franzen)</td><td>у нас равное, без перераспределения; снятие остывших игр опровергнуто на старой сборке</td><td><span class="tag t-part">на старой сборке</span></td></tr>
+</table>
+
+<h2>7. Обвязка и промпты</h2>
+<table><tr><th>что</th><th>как сейчас</th><th>статус</th></tr>
+<tr><td>база</td><td>Duck (Tufa) + AGENTFIX Скотта + память функций; v3 выключен</td><td><span class="tag t-ok">в бою</span></td></tr>
+<tr><td>на что уходят вызовы</td><td>56% — только осмотр доски, 44% — ходы, 7% падают с ошибкой (REAP 1 ч)</td><td><span class="tag t-ok">измерено</span></td></tr>
+<tr><td>predict (arc-skill), a6b наблюдение</td><td>ниже контроля, но на медленном поде без контроля на нём же</td><td><span class="tag t-part">не доказано</span></td></tr>
+<tr><td>«инструменты агента» у Franzen</td><td>ждём код до 02:59 МСК 01.10</td><td><span class="tag t-no">неизвестно</span></td></tr>
+</table>
+
+<h2>Что проверить и сколько стоит</h2>
+<table><tr><th>шаг</th><th>слой</th><th>цена</th></tr>
+<tr><td>разобрать код Franzen: сервер SGLang, распределение времени, инструменты</td><td>3, 6, 7</td><td>бесплатно, сегодня ночью</td></tr>
+<tr><td>фаза A на Kaggle 1–2 ч с REAP: загрузка карты, Running/Waiting, генерация, падения сервера во 2-м часу</td><td>1, 2, 4</td><td>1.5–2.5 ч квоты после 03.10</td></tr>
+<tr><td>SGLang против vLLM на одной машине, одинаковая нагрузка, паспорт машины</td><td>3</td><td>~1.5 ч пода ≈ $3, или его рантайм у Franzen</td></tr>
+<tr><td>TensorRT-LLM: собрать и поднять Flash-Next</td><td>3</td><td>под, несколько часов; только если SGLang не даст прироста</td></tr>
+<tr><td>MTP 0 / 2 / 3 на большом кэше</td><td>5</td><td>~30 мин пода</td></tr>
+</table>
+<p class="note">Источники: runs/kaggle_cpu_probe, runs/kaggle_reap_kv15_v1_phaseA, runs/pod_3009_all, runs/pod_3009b_all, runs/pod_ss_reap_1h, scripts/level_times.py, reference/trtllm (исходники NVIDIA), nextfork/src/sglang-rtxpro6000; записи памяти проекта.</p>
+</div></body></html>
