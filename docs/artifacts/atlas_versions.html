@@ -309,6 +309,24 @@
       <div class="node"></div>
       <div class="card">
         <div class="card-head">
+          <div class="v-label"><span class="v-num">v4-lite-v030-reap-kv15 &middot; v4-lite на REAP-448 + vLLM 0.30, кэш 15 ГиБ</span><span class="v-date">30.09 &middot; кернел arc3-nextfork-v4lite-v030-reap-kv15 &middot; датасет arc3-nextfork (опубл. 30.09 00:41 МСК, 4422 файла, NEXTFORK_RUNTIME) &middot; рантайм foysalemonshanto/vllm-0-30-0-runtime &middot; модель boristown REAP-448</span></div>
+          <span class="badge pending">v1 запушен 30.09 01:41 МСК; фаза A COMPLETE (02:20): сервер vLLM 0.30 + REAP встал на Kaggle (69.2 ГиБ, кэш 315.6 тыс., 14 запросов одновременно), 102 запроса без ошибок, уровней 0 за 120 с на игру (36 ходов — проверка запуска, не балла); <strong>бой 30.09: 4.00</strong> (сабмит 56693544) — не лучше v4-lite 4.30; на поде за 1 ч 12.70 / 47 уровней, старая сборка за 132 мин 37–40 уровней; вероятна среда боя (не мерили дольше 1 ч)</span>
+        </div>
+        <p class="summary">Отличие от боевого v4-lite (4.30) — три строки ноутбука: NEXTFORK_RUNTIME=v030 (vLLM 0.30.0 вместо дев-сборки keith 26.08), NEXTFORK_MODEL=reap448 (64 эксперта из 512 срезаны, веса 69.2 ГиБ против 81.8), кэш 15 ГиБ вместо 5 (316 тыс. токенов против 105 тыс.).</p>
+        <ul class="changes">
+          <li><strong>Под 29.09, 25 игр по 30 мин, v4-lite:</strong> боевая настройка (старая сборка, 5 ГиБ) 13 уровней, 12/25, 1.70; 0.30 + обычная модель 9 ГиБ 18 / 14/25 / 2.85; <strong>0.30 + REAP 16 ГиБ 26 / 18/25 / 4.71</strong>, запросов 577 против 365, очередь 37 с против 101; по играм против 0.30 8:2, против kv8 6:0.</li>
+          <li><strong>Отвергнуто:</strong> fp8-кэш на ночной сборке — обычная модель 20 / 12/25 / 4.28 (по играм 4:4 с BF16), REAP + fp8 22 / 18/25 / 3.27 (2:5 по уровням против REAP BF16): кэш ×1.2–1.3, запросов +5–8%, уровней не прибавил.</li>
+          <li><strong>Проверено на поде через сам serving_setup.py</strong> (рантайм 0.30 распакован как на Kaggle): VLLM_SETUP_COMPLETE за 415 с, REAP 69.2 ГиБ, кэш 315.6 тыс. токенов, свободно 5.4 ГБ (на Kaggle минус процесс ноутбука 712 МиБ — запас ~4.7 ГБ); игра 5 мин без ошибок.</li>
+          <li><strong>Под 30.09, 1 ч на игру, та же сборка через serving_setup.py, 15 ГиБ:</strong> 47 уровней, 1-й уровень 21/25, 2-й 12, ходов/игру 77, запросов 987, очередь 47 с, балл 12.70; ошибок и нехватки памяти нет. Для сравнения — старая сборка v4 на полной длине (132 мин) 7.32, 37 уровней.</li>
+          <li><strong>Правки кода:</strong> serving_setup.py — выключатель NEXTFORK_RUNTIME (keith по умолчанию, без изменений боя), без PLE-заплатки RadixArk и --quantization, VLLM_USE_FLASHINFER_SAMPLER=0; REAP — VLLM_MTP_NUM_EXPERTS=512 через sitecustomize.py модели и VLLM_USE_DEEP_GEMM=0.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="entry pending">
+      <div class="node"></div>
+      <div class="card">
+        <div class="card-head">
           <div class="v-label"><span class="v-num">v4-lite-kv8 &middot; v4-lite + кэш vLLM 8 ГиБ вместо 5</span><span class="v-date">29.09 ~00:50 &middot; кернел arc3-nextfork-v4lite-kv8 &middot; датасет arc3-nextfork (без изменений)</span></div>
           <span class="badge pending">v1 (8 ГиБ) — ERROR на Kaggle: нехватка видеопамяти (лишний процесс ноутбука 712 МиБ, на поде его нет); v2 (7 ГиБ) — ERROR: сервер поднялся, но OOM на первых запросах (нужно 272 МиБ, свободно 240); в бой не годится</span>
         </div>

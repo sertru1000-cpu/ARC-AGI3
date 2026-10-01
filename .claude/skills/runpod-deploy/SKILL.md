@@ -22,6 +22,14 @@ This is a reversal of earlier same-day advice ("switch to the vllm-openai image,
 
 **What DOES reliably work, confirmed multiple times 26-27.08:** a plain "RunPod Pytorch 2.8.0" template pod (1x A100 SXM 80GB, via the web UI) always gave working SSH, both times it was tried. Use this.
 
+## FIRST on every new pod (rule of 30.09)
+
+Right after SSH works, before downloading weights: `scp scripts/machine_probe.py` to the pod, run it, save the output to
+`runs/<pod>/machine_probe.txt`, and compare with the Kaggle reference (AMD EPYC 9B45, PYLOOP 0.162 s, GPU power limit 600 W).
+If the pod is slower (PYLOOP higher or power limit below 600 W), queue a control run ON THE SAME POD — never compare its runs
+with runs from other pods. Why: 30.09 a Xeon 6952P / 450 W pod was ~1.5x slower (vLLM EngineCore pinned one core at 100%,
+GPU 37%), and two layer verdicts became unprovable. Memory: [[feedback-machine-probe-before-comparing]].
+
 ## Steps, in order
 
 1. **Tell the user exactly what to pick in the web UI**: template "RunPod Pytorch 2.8.0" (or whatever the current equivalent default PyTorch template is called), GPU "1x A100 SXM" / 80GB VRAM. Do not attempt to specify a Docker image or override any start command — the default template already works.

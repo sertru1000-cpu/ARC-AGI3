@@ -445,6 +445,11 @@
         <span class="item-title">ctx16 / kv8 — из аудита трубопровода</span>
         <span class="item-desc">У Скотта окно 16k не применялось (serving_setup возвращает 32768, tool_agent читает при импорте) и вытеснений было 10–213 на ~580 запросов. Сборка: <code>build_nextfork_notebook.py --seqs 16 --ctx 16384</code> или <code>--seqs 16 --kv-gib 8</code> (после публикации nextfork v4).</span>
       </div>
+      <div class="item" style="--item-color:var(--status-progress-ink)">
+        <span class="chip todo">бой 30.09: 4.00 — не лучше 4.30; на поде 1 ч 12.70. Проверить среду боя фазой A 1–2 ч после 03.10</span>
+        <span class="item-title">v4-lite-v030-reap-kv15 — REAP-448 + vLLM 0.30, кэш 15 ГиБ (главная находка 29.09)</span>
+        <span class="item-desc">Датасет arc3-nextfork опубликован 30.09 00:41 МСК (4422 файла, сверен; выключатель NEXTFORK_RUNTIME, по умолчанию keith). Рантайм foysalemonshanto/vllm-0-30-0-runtime, модель boristown REAP-448. Кернел arc3-nextfork-v4lite-v030-reap-kv15 v1: фаза A 120 с на игру, фаза B 7920 с. Под 29–30.09 (25 игр): 30 мин — 26 уровней / 18/25 / 4.71 против 13 / 12/25 / 1.70 у боевой настройки; 1 ч через сам serving_setup.py — 47 уровней / 21/25 / 12.70 без ошибок, свободно 5.4 ГБ видеопамяти (на Kaggle ~4.7). fp8-кэш (ночная сборка) прибавки не дал — отвергнут.</span>
+      </div>
       <div class="item" style="--item-color:var(--status-todo-ink)">
         <span class="chip done">бой 28.09: 4.30 — лучший наш</span>
         <span class="item-title">nextfork v4-lite — Скотт + память функций, без v3 (боевая)</span>
