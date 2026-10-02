@@ -5,7 +5,8 @@
   2. qwen_sparse_attn_backend.py — три чтения кэша идут через nf_fp4 (при bf16/fp8 поведение прежнее);
   3. server_args.py — при NEXTFORK_FP4_QSA=1 снимается проверка «KV4 только с triton/trtllm_mha/...»
      (у этой модели полное внимание всегда идёт через QSA, метка механизма на него не влияет);
-  4. fp4_kv_cache_quant_method.py — при NEXTFORK_FP4_NOWS=1 не выделяется общий fp8-буфер распаковки
+  4. memory_pool.py — масштаб записи берётся тензором с карты (иначе падает захват CUDA-графа);
+  5. fp4_kv_cache_quant_method.py — при NEXTFORK_FP4_NOWS=1 не выделяется общий fp8-буфер распаковки
      размером со весь пул (+~15% токенов в пуле; QSA он не нужен).
 Включение на сервере: --kv-cache-dtype nvfp4 и NEXTFORK_FP4_QSA=1 [NEXTFORK_FP4_NOWS=1] [NEXTFORK_FP4_OUT=fp8].
 
@@ -58,6 +59,16 @@ def main(root: Path):
          '        if cfg.kv_cache_dtype not in ("nvfp4", "fp4_mx_block16"):\n            return\n'
          f'        if __import__("os").environ.get("NEXTFORK_FP4_QSA") == "1":  # {MARK}\n            return\n\n'
          "        use_mla_backend = self.use_mla_backend()\n", 1),
+    ])
+
+    # запись в кэш: QSA передаёт layer.k_scale числом -> torch.tensor(...) копирует CPU->GPU и роняет захват
+    # CUDA-графа (под 02.10, s20fp4q). Берём тот же масштаб из k_scales_gpu (он и заполнен из layer.k_scale).
+    edit(srt / "mem_cache" / "memory_pool.py", [
+        ("    def _quantized_scales(self, global_layer_id: int, k_scale, v_scale):\n"
+         '        if k_scale is None and hasattr(self.quant_method, "k_scales_gpu"):\n',
+         "    def _quantized_scales(self, global_layer_id: int, k_scale, v_scale):\n"
+         f"        # {MARK}: число вместо тензора на карте ломает захват CUDA-графа\n"
+         '        if (k_scale is None or isinstance(k_scale, (int, float))) and hasattr(self.quant_method, "k_scales_gpu"):\n', 1),
     ])
 
     qm = srt / "layers" / "quantization" / "fp4_kv_cache_quant_method.py"
