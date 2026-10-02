@@ -22,22 +22,26 @@ def main():
     ap.add_argument("--probe", default="/workspace/probe.json")
     ap.add_argument("--port", type=int, default=8101)
     ap.add_argument("--out", default="")
+    ap.add_argument("--resp-max", type=int, default=384)
     a = ap.parse_args()
     items = json.load(open(a.probe))
     rows = []
     for it in items:
         rec = {"game": it["game"], "pair": it["pair"], "long_prompt": it["long_prompt"], "resp_len": it["resp_len"]}
+        resp = min(it["resp_len"], a.resp_max)
+        rec["resp_scored"] = resp
         for kind in ("long", "short"):
-            ids = it[kind + "_ids"]
+            full = it[kind + "_ids"]
+            ids = full[: len(full) - it["resp_len"] + resp]   # первые resp токенов ответа: логиты по словарю 248k не влезают в память
             t0 = time.time()
-            lp = generate(a.port, ids, len(ids) - it["resp_len"])
+            lp = generate(a.port, ids, len(ids) - resp)
             rec[kind + "_nll"] = -sum(lp) / max(1, len(lp))
             rec[kind + "_n"] = len(lp)
             rec[kind + "_s"] = round(time.time() - t0, 1)
         rec["gain"] = rec["short_nll"] - rec["long_nll"]
         rows.append(rec)
         print(f"[{a.tag}] {rec['game']} {rec['long_prompt']:6d}: long {rec['long_nll']:.4f} short {rec['short_nll']:.4f} "
-              f"gain {rec['gain']:+.4f} (n={rec['long_n']}/{it['resp_len']}, {rec['long_s']}s)", flush=True)
+              f"gain {rec['gain']:+.4f} (n={rec['long_n']}/{resp}, {rec['long_s']}s)", flush=True)
     n = len(rows)
     ml = sum(r["long_nll"] for r in rows) / n
     ms = sum(r["short_nll"] for r in rows) / n

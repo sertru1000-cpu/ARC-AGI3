@@ -326,7 +326,7 @@ if CFG["SPEC"]:
         "--speculative-eagle-topk", "1", "--speculative-num-draft-tokens", str(CFG["SPEC_STEPS"]+1),
         "--speculative-draft-model-path", str(DRAFT_VIEW),
         "--speculative-draft-model-quantization", "compressed-tensors", "--speculative-moe-runner-backend", "auto",
-        "--speculative-draft-kv-cache-dtype", CFG["KVDTYPE"],
+        "--speculative-draft-kv-cache-dtype", (CFG["KVDTYPE"] if CFG["KVDTYPE"].startswith(("fp8", "bf16", "bfloat16")) else "fp8_e4m3"),   # черновик: nvfp4 не поддерживается
         "--speculative-accept-threshold-single", str(CFG["SPEC_ACCEPT_SINGLE"]),
         "--speculative-accept-threshold-acc", str(CFG["SPEC_ACCEPT_ACC"])]
     if CFG["FRSPEC"]:
