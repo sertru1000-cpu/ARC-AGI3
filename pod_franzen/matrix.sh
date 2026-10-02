@@ -45,6 +45,8 @@ for v in "$@"; do
     bf16)      variant bf16 0 1 POD_KVDTYPE=bf16 POD_SPEC=0 ;;
     hicache)   variant hicache 10 0 POD_HICACHE_GB=30 ;;
     w250)      variant w250 4 0 POD_CTX_K=258 POD_MAXREQ=4 POD_HICACHE_GB=30 ;;
+    fp4q)      python3 $W/fp4qsa/apply_fp4qsa.py /tmp/sgl-intel/venv/lib/python3.12/site-packages/sglang
+               variant fp4q 10 1 POD_KVDTYPE=nvfp4 NEXTFORK_FP4_QSA=1 NEXTFORK_FP4_NOWS=1 ;;   # свой патч QSA для nvfp4
     sgl0521)   SERVE_SCRIPT=$W/pod_franzen/serve0521.py variant sgl0521 10 1 DELTA_DIR=$W/wheels/sgl0521 ;;
     *) echo "неизвестный вариант $v" ;;
   esac
