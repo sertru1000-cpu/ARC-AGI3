@@ -24,12 +24,16 @@ assert t.count(anchor2) == 1, "якорь в tool_agent не найден ров
 ADD = (
     "        if os.environ.get(\"NEXTFORK_MACROS\", \"0\").strip().lower() in (\"1\", \"true\", \"on\"):\n"
     "            prompt += (\n"
-    "                \"- Macros in python for a sequence you already know: `run(\\\"U3 R2 S D* C12,30\\\")` \"\n"
-    "                \"plays the moves one by one (U D L R S Z = up down left right space undo, a number repeats, \"\n"
-    "                \"`*` repeats until the board stops changing, C<row>,<col> clicks) and stops early on a level \"\n"
-    "                \"change, game over, a move that changes nothing, or a guard. `until(\\\"R\\\", lambda f: ...)` \"\n"
-    "                \"repeats one move until a test on the current frame holds. `click_each(\\\"r\\\")` clicks every \"\n"
-    "                \"object of that color. Each prints a one-line report. Probe single moves while the effect is unknown.\\n\"\n"
+    "                \"\\nMacro moves (use them):\\n\"\n"
+    "                \"- Once you know what the next moves should be, play them in ONE python call with a macro \"\n"
+    "                \"instead of one move per call. Every extra call costs a full model turn; macros do not.\\n\"\n"
+    "                \"- `run(\\\"U3 R2 S D* C12,30\\\")` plays moves one by one: U D L R = arrows, S = space, Z = undo, \"\n"
+    "                \"a number repeats, `*` repeats until the board stops changing, C<row>,<col> clicks. It stops by itself \"\n"
+    "                \"on a level change, game over, a move that changes nothing, or a guard, and prints a one-line report.\\n\"\n"
+    "                \"- `until(\\\"R\\\", lambda f: <test on frame f>)` repeats one move until the test holds; \"\n"
+    "                \"`click_each(\\\"r\\\")` clicks every object of that color.\\n\"\n"
+    "                \"- Single moves are for probing an unknown effect. When executing a plan, navigating to a known place, \"\n"
+    "                \"or repeating a move, use a macro.\\n\"\n"
     "            )\n"
 )
 if "NEXTFORK_MACROS" not in t:
