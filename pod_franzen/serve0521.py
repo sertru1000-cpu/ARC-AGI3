@@ -4,6 +4,7 @@ POD_SPEC (0/1), POD_REPLAYSSM (только для SGLang 0.5.21).
 usage: python pod_franzen/serve.py   (переменные: MODEL_DIR DRAFT_MODEL_DIR WHEELHOUSE_DIR WORKING_DIR)"""
 import os, sys, time, threading
 from pathlib import Path
+DELTA_DIR = os.environ["DELTA_DIR"]   # колёса SGLang 0.5.21 + перенесённые патчи (sergueimakarov/arc3-sglang0521-delta)
 MODEL_DIR = os.environ["MODEL_DIR"]
 DRAFT_MODEL_DIR = os.environ["DRAFT_MODEL_DIR"]
 WHEELHOUSE_DIR = os.environ["WHEELHOUSE_DIR"]
@@ -23,17 +24,17 @@ import os, sys, glob, time, shutil, subprocess, urllib.request, urllib.error
 import copy, hashlib, json, re, shlex, socket, zipfile
 from pathlib import Path
 
-PREFIX = "/tmp/sgl-intel"       # Separate from the previous fork's /tmp/sgl venv.
+PREFIX = "/tmp/sgl-0521"       # Separate from the previous fork's /tmp/sgl venv.
 LOG = str(Path(WORKING_DIR) / "serve.log")
 CFG = dict(
-    CTX=int(os.environ.get("POD_CTX_K", "136"))*1024,
+    CTX=(116+12+8)*1024,
     MEMFRAC=0.96,
     MAXREQ=int(os.environ.get("POD_MAXREQ", "10")),
     CUDAGRAPH_MAXBS=int(os.environ.get("POD_MAXREQ", "10")),
     MAMBA_CACHE=60,
     CHUNK=8192,
     MAX_PREFILL=16384,
-    SPEC=os.environ.get("POD_SPEC", "1") == "1",
+    SPEC=True,
     FRSPEC=True,
     AUTOTUNE=True,
     # Preserve the original Kaggle checkpoint prefetch/cache behavior.
@@ -43,7 +44,7 @@ CFG = dict(
     KVDTYPE=os.environ.get("POD_KVDTYPE", "fp8_e4m3"),
     SSM_DTYPE="bfloat16",
     MAMBA_RADIX="extra_buffer",
-    GDN_MTP_CACHE_MODE="none",
+    GDN_MTP_CACHE_MODE=None,   # флага --gdn-mtp-cache-mode в SGLang 0.5.21 нет
     SERVED_NAME=SERVED_MODEL_NAME,
     SPEC_ACCEPT_SINGLE=1.0,
     SPEC_ACCEPT_ACC=1.0,
@@ -174,8 +175,9 @@ with socket.socket() as probe:
 Path(PREFIX).mkdir(parents=True, exist_ok=True)
 Path(LOG).parent.mkdir(parents=True, exist_ok=True)
 WHEELS = find_unique(WHEELHOUSE_DIR, "wheels", directory=True)
-LOCK = find_unique(WHEELHOUSE_DIR, "requirements.lock")
-sglang_wheels = sorted(WHEELS.glob("sglang-*.whl"))
+DELTA_WHEELS = find_unique(DELTA_DIR, "wheels", directory=True)
+LOCK = find_unique(DELTA_DIR, "requirements.lock")   # lock Франзена с заменой 10 пакетов на SGLang 0.5.21
+sglang_wheels = sorted(DELTA_WHEELS.glob("sglang-*.whl"))
 assert len(sglang_wheels) == 1, f"Expected one SGLang wheel, found {sglang_wheels}"
 wheel = sglang_wheels[0]
 install_marker = Path(PREFIX) / "installed-bundle.txt"
@@ -200,7 +202,7 @@ if not Path(SGLANG).exists() or not install_marker.is_file():
     uv = [str(uv_binary)]
     if not Path(PYTHON).exists():
         run(uv + ["venv", "--python", sys.executable, VENV], env=install_env)
-    install = uv + ["pip", "install", "--python", PYTHON, "--no-index", "--find-links", str(WHEELS)]
+    install = uv + ["pip", "install", "--python", PYTHON, "--no-index", "--find-links", str(DELTA_WHEELS), "--find-links", str(WHEELS)]
     run(install + ["-r", str(LOCK)], env=install_env)
     run(install + ["--reinstall", "--no-deps", str(wheel)], env=install_env)
     install_marker.write_text('install')
@@ -270,6 +272,7 @@ print("Host compiler:", CXX)
 # Report the optional later caching patch. This cell does not modify wheel code.
 run([PYTHON, "-c", '''import pathlib, sglang, torch
 print("sglang", sglang.__version__, "| torch", torch.__version__)
+assert sglang.__version__.startswith("0.5.21"), "ожидался SGLang 0.5.21"
 assert torch.cuda.is_available(), "CUDA unavailable"
 print("GPU:", torch.cuda.get_device_name(0), "capability:", torch.cuda.get_device_capability(0))
 '''], env=env)
@@ -310,11 +313,6 @@ args = [SGLANG, "serve", "--model-path", MODEL_DIR, "--load-format", "safetensor
     "--default-chat-template-kwargs", '{"preserve_thinking":true}',
     "--watchdog-timeout", "1800", "--schedule-policy", "lpm", "--warmups", "structured_output",
     "--enable-cache-report", "--enable-metrics", "--enable-request-time-stats-logging"]
-if int(os.environ.get("POD_HICACHE_GB", "0")) > 0:
-    args += ["--enable-hierarchical-cache", "--hicache-size", os.environ["POD_HICACHE_GB"],
-             "--hicache-write-policy", "write_through", "--hicache-io-backend", "kernel"]
-if os.environ.get("POD_REPLAYSSM") == "1":
-    args += ["--enable-linear-replayssm-spec"]
 if CFG["PREFETCH_CHECKPOINTS"]: args += ["--weight-loader-prefetch-checkpoints"]
 if CFG["DROP_CACHE_AFTER_LOAD"]: args += ["--weight-loader-drop-cache-after-load"]
 tmpl = Path(MODEL_DIR, "chat_template.jinja")
@@ -328,7 +326,8 @@ if CFG["SPEC"]:
         "--speculative-draft-model-quantization", "compressed-tensors", "--speculative-moe-runner-backend", "auto",
         "--speculative-draft-kv-cache-dtype", CFG["KVDTYPE"],
         "--speculative-accept-threshold-single", str(CFG["SPEC_ACCEPT_SINGLE"]),
-        "--speculative-accept-threshold-acc", str(CFG["SPEC_ACCEPT_ACC"])]
+        "--speculative-accept-threshold-acc", str(CFG["SPEC_ACCEPT_ACC"]),
+        "--enable-linear-replayssm-spec"]   # 0.5.21: без промежуточного буфера SSM черновика (аналог gdn_mtp_cache_mode=none форка)
     if CFG["FRSPEC"]:
         tok = find_unique(WHEELHOUSE_DIR, "hot_tokens_64k.pt", required=False)
         if tok is None: tok = find_unique(WHEELHOUSE_DIR, "flash-next-64k.pt")
@@ -370,6 +369,5 @@ while time.time() - NOTEBOOK_START_TIME < SERVER_STARTUP_TIMEOUT:
 else:
     print(f"\nDEADLINE at {int(time.time()-NOTEBOOK_START_TIME)}s from notebook start; "
           f"releasing the benchmark with the server still loading")
-# ---- ждём здоровья и держим процесс живым, пока жив сервер ----
 print("server pid", proc.pid, "log", LOG, flush=True)
 proc.wait()

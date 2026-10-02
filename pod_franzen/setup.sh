@@ -8,7 +8,7 @@ nvidia-smi --query-gpu=name,driver_version,power.limit,memory.total --format=csv
 free -g | tee -a $W/run/machine_probe.txt; df -h / $W | tee -a $W/run/machine_probe.txt
 DRV=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d. -f1)
 [ "$DRV" -ge 580 ] || { echo "ДРАЙВЕР $DRV < 580: колёса Франзена собраны под CUDA 13 — СТОП"; exit 1; }
-pip install -q uv kaggle "huggingface_hub[cli]" hf_transfer
+pip install -q --break-system-packages uv kaggle "huggingface_hub[cli]" hf_transfer
 export HF_HUB_ENABLE_HF_TRANSFER=1
 echo "== 2. колёса Pennyroyal (Kaggle dfranzen/pennyroyal-v253)"; export KAGGLE_API_TOKEN=$(cat /root/.kaggle/access_token)
 [ -d $W/wheels/pennyroyal/wheels ] || { kaggle datasets download dfranzen/pennyroyal-v253 -p $W/wheels/pennyroyal --unzip; }
