@@ -22,7 +22,7 @@ while :; do
     echo "$(date +%H:%M) матрица готова"; fetch; kill_pod; exit 0
   fi
   if [[ "$(date -u +%H:%M)" > "$DEADLINE" || "$(date -u +%H:%M)" == "$DEADLINE" ]]; then
-    echo "$(date +%H:%M) срок $DEADLINE UTC вышел — качаю что есть и гашу безусловно"; fetch; kill_pod; exit 0
+    echo "$(date +%H:%M) срок $DEADLINE UTC вышел — качаю что есть; под НЕ трогаю"; fetch; kill_pod; exit 0
   fi
   sleep 60
 done
