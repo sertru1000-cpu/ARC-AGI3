@@ -35,6 +35,7 @@ PYPI = ["vllm", "sglang", "flashinfer-python", "torch", "transformers", "auto-ro
         "arc-agi", "arcengine"]
 GH_RELEASES = ["vllm-project/vllm", "sgl-project/sglang", "flashinfer-ai/flashinfer", "intel/auto-round",
                "vllm-project/llm-compressor", "NVIDIA/TensorRT-LLM"]
+GH_TAGS = ["jpezzulli/sglang-rtxpro6000", "mratsim/sglang-qwen38fn-sm120-turbo", "gabrielolympie/sglang-flashnext-sm120"]
 GH_REPOS = ["da-fr/arc-agi-3-solution", "LohitSiriki/arc-agi-3-milestone2-solution", "jpezzulli/sglang-rtxpro6000",
             "Tufalabs/duck-harness", "arcprize/ARC-AGI-3-Agents"]
 GH_ORGS = ["arcprize", "Tufalabs"]
@@ -173,7 +174,10 @@ def snap():
     s["pypi"] = section("PyPI", pypi)
 
     def releases():
-        return {repo: [r["tag_name"] for r in get(f"https://api.github.com/repos/{repo}/releases?per_page=5")] for repo in GH_RELEASES}
+        out = {repo: [r["tag_name"] for r in get(f"https://api.github.com/repos/{repo}/releases?per_page=5")] for repo in GH_RELEASES}
+        for repo in GH_TAGS:   # форки без релизов на GitHub: следим за тегами (Pennyroyal — сервер в бою)
+            out[repo + " (теги)"] = [t["name"] for t in get(f"https://api.github.com/repos/{repo}/tags?per_page=8")]
+        return out
     s["releases"] = section("релизы GitHub", releases)
 
     def docker():
