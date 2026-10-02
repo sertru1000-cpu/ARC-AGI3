@@ -310,6 +310,8 @@ args = [SGLANG, "serve", "--model-path", MODEL_DIR, "--load-format", "safetensor
     "--default-chat-template-kwargs", '{"preserve_thinking":true}',
     "--watchdog-timeout", "1800", "--schedule-policy", "lpm", "--warmups", "structured_output",
     "--enable-cache-report", "--enable-metrics", "--enable-request-time-stats-logging"]
+if os.environ.get("POD_ATTN"):
+    args += ["--attention-backend", os.environ["POD_ATTN"]]   # кэш KV в 4 битах требует triton / trtllm_mha
 if int(os.environ.get("POD_HICACHE_GB", "0")) > 0:
     args += ["--enable-hierarchical-cache", "--hicache-size", os.environ["POD_HICACHE_GB"],
              "--hicache-write-policy", "write_through", "--hicache-io-backend", "kernel"]
