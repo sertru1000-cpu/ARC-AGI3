@@ -37,6 +37,7 @@ QUEUE = [
     ("№21 мини-библиотека", "graft_dfranzen_m2_lib"),
     ("№22 нотация", "graft_dfranzen_m2_notes"),
     ("№8 vLLM LHS", "graft_dfranzen_m2_vllm_lhs"),
+    ("эскалация застрявшего уровня (Kepler)", "graft_dfranzen_m2_escalate"),
 ]
 
 
