@@ -13,7 +13,24 @@ import argparse, glob, json, statistics as st, sys, threading, time, urllib.requ
 from pathlib import Path
 
 
-def load_streams(run, games, max_per_game):
+def _tag_copy(messages, k):
+    """Копия игры k: метка в начале первого не-системного сообщения — общий с оригиналом только системный префикс."""
+    out, done = [], False
+    for m in messages:
+        m = dict(m)
+        if not done and m.get("role") != "system":
+            c = m.get("content")
+            tag = f"[session {k}]\n"
+            if isinstance(c, str):
+                m["content"] = tag + c
+            elif isinstance(c, list):
+                m["content"] = [{"type": "text", "text": tag}] + list(c)
+            done = True
+        out.append(m)
+    return out
+
+
+def load_streams(run, games, max_per_game, dup=1):
     streams = []
     for f in sorted(glob.glob(str(Path(run) / "*_p0_requests.jsonl")))[:games or None]:
         reqs = []
@@ -31,6 +48,8 @@ def load_streams(run, games, max_per_game):
             reqs = reqs[:max_per_game]
         if reqs:
             streams.append((Path(f).name[:4], reqs))
+            for k in range(1, dup):
+                streams.append((f"{Path(f).name[:4]}#{k}", [dict(q, messages=_tag_copy(q["messages"], k)) for q in reqs]))
     return streams
 
 
@@ -49,10 +68,11 @@ def main():
     ap.add_argument("--games", type=int, default=0)
     ap.add_argument("--max-requests-per-game", type=int, default=0)
     ap.add_argument("--out", default="")
+    ap.add_argument("--dup", type=int, default=1, help="каждую игру проиграть N раз (копии с меткой сессии)")
     ap.add_argument("--dry", action="store_true", help="только посчитать нагрузку, без запросов")
     a = ap.parse_args()
 
-    streams = load_streams(a.run, a.games, a.max_requests_per_game)
+    streams = load_streams(a.run, a.games, a.max_requests_per_game, a.dup)
     n_req = sum(len(r) for _, r in streams)
     gen = sum(q["max_tokens"] for _, r in streams for q in r)
     print(f"игр {len(streams)}, запросов {n_req}, токенов ответа {gen:,}, промптов (записано) "

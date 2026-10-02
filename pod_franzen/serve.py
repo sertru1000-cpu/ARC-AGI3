@@ -1,6 +1,6 @@
 """Сервер Франзена (SGLang Pennyroyal 2.5.3 + Intel W4A16 + черновик albucino) на поде — ячейка 12 его ноутбука дословно,
 с переменными из окружения. Настройки сервера можно менять переменными POD_KVDTYPE, POD_MAXREQ, POD_CTX_K, POD_HICACHE_GB,
-POD_SPEC (0/1), POD_REPLAYSSM (только для SGLang 0.5.21).
+POD_SPEC (0/1), POD_MAMBA, POD_REPLAYSSM (только для SGLang 0.5.21).
 usage: python pod_franzen/serve.py   (переменные: MODEL_DIR DRAFT_MODEL_DIR WHEELHOUSE_DIR WORKING_DIR)"""
 import os, sys, time, threading
 from pathlib import Path
@@ -30,7 +30,7 @@ CFG = dict(
     MEMFRAC=0.96,
     MAXREQ=int(os.environ.get("POD_MAXREQ", "10")),
     CUDAGRAPH_MAXBS=int(os.environ.get("POD_MAXREQ", "10")),
-    MAMBA_CACHE=60,
+    MAMBA_CACHE=int(os.environ.get("POD_MAMBA", "60")),   # 5 слотов на запрос: для 20 мест нужно 100
     CHUNK=8192,
     MAX_PREFILL=16384,
     SPEC=os.environ.get("POD_SPEC", "1") == "1",

@@ -30,7 +30,7 @@ variant() {  # имя streams probe(0/1) переменные...
   start_server $name "$@" || return
   grep -E "KV Cache is allocated|Load weight end" $W/run/$name/serve.log | head -3 | cut -c1-200
   [ "$probe" = "1" ] && python3 $W/pod_franzen/kvprobe.py --tag $name --port 8101 --out $W/run/kvprobe_$name.json 2>&1 | tail -3
-  [ "$streams" != "0" ] && python3 $W/replay_load.py --run $W/replay --url http://127.0.0.1:8101/v1 --streams $streams --out $W/run/replay_$name.json 2>&1 | tail -14
+  [ "$streams" != "0" ] && python3 $W/replay_load.py --run $W/replay --url http://127.0.0.1:8101/v1 --streams $streams ${REPLAY_ARGS:-} --out $W/run/replay_$name.json 2>&1 | tail -14
   grep -E "#running-req" $W/run/$name/serve.log | grep -o "full token usage: [0-9.]*" | sort -t: -k2 -n | tail -1
   free -g | sed -n 2p
 }
@@ -47,6 +47,11 @@ for v in "$@"; do
     w250)      variant w250 4 0 POD_CTX_K=258 POD_MAXREQ=4 POD_HICACHE_GB=30 ;;
     fp4q)      python3 $W/fp4qsa/apply_fp4qsa.py /tmp/sgl-intel/venv/lib/python3.12/site-packages/sglang
                variant fp4q 10 1 POD_KVDTYPE=nvfp4 NEXTFORK_FP4_QSA=1 NEXTFORK_FP4_NOWS=1 ;;   # свой патч QSA для nvfp4
+    # 20 одновременных игр: записанные 10 игр дважды (--dup 2), слотов Mamba 100 (по 5 на запрос)
+    s20)       REPLAY_ARGS='--dup 2' variant s20 20 0 POD_MAXREQ=20 POD_MAMBA=100 ;;
+    s20hc)     REPLAY_ARGS='--dup 2' variant s20hc 20 0 POD_MAXREQ=20 POD_MAMBA=100 POD_HICACHE_GB=30 ;;
+    s20fp4q)   python3 $W/fp4qsa/apply_fp4qsa.py /tmp/sgl-intel/venv/lib/python3.12/site-packages/sglang
+               REPLAY_ARGS='--dup 2' variant s20fp4q 20 0 POD_MAXREQ=20 POD_MAMBA=100 POD_KVDTYPE=nvfp4 NEXTFORK_FP4_QSA=1 NEXTFORK_FP4_NOWS=1 ;;
     sgl0521)   SERVE_SCRIPT=$W/pod_franzen/serve0521.py variant sgl0521 10 1 DELTA_DIR=$W/wheels/sgl0521 ;;
     *) echo "неизвестный вариант $v" ;;
   esac
