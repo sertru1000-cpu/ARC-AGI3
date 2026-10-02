@@ -13,6 +13,7 @@
 | 7 | graft_dfranzen_m2_sgl0521 | SGLang 0.5.21 v3 (ReplaySSM, ждёт сервер, 10×10 мин) | 0.75 ч | — (поставлена 02.10 по слову) |
 | 8 | graft_dfranzen_m2_vllm_lhs | vLLM Lord Han Solo (10×10 мин) | 1 ч | — |
 | 8б | graft_dfranzen_m2_hicache | второй ярус кэша KV в ОЗУ (HiCache 40 ГБ, как у rellik13) | 2.3 ч | — (по вопросу владельца 02.10) |
+| 8в | graft_dfranzen_m2_w250 | окно ~250k без лишних обрезок, 4 активные игры, HiCache 40 ГБ: длинная история против вдвое меньшей генерации | 2.3 ч | — (по слову владельца 02.10) |
 | 9 | graft_dfranzen_m2_fp4 | кэш nvfp4 на стенде | 2.3 ч | №4 без потери дальней памяти |
 | 10 | graft_dfranzen_m2_s14fp4 | 14 игр, полное окно, nvfp4 | 2.3 ч | №9 в порядке |
 | 11–13 | graft_dfranzen_m2_sched_nodecay / _patient / _impatient | планировщик | 6.9 ч | после №1–6 |
