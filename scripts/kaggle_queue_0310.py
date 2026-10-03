@@ -21,6 +21,7 @@ SLOTS = 2
 
 # порядок — как в очереди недели (docs/queue_week_0310.md); №14 и №18–20 условные — не здесь
 QUEUE = [
+    ("контроль base2 (новая база)", "graft_dfranzen_m2_base2"),
     ("проба fp4", "graft_fp4probe"),
     ("№1 контроль базы", "graft_dfranzen_m2_stand"),
     ("№3 макро-ходы", "graft_dfranzen_m2_macros"),
