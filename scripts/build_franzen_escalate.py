@@ -11,14 +11,14 @@ APPLY = (ROOT / "nextfork/escalate/apply_escalate.py").read_text()
 
 GIT = 'subprocess.run(["git", "apply", "--include=ARC3-Inference/*", "-v", "/kaggle/harness-changes.patch"], cwd=f"{BUNDLE_DIR}/src", check=True)\n'
 BLOCK = (
-    "# NEXTFORK 03.10: эскалация застрявшего уровня (nextfork/escalate, идея Kepler): после 60 ходов на уровне — обязательная инструкция\n"
+    "# NEXTFORK 03.10: эскалация застрявшего уровня (nextfork/escalate, идея Kepler): после 90 ходов на уровне — обязательная инструкция\n"
     "_ESC_DIR = Path('/kaggle/working/nextfork_escalate'); _ESC_DIR.mkdir(parents=True, exist_ok=True)\n"
     f"(_ESC_DIR / 'apply_escalate.py').write_text({APPLY!r})\n"
     "subprocess.run([sys.executable, str(_ESC_DIR / 'apply_escalate.py'), str(BUNDLE_DIR / 'src')], check=True)\n"
     "os.environ['NEXTFORK_ESCALATE'] = '1'\n"
 )
 ENV_ANCHOR = "    'EXPOSE_UNDO': 'on',\n"
-ENV_ADD = "    'NEXTFORK_ESCALATE': '1',   # эскалация застрявшего уровня (пороги NEXTFORK_ESC_T1/T2: 60/120 ходов)\n"
+ENV_ADD = "    'NEXTFORK_ESCALATE': '1',   # эскалация застрявшего уровня (пороги NEXTFORK_ESC_T1/T2: 90/180 ходов)\n"
 
 
 def main():
