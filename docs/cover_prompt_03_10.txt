@@ -1,0 +1,9 @@
+Wide landscape cover image, aspect ratio 2:1 (for example 1600×800), for a research write-up about an AI agent playing grid-based puzzle games.
+
+Concept: "The server was the ceiling." On the left, a small square pixel-art game board — a 64×64 grid of flat colored cells in a limited 16-color palette (deep navy background, cells in teal, coral, mustard yellow, magenta, light gray), in the style of minimalist puzzle games: a few rectangles, a small player square, a door-like outline. From the board, a long horizontal ribbon of tiny snapshots of the same board flows to the right, like a film strip of the game's history — each frame slightly different, showing moves over time.
+
+The ribbon enters a large, clean, stylized memory block on the right, drawn as a grid of glowing cache slots (like a GPU memory bank seen from above). The first part of the memory block holds full-size tiles; the rest holds the same tiles packed tighter — half the width — so visibly more of the history fits. A few earlier frames that do not fit drop out of the ribbon and fade, suggesting forgotten history.
+
+Style: flat vector illustration with subtle depth, crisp edges, generous negative space, calm technical mood, soft glow on the memory block, no photorealism, no people, no robots, no brains, no circuit-board clichés. Balanced composition with the visual weight on the memory block. Dark navy background with a faint grid.
+
+No text, no letters, no numbers, no logos, no watermarks anywhere in the image.
