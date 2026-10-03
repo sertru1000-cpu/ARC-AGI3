@@ -1,6 +1,6 @@
 # The Server Was the Ceiling: What Twenty Null Layers, a Score Budget and a 4-bit KV Cache Taught Us on ARC-AGI-3
 
-*An open-weights agent on one 96 GB card: why our harness work did not move the score, what did, and the serving measurements a team should make first.*
+*ARC Prize 2026, ARC-AGI-3 track. An open-weights agent on one 96 GB card: why our harness work did not move the score, what did, and the serving measurements a team should make first.*
 
 ## 1. Setup and unit of measurement
 

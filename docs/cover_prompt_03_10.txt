@@ -6,4 +6,4 @@ The ribbon enters a large, clean, stylized memory block on the right, drawn as a
 
 Style: flat vector illustration with subtle depth, crisp edges, generous negative space, calm technical mood, soft glow on the memory block, no photorealism, no people, no robots, no brains, no circuit-board clichés. Balanced composition with the visual weight on the memory block. Dark navy background with a faint grid.
 
-No text, no letters, no numbers, no logos, no watermarks anywhere in the image.
+Text: exactly one line of text, and nothing else written anywhere: "ARC Prize 2026 · ARC-AGI-3". Place it in the top-left corner over the dark background, in a clean modern sans-serif typeface, white or very light gray, medium weight, modest size (about 5% of the image height), perfectly spelled, with the middle dot as shown. No other words, letters or numbers in the image — the board, the snapshots and the memory block carry no labels. No logos, no watermarks.
