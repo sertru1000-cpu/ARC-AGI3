@@ -9,8 +9,8 @@ import copy, json, os, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-# с 03.10 база — base2 (копия Франзена + макро-ходы + планировщик impatient), слово владельца; старая — FRANZEN_BASE=graft_dfranzen_m2_stand
-BASE = ROOT / "kernels" / os.environ.get("FRANZEN_BASE", "graft_dfranzen_m2_base2")
+# с 03.10 база — base3 (копия Франзена + макро-ходы + планировщик impatient + картинка x4), слово владельца; старая — FRANZEN_BASE=graft_dfranzen_m2_stand
+BASE = ROOT / "kernels" / os.environ.get("FRANZEN_BASE", "graft_dfranzen_m2_base3")
 
 # env: значения setup_env (новые ключи добавляются, старые заменяются); cfg: CFG сервера; cell16: замены строк
 VARIANTS = {
