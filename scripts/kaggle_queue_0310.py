@@ -27,6 +27,7 @@ QUEUE = [
     ("№2 контроль базы (повтор)", "graft_dfranzen_m2_stand2"),
     ("s20hc 20 игр + HiCache", "graft_dfranzen_m2_s20hc"),
     ("№8в окно 250k + HiCache", "graft_dfranzen_m2_w250"),
+    ("s20fp4 20 игр на кэше fp4", "graft_dfranzen_m2_s20fp4"),
     ("№6 14 игр, окно 72k", "graft_dfranzen_m2_s14w72"),
     ("№11 планировщик nodecay", "graft_dfranzen_m2_sched_nodecay"),
     ("№12 планировщик patient", "graft_dfranzen_m2_sched_patient"),
