@@ -83,6 +83,8 @@ for v in "$@"; do
     s10d)      REPLAY_ARGS='--dup 2' variant s10d 10 0 ;;   # контроль на той же удвоенной нагрузке, что s11/s12
     moetri)    variant moetri 10 0 POD_MOE=triton ;;
     nooverlap) variant nooverlap 10 0 POD_NO_OVERLAP=1 ;;
+    wna16)     python3 $W/pod_franzen/apply_wna16.py /tmp/sgl-intel/venv/lib/python3.12/site-packages/sglang
+               variant wna16 10 0 NF_MOE_WNA16=1 ;;   # ядро MoE Triton int4 вместо Marlin
     sgl0521)   SERVE_SCRIPT=$W/pod_franzen/serve0521.py variant sgl0521 10 1 DELTA_DIR=$W/wheels/sgl0521 ;;
     *) echo "неизвестный вариант $v" ;;
   esac
