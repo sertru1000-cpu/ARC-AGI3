@@ -26,27 +26,43 @@ def post(port, path, obj):
         return r.read().decode()[:300]
 
 
-def analyse(path):
+def analyse(path, steps):
     op = gzip.open if path.endswith(".gz") else open
     ev = json.load(op(path, "rt")).get("traceEvents", [])
     k = [e for e in ev if e.get("ph") == "X" and e.get("cat") in ("kernel", "gpu_memcpy", "gpu_memset")]
     if not k:
         return {"error": "нет ядер в трассе"}
-    by = defaultdict(float); top = defaultdict(float)
+    durs = defaultdict(list); top = defaultdict(list); h2d_bytes = 0
     for e in k:
         n = e.get("name", ""); d = float(e.get("dur", 0))
-        top[n[:90]] += d
+        top[n[:90]].append(d)
+        if e.get("cat") == "gpu_memcpy":
+            h2d_bytes += int((e.get("args") or {}).get("bytes", 0) or 0)
         for g, rx in GROUPS:
             if re.search(rx, n, re.I):
-                by[g] += d; break
+                durs[g].append(d); break
         else:
-            by["прочее"] += d
-    busy = sum(by.values())
+            durs["прочее"].append(d)
+    busy = sum(sum(v) for v in durs.values())
     k.sort(key=lambda e: e["ts"])
     span = k[-1]["ts"] + k[-1].get("dur", 0) - k[0]["ts"]
-    return {"gpu_busy_pct": round(100 * busy / span, 1), "span_ms": round(span / 1000, 1),
-            "groups_pct": {g: round(100 * v / busy, 1) for g, v in sorted(by.items(), key=lambda x: -x[1])},
-            "top_kernels_pct": [(n, round(100 * v / busy, 1)) for n, v in sorted(top.items(), key=lambda x: -x[1])[:15]]}
+    gaps, end = [], k[0]["ts"]
+    for e in k:
+        if e["ts"] > end:
+            gaps.append(e["ts"] - end)
+        end = max(end, e["ts"] + e.get("dur", 0))
+    idle = sum(gaps)
+    def row(v):
+        v = sorted(v)
+        return {"calls_per_step": round(len(v) / steps, 1), "gpu_ms_per_step": round(sum(v) / steps / 1000, 3),
+                "pct_gpu": round(100 * sum(v) / busy, 1), "avg_us": round(sum(v) / len(v), 1),
+                "p95_us": round(v[int(0.95 * (len(v) - 1))], 1)}
+    big_gaps = sorted(gaps)[-5:]
+    return {"steps_assumed": steps, "span_ms": round(span / 1000, 1), "span_ms_per_step": round(span / steps / 1000, 2),
+            "gpu_idle_pct": round(100 * idle / span, 1), "gaps_gt_100us": sum(g > 100 for g in gaps),
+            "largest_gaps_us": [round(g) for g in big_gaps], "memcpy_bytes_total": h2d_bytes,
+            "groups": {g: row(v) for g, v in sorted(durs.items(), key=lambda x: -sum(x[1]))},
+            "top_kernels": [(n, row(v)) for n, v in sorted(top.items(), key=lambda x: -sum(x[1]))[:20]]}
 
 
 def main():
@@ -68,7 +84,7 @@ def main():
     files = sorted(glob.glob(os.path.join(a.out, "**", "*.json*"), recursive=True), key=os.path.getsize)
     if not files:
         print("ТРАССЫ НЕТ"); return
-    res = analyse(files[-1])
+    res = analyse(files[-1], a.steps)
     print(json.dumps(res, ensure_ascii=False, indent=1))
     json.dump(res, open(os.path.join(a.out, "summary.json"), "w"), ensure_ascii=False, indent=1)
 

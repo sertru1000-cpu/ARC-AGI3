@@ -1,6 +1,6 @@
 """Сервер Франзена (SGLang Pennyroyal 2.5.3 + Intel W4A16 + черновик albucino) на поде — ячейка 12 его ноутбука дословно,
 с переменными из окружения. Настройки сервера можно менять переменными POD_KVDTYPE, POD_MAXREQ, POD_CTX_K, POD_HICACHE_GB,
-POD_SPEC (0/1), POD_SPEC_STEPS, POD_CG_ALL (0/1), POD_MAMBA, POD_REPLAYSSM (только для SGLang 0.5.21).
+POD_SPEC (0/1), POD_SPEC_STEPS, POD_CG_ALL (0/1), POD_MOE, POD_NO_OVERLAP (0/1), POD_MAMBA, POD_REPLAYSSM (только для SGLang 0.5.21).
 usage: python pod_franzen/serve.py   (переменные: MODEL_DIR DRAFT_MODEL_DIR WHEELHOUSE_DIR WORKING_DIR)"""
 import os, sys, time, threading
 from pathlib import Path
@@ -306,12 +306,14 @@ args = [SGLANG, "serve", "--model-path", MODEL_DIR, "--load-format", "safetensor
     "--mamba-backend", CFG["LINEAR_BACKEND"],
     "--linear-attn-decode-backend", CFG["LINEAR_BACKEND"],
     "--linear-attn-prefill-backend", CFG["LINEAR_BACKEND"],
-    "--moe-runner-backend", "auto", "--ple-offload-embedding", "--trust-remote-code",
+    "--moe-runner-backend", os.environ.get("POD_MOE", "auto"), "--ple-offload-embedding", "--trust-remote-code",
     "--mm-feature-transport", "cpu", "--image-processor-backend", "pil",
     "--reasoning-parser", "qwen3", "--tool-call-parser", "qwen3_coder",
     "--default-chat-template-kwargs", '{"preserve_thinking":true}',
     "--watchdog-timeout", "1800", "--schedule-policy", "lpm", "--warmups", "structured_output",
     "--enable-cache-report", "--enable-metrics", "--enable-request-time-stats-logging"]
+if os.environ.get("POD_NO_OVERLAP") == "1":   # стенд 04.10: проверить, даёт ли перекрытие планировщика пользу
+    args += ["--disable-overlap-schedule"]
 if os.environ.get("POD_ATTN"):
     args += ["--attention-backend", os.environ["POD_ATTN"]]   # кэш KV в 4 битах требует triton / trtllm_mha
 if int(os.environ.get("POD_HICACHE_GB", "0")) > 0:

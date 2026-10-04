@@ -42,6 +42,7 @@ for v in "$@"; do
     s14)       variant s14 14 0 POD_MAXREQ=14 ;;
     fp4)       variant fp4 10 1 POD_KVDTYPE=nvfp4 POD_ATTN=triton ;;
     fp8tri)    variant fp8tri 10 1 POD_ATTN=triton ;;
+    fp4trt)    variant fp4trt 10 1 POD_KVDTYPE=nvfp4 POD_ATTN=trtllm_mha ;;
     fp4s14)    variant fp4s14 14 0 POD_KVDTYPE=nvfp4 POD_MAXREQ=14 POD_ATTN=triton ;;
     bf16)      variant bf16 0 1 POD_KVDTYPE=bf16 POD_SPEC=0 ;;
     hicache)   variant hicache 10 0 POD_HICACHE_GB=30 ;;

@@ -77,6 +77,12 @@ for v in "$@"; do
     cgall)     variant cgall 10 0 POD_CG_ALL=1 ;;
     base10)    variant base10 10 0 ;;
     prof)      PROFILE=1 variant prof 10 0 ;;   # профиль декодирования на боевой настройке
+    # 04.10, второй ответ критика
+    s11)       REPLAY_ARGS='--dup 2' variant s11 11 0 POD_MAXREQ=11 POD_MAMBA=60 POD_CG_ALL=1 ;;   # 11 мест, графы 1..11, слотов 60>=55
+    s12)       REPLAY_ARGS='--dup 2' variant s12 12 0 POD_MAXREQ=12 POD_MAMBA=60 POD_CG_ALL=1 ;;
+    s10d)      REPLAY_ARGS='--dup 2' variant s10d 10 0 ;;   # контроль на той же удвоенной нагрузке, что s11/s12
+    moetri)    variant moetri 10 0 POD_MOE=triton ;;
+    nooverlap) variant nooverlap 10 0 POD_NO_OVERLAP=1 ;;
     sgl0521)   SERVE_SCRIPT=$W/pod_franzen/serve0521.py variant sgl0521 10 1 DELTA_DIR=$W/wheels/sgl0521 ;;
     *) echo "неизвестный вариант $v" ;;
   esac
