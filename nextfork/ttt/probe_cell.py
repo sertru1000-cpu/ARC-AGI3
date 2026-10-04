@@ -32,12 +32,13 @@ t0 = time.time()
 for gi, g in enumerate(GAMES):
     for it in g["items"]:
         before = _ndump()
+        start = max(0, it["mask"].index(1) - 1) if 1 in it["mask"] else len(it["ids"]) - 2   # логиты только с первой цели: память
         out = _post({"input_ids": it["ids"], "sampling_params": {"max_new_tokens": 1, "temperature": 0.0},
-                     "return_logprob": True, "logprob_start_len": 0})
+                     "return_logprob": True, "logprob_start_len": start})
         after = _ndump()
         assert after == before + 1, f"ожидался один новый файл, было {before}, стало {after}"
         lp = [x[0] for x in out["meta_info"]["input_token_logprobs"]]
-        ITEMS.append((g["game"], it["split"], os.path.join(DUMP, f"{after - 1:05d}.pt"), it["ids"], it["mask"], lp))
+        ITEMS.append((g["game"], it["split"], os.path.join(DUMP, f"{after - 1:05d}.pt"), it["ids"], it["mask"], lp, start))
     print(f"[{gi+1}/{len(GAMES)}] {g['game']} готово, {time.time()-t0:.0f} с", flush=True)
 
 # сервер больше не нужен: освобождаем карту
@@ -63,18 +64,19 @@ print('lm_head', tuple(W.shape), flush=True)
 
 def gather(game, split):
     H, Y, check = [], [], []
-    for (g, sp, path, ids, mask, lp) in ITEMS:
+    for (g, sp, path, ids, mask, lp, start) in ITEMS:
         if g != game or sp != split: continue
-        h = torch.load(path).to("cuda")
-        n = min(h.shape[0], len(ids) - 1)
-        idx = [i for i in range(n) if mask[i + 1]]
-        if not idx: continue
-        H.append(h[idx]); Y.append(torch.tensor([ids[i + 1] for i in idx], device="cuda"))
-        # сверка: логарифм вероятности из выгрузки против серверного (lp[i+1] — токен на позиции i+1)
-        j = idx[len(idx) // 2]
-        if j + 1 < len(lp) and lp[j + 1] is not None:
-            mine = torch.log_softmax((h[j:j+1].to(torch.bfloat16) @ W.T).float(), -1)[0, ids[j + 1]].item()
-            check.append(abs(mine - lp[j + 1]))
+        h = torch.load(path).to("cuda")          # строка r выгрузки = позиция start + r
+        n = min(start + h.shape[0], len(ids) - 1)
+        pos = [i for i in range(start, n) if mask[i + 1]]
+        if not pos: continue
+        rows = [i - start for i in pos]
+        H.append(h[rows]); Y.append(torch.tensor([ids[i + 1] for i in pos], device="cuda"))
+        # сверка: lp[k] — логарифм вероятности токена на позиции start + k (первый None)
+        j = pos[len(pos) // 2]; k = j + 1 - start
+        if k < len(lp) and lp[k] is not None:
+            mine = torch.log_softmax((h[j - start:j - start + 1].to(torch.bfloat16) @ W.T).float(), -1)[0, ids[j + 1]].item()
+            check.append(abs(mine - lp[k]))
     if not H: return None, None, check
     return torch.cat(H), torch.cat(Y), check
 

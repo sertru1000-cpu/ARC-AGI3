@@ -30,6 +30,8 @@ def main():
     nb["cells"][4]["source"] = c4.replace(a, "PROBE_DIR         = '/kaggle/input/datasets/sergueimakarov/arc3-ttt-probe'").splitlines(keepends=True)
     c12 = "".join(nb["cells"][12]["source"])
     assert c12.count(LAUNCH) == 1 and "SPEC=False" in c12 and "env = dict(os.environ)" in c12
+    assert c12.count("MEMFRAC=0.96,") == 1
+    c12 = c12.replace("MEMFRAC=0.96,", "MEMFRAC=0.88,   # проба: место под логиты по словарю 248k")
     nb["cells"][12]["source"] = c12.replace(LAUNCH, PATCH + LAUNCH).splitlines(keepends=True)
     nb["cells"][13]["source"] = ["## Проба: дообучение во время игры (вариант A)\n"]
     nb["cells"][14]["source"] = CELL.splitlines(keepends=True)
