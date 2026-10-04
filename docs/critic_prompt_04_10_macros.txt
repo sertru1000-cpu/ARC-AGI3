@@ -1,0 +1,38 @@
+You are an expert in LLM agents for interactive environments (ARC-AGI-3 style grid games), tool design for code-writing agents, and action abstractions (options, macro-actions, skill libraries). Help us develop one idea — "macro moves" — into something that actually raises our score. Please be critical and concrete.
+
+## Setting
+ARC Prize 2026, ARC-AGI-3 (Kaggle). An open-weights LLM (Qwen3.8-Flash-Next, ~125B MoE, served on one 96 GB GPU, no internet) plays unseen grid games. Each game: 64x64 board, 16 colours, actions UP/DOWN/LEFT/RIGHT, SPACE, MOUSE(row,col) click, UNDO. No rules, no stated goal; levels must be cleared. Score per level = min((human_moves / agent_moves)^2, 1.15), levels weighted by index; ~110 hidden games, 9-hour notebook.
+The agent (Duck/TAAF harness, Franzen's Milestone-2 version) works in turns: each turn the model writes reasoning (~80% of output tokens) and calls one tool, `python`, which receives `current_frame`, `history`, `transitions`, `frame_diff`, and `action(list_of_moves)` that executes moves on the real game. One model call ≈ 1–1.5k generated tokens; total generation per hour is fixed by the server, and on our bench the score is proportional to the number of moves the server's generation can buy.
+
+## What we built ("macro moves")
+In the python sandbox we added:
+- `run("U3 R2 S D* C12,30 Z", max_steps=30)` — a compact move string: U/D/L/R arrows, S space, Z undo, a number repeats, `*` repeats until the board stops changing, C<row>,<col> clicks. Executes move by move and stops early on: level change, game over, a move that changes nothing, or a step limit; prints a one-line report.
+- `until("R", lambda f: <test on frame>)` — repeat one move until a condition on the frame holds.
+- `click_each("r")` — click every object of a colour.
+- A prompt section "Macro moves (use them)": once you know the next moves, play them in ONE python call; single moves are for probing unknown effects.
+
+## What we measured (25 public games, 2-hour bench, one run each)
+- Score (RHAE): macros 56.82 vs two identical controls 50.63 / 53.06 (difference +5.0; standard error of a single-run difference ≈ 6.7, so not distinguishable). Levels 109 vs 105/107; total moves 4,963 vs 5,528/5,208 (fewer moves for slightly more levels).
+- Battle (hidden set): copy + macros 24.85 vs plain copies 24.25 / 26.78. A later build with macros + a faster-decaying game scheduler + a 4x smaller board image scored 28.03 (our best), but the components are confounded.
+- **Usage, counted from the recorded tool calls (unique python calls across all games):**
+  - control: 2,255 python calls; 860 contain `action(...)`; 74 contain a `run(` (the model writes its OWN helper named run in the control); **59% of calls execute no move at all** (pure observation/analysis).
+  - macros: 2,172 python calls; 849 contain `action(...)`; **114 use our `run("...")` (~5% of calls)**; `until()` 0 times; `click_each()` 0 times; **57% of calls execute no move**.
+  So the model barely uses the macros; the prompt line changed little. The small move saving may come from the 114 macro calls or be noise.
+- Related findings from earlier: a cleared level costs median 30 moves (p90 70); stalled games repeat the same click triples (64% of click triples are repeats in stalled games vs 21% in healthy ones); removing reasoning destroys the agent; adding instructions to the prompt generally does not change behaviour (the model restates an injected rule and still doesn't act on it); half of all calls only look at the board through code.
+
+## The core economics
+Every python call costs a full model turn (~1–1.5k tokens of generation, the scarce resource). 57% of turns produce no move. If we could turn several observation turns + several single-move turns into one turn that executes a verified multi-move plan, the same generation budget would buy more moves — and on our bench more moves ≈ more levels. But wasted moves are penalised (squared ratio), so blind long macros can hurt.
+
+## What we want from you
+1. Diagnose: why does the model ignore the macros (prompt placement, the model's habits, the cost/benefit it perceives, the harness returning too little information after a macro)? What would you change first, and how would you measure whether it worked (we can count usage from logs for free)?
+2. Design: concrete next versions of the idea, ranked by expected effect on moves-per-generated-token without increasing wasted moves. For example (challenge or improve these, add your own):
+   - macros that return rich observations (diff summary, objects moved, what stopped them) so the model needs fewer look-only turns;
+   - "plan-execute" calls: the model writes a whole plan as a macro with stop conditions, the harness executes it and reports where reality diverged;
+   - automatic macro extraction: when a level is cleared, store the move sequence/pattern and offer it as a named macro on the next level or a similar layout;
+   - harness-side automation of exploration patterns (e.g. "try each action once and report effects") so the model doesn't spend turns on it;
+   - macros as the default action interface (single moves only via a macro of length 1), or forcing a minimum number of moves per turn when the plan is known;
+   - an anti-repeat guard inside macros using the stall statistic above.
+3. Risks: where macros could lower the score (blind execution past a game-over, wrong stop conditions, increasing moves on levels already near the human baseline), and how to guard against them.
+4. Measurement: given that one bench run has a ±6.7 standard error on the score, what cheaper intermediate metrics should we track per run (moves per model call, share of no-move turns, levels per 1M generated tokens, macro usage rate, wasted-move share), and what thresholds would justify spending a full bench?
+
+Be specific: prompt wording, tool signatures, what the tool should print back, and stop rules.
