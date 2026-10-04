@@ -1,6 +1,6 @@
 """Сервер Франзена (SGLang Pennyroyal 2.5.3 + Intel W4A16 + черновик albucino) на поде — ячейка 12 его ноутбука дословно,
 с переменными из окружения. Настройки сервера можно менять переменными POD_KVDTYPE, POD_MAXREQ, POD_CTX_K, POD_HICACHE_GB,
-POD_SPEC (0/1), POD_MAMBA, POD_REPLAYSSM (только для SGLang 0.5.21).
+POD_SPEC (0/1), POD_SPEC_STEPS, POD_CG_ALL (0/1), POD_MAMBA, POD_REPLAYSSM (только для SGLang 0.5.21).
 usage: python pod_franzen/serve.py   (переменные: MODEL_DIR DRAFT_MODEL_DIR WHEELHOUSE_DIR WORKING_DIR)"""
 import os, sys, time, threading
 from pathlib import Path
@@ -47,7 +47,7 @@ CFG = dict(
     SERVED_NAME=SERVED_MODEL_NAME,
     SPEC_ACCEPT_SINGLE=1.0,
     SPEC_ACCEPT_ACC=1.0,
-    SPEC_STEPS=3,
+    SPEC_STEPS=int(os.environ.get("POD_SPEC_STEPS", "3")),   # стенд 04.10: перебор шагов черновика
 )
 VENV = f"{PREFIX}/venv"
 PYTHON = f"{VENV}/bin/python"
@@ -287,6 +287,8 @@ if CFG["SPEC"]:
 
 # ---- assemble Pennyroyal / AutoRound launch arguments ----
 graph_bs = sorted({1, 2, 4, 7, 8, 9, 10, CFG["MAXREQ"], CFG["CUDAGRAPH_MAXBS"]})
+if os.environ.get("POD_CG_ALL") == "1":   # стенд 04.10: графы для всех размеров 1..max
+    graph_bs = list(range(1, CFG["CUDAGRAPH_MAXBS"] + 1))
 graph_bs = [n for n in graph_bs if n <= CFG["CUDAGRAPH_MAXBS"]]
 args = [SGLANG, "serve", "--model-path", MODEL_DIR, "--load-format", "safetensors",
     "--model-loader-extra-config", '{"enable_multithread_load":false}',
