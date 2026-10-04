@@ -1,0 +1,37 @@
+Follow-up to your review of our single-GPU serving throughput (Qwen3.8-Flash-Next, SGLang fork Pennyroyal 2.5.3, 1x RTX PRO 6000 Blackwell). Thank you — several points were useful. Here are corrections to what I told you, new facts we checked, and what we are about to run. Please revise your ranking and answer the questions at the end.
+
+## Corrections (my wording was ambiguous)
+1. "8 streams 679 tok/s vs 10 streams 608 tok/s" was NOT a like-for-like comparison. 679 was the instantaneous peak of the server's own throughput counter during the 8-stream run. On the same recorded load, 8 streams gave about 10% LOWER total throughput than 10 streams over the whole replay (each request got ~13% more speed, but there were fewer of them). So we have no evidence that 10 is past the peak; we have not measured 6, 7, 9 or 11–12 streams.
+2. Our throughput metric on the replay bench is already: accepted output tokens returned to the client / wall-clock time. Draft tokens are not counted. The server log counter ("gen throughput") is a separate, noisier number.
+3. "Concurrency 20 = 415 tok/s" — agreed, that was a KV-capacity failure (prefix-cache hits fell from 93% to 46%), not a decode-batch limit. With a host-RAM KV tier the same 20 streams gave 650 tok/s.
+
+## New facts checked since your answer
+- CUDA graphs: in every pod replay run so far (about 2,700 decode steps across 10 configurations: base, 8/14/20 streams, host-RAM tier, etc.) the server log shows "cuda graph: True" for 100% of decode batches. So decode never falls back to eager with the current graph sizes (1,2,4,7,8,9,10). We dropped that experiment.
+- The fork's host-RAM KV tier already carries the model's PLE side state (short-conv window and n-gram history) through eviction/restore — the upstream bug SGLang #39862 does not apply to us.
+- Upstream PR #41729 (prefill CUDA graphs for Qwen4-Exp) only applies to text-only batches; 100% of our requests carry one board image, so it does not apply.
+- Speculative settings in use: NEXTN with the built-in MTP head and a separate INT4 draft, 3 steps, topk 1, 4 draft tokens, FR-Spec hot-token map 64k, acceptance thresholds 1.0/1.0 (exact). Accepted length 2.6–2.8, accept rate 0.54–0.60. Sampling: temperature 0.7, top_p 0.95, top_k 20.
+- Old pod log, battle config, 10 streams: mean server-counter generation 652 tok/s, accepted 2.64, 9.0 active requests on average, GPU utilisation ~91%, power ~300 W of a 600 W limit (sampled by nvidia-smi).
+
+## The machine we are measuring on now (rented pod)
+- GPU: RTX PRO 6000 Blackwell Server Edition, 96 GB, power limit 600 W, max SM clock 2430 MHz, driver 580.159.04
+- CPU: AMD EPYC 9554 64-core (256 threads), 1 TB RAM. Single-core Python loop is ~1.6x slower than the Kaggle machine where the competition runs (AMD EPYC 9B45). So absolute numbers here are not Kaggle numbers; we only compare variants against a control on the same pod.
+- On Kaggle (the target) we cannot change GPU clocks, power limit, persistence mode or NUMA binding — we do not have that control there. Settings that can be passed to the server process or set from Python are fine.
+
+## What we are about to run on the pod (10 streams, same recorded load, ~10 min each)
+| variant | change |
+|---|---|
+| base10 | control |
+| spec0 | speculative decoding off |
+| spec1 / spec2 / spec4 | NEXTN with 1, 2, 4 steps (draft tokens = steps+1) |
+| prof | SGLang built-in profiler (/start_profile, CPU+GPU, 60 decode steps) under load; we will group GPU time into MoE/INT4 GEMM, QSA/indexer/sparse attention, GDN/linear attention, dense GEMM, norms/elementwise, sampling/speculative, memcpy H2D/D2H, and measure GPU idle gaps |
+For each variant we record accepted tokens/s, accepted length, mean active requests, GPU power and utilisation.
+
+## Questions
+1. Power: the GPU draws only ~300 W of 600 W at ~91% "utilisation". What does that tell you about the bottleneck (memory-latency-bound kernels, small-batch kernels, launch gaps)? Is there anything we can do from the server side (not driver settings) that typically raises power draw and throughput in this situation?
+2. Given the corrections, what is your new top-3? Is a sweep over 6/7/9/11/12 streams still worth it, given 8 was worse than 10?
+3. Speculative decoding with sampling at temperature 0.7 and exact acceptance: does NEXTN still preserve the output distribution exactly in SGLang with these thresholds? Which of spec1/spec2/spec4 do you expect to win at ~9 active requests, and why?
+4. When we get the profile, what exact numbers or kernel names would make you say "PLE host lookups matter", "QSA/indexer dominates", or "MoE INT4 kernels dominate"? What should we look at in the trace that we might miss (e.g. per-step CPU time in the scheduler, synchronisations per QSA layer)?
+5. Our cards on the pod and on Kaggle have different CPUs. Which of the candidate changes are likely to transfer from a slower-CPU pod to the faster-CPU Kaggle machine, and which might not?
+6. Anything in the SGLang server flags worth testing that we have not mentioned (overlap scheduling, PDL, specific MoE runner backends on SM120 for W4A16 AutoRound, mamba/GDN backend options, `--enable-*` switches), with the expected effect and whether it changes outputs?
+
+Please be specific: flag names and values for SGLang ~0.5.19, and what result would change your recommendation.
