@@ -1,0 +1,51 @@
+You are an expert in LLM inference serving (SGLang, vLLM, speculative decoding, KV-cache management, MoE kernels on NVIDIA Blackwell). I need a critical, concrete review: how can we raise the total generation throughput of one server on fixed hardware? Please challenge our assumptions; we have been wrong about the serving stack before.
+
+## Why throughput is the metric
+Kaggle competition ARC Prize 2026 / ARC-AGI-3: an LLM agent plays ~110 unseen grid puzzle games inside one Kaggle notebook (no internet, 9-hour limit). On our 25-game bench, every configuration we tried scored in proportion to the TOTAL tokens the server generated; nothing we changed made individual moves smarter. More generated tokens per hour = more moves = more levels = higher score. Quality per token must not drop (the model must stay the same model).
+
+## Hardware (fixed)
+- 1x NVIDIA RTX PRO 6000 Blackwell Server Edition, 96 GB, SM120, 600 W limit
+- AMD EPYC 9B45 host, ~177 GB RAM visible to the notebook
+- No internet; everything installs from attached datasets (wheels)
+
+## Model (fixed family)
+- Qwen3.8-Flash-Next (architecture Qwen4-Exp): ~125B total MoE, 512 routed experts, hybrid — 36 Gated-DeltaNet (linear attention, Mamba-style state) layers + 12 full-attention layers that run through a sparse attention path (QSA: indexer selects top-k=512 tokens per query), per-layer embeddings (PLE, ~51 GB, kept in host RAM), vision tower (we send one board image per request).
+- Packaging in use: Intel W4A16 AutoRound (experts INT4; attention, linear attention, shared experts, PLE and MTP in BF16). Weights on GPU ≈ 69.9 GB.
+- Tested and rejected: RadixArk NVFP4 packaging (74.5 GB on GPU → KV pool 656k instead of 1.01M tokens → 503 vs 674 tok/s, score halved). A 2–3-bit stronger model was worse.
+
+## Server (current)
+- SGLang fork "Pennyroyal 2.5.3" (based on 0.5.19) + 5 patches from the best open solution
+- KV cache fp8_e4m3 (we measured: no quality loss vs BF16 on a likelihood probe), KV pool ≈ 1.01M tokens, mem-fraction-static 0.96, page size 64
+- context-length 139,264; harness keeps history up to ~118k tokens and trims in one block down to ~58k (keeps the prefix cache valid)
+- max-running-requests 10 (Mamba state slots: 60, 5 per request — the server silently caps concurrency at slots/5)
+- chunked prefill 8192, max prefill 16384, CUDA graphs for decode at bs 1,2,4,7,8,9,10
+- prefix caching (radix), schedule policy lpm; prefix-cache hit ≈ 93% of prompt tokens
+- speculative decoding: NEXTN (built-in MTP head, separate INT4 draft "albucino"), 3 steps, topk 1, 4 draft tokens, FR-Spec hot-token map of 64k; accepted length ≈ 2.6–2.8, accept rate ≈ 0.54–0.60
+- attention backend flashinfer; linear attention backend flashinfer; MoE runner auto (Marlin for W4A16)
+- reasoning effort xhigh (chat template default); answers are long: ~1.4k tokens median, ~80% of output is reasoning
+
+## Measurements
+- Battle configuration: ~620–700 generated tok/s total at 8–10 concurrent requests; ~750 tok/s at full load on a rented card of the same model.
+- Prompt processing is ~2.6% of request time; decode dominates.
+- Replay bench (recorded harness requests replayed with fixed answer lengths): 10 streams 608 tok/s; 8 streams 679 tok/s peak but −10% total; 20 streams without host cache 415 tok/s (pool overflows, cache hits fall to 46%, recompute); 20 streams with a 30 GB host-RAM KV tier (HiCache) 650 tok/s (+7%), but on the game bench 20 games scored the same as 10 (each game gets half the generation).
+- 4 streams with a 250k window: only 3.3–3.7 concurrent requests → 370–400 tok/s → score halved.
+- NVFP4 KV cache: we wrote a patch so the sparse-attention path dequantises only selected tokens; it works (pool ×1.5, equal quality, equal speed at 10 requests) but extra pool does not help at 10 games, and 20 games on NVFP4 KV without host tier collapsed (cache hits 38%).
+- SGLang 0.5.21 (upstream) allocated an 18% smaller KV pool than the fork. vLLM 0.31.0 just tagged (Docker image, not yet on PyPI); our last vLLM experience (old build, 5 GiB KV) was far worse, but not a fair comparison.
+- Upstream PR #41729 (prefill CUDA graphs for Qwen4-Exp) only applies to text-only batches; all our requests carry an image.
+
+## What we have NOT tried
+- Different speculative settings (more/fewer draft steps, topk>1, draft off at high concurrency, EAGLE-style trees, a different draft model)
+- Tuning decode CUDA-graph batch sizes, chunked prefill size, max prefill tokens, schedule policy, overlap scheduling
+- MoE kernel choices (Marlin vs other W4A16 kernels on SM120, expert-parallel tricks on a single GPU), torch.compile, PDL
+- Shorter answers without losing reasoning quality (removing reasoning entirely destroyed the agent; ~1/3 of the reasoning restates facts the harness already knows)
+- Reducing image cost (we send one board image per request; a 4x smaller image scored the same or slightly better)
+- Batching the harness differently (more requests in flight per game, parallel tool calls)
+- Lower CPU overhead in the scheduler loop (we saw CPU-bound engine loops on slower hosts)
+
+## What I want from you
+1. Your diagnosis: on this hardware/model/config, what most likely limits decode throughput at 8–10 concurrent long-context requests — memory bandwidth of expert weights, the sparse-attention/indexer path, the Mamba/GDN layers, speculative overhead, CPU scheduling, or something else? How would you verify which (exact profiler commands or server metrics)?
+2. A ranked list of concrete changes with the expected effect size and the risk to output quality, e.g. specific SGLang flags and values, speculative configurations, kernel/backends, quantisation variants. Mark which ones keep the outputs distribution-identical (pure systems changes) and which change the model's behaviour.
+3. Anything in our measurements that looks wrong or misread. In particular: is ~700 tok/s at 10 concurrent requests reasonable for this model on this GPU, or should we expect much more? What would you consider the ceiling?
+4. The cheapest experiments to run first (we can replay recorded load against a server for ~10 minutes per configuration, and run a 2-hour 25-game bench a few times per week).
+
+Be specific (flags, numbers, file paths in SGLang if relevant). If you need data we did not give, say exactly what to measure.
